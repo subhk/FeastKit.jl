@@ -1,0 +1,31 @@
+////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////  The  FEAST Eigenvalue Solver     ///////////////////////////
+//////////// ///////////////////////////////////////////////////////////////////////////////
+web   : http://www.feast-solver.org  
+E-mail: feastsolver@gmail.com              
+/////////////////////////////////////////////////////////////////////////////////////////////
+
+
+FEAST EXAMPLE:     -Examples for Fortran, C, Fortran-MPI, C-MPI
+                   -Examples for Hermitian, non-Hermitian, Polynomial eigenvalue problems 
+                   -Examples for dense, banded and sparse-CSR storage
+
+
+Five systems:      - system1 (a real symmetric generalized eigenvalue problem), 
+                   - system2 (a complex Hermitian standard eigenvalue problem),
+                   - system3 (a real non-symmetric  generalized eigenvalue problem),
+                   - system4 (a complex symmetric  standard eigenvalue problem),
+                   - system5 (a quadratic problem- real symmetric matrices)
+
+This directory $FEASTROOT/example contains the following directories:
+
+
+FEAST                      ! FEAST-SMP 
+PFEAST-L2                  ! FEAST-MPI L2 parallism (shared memory linear system solver)
+PFEAST-L2L3                ! FEAST-MPI L2 + L3 parallelism using MPI solver
+PFEAST-L1L2L3              ! FEAST-MPI 3 levels of MPI parallelism MPI-MPI-MPI
+
+********************************************************************************************
+Before use: set up compilers and libraries paths by running make in respective directories
+*********************************************************************************************
+

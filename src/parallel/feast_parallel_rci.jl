@@ -54,11 +54,11 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
     if state.ijob == -1  # Initialization
         # Initialize FEAST parameters
         feastdefault!(fpm)
-        state.info = FEAST_SUCCESS.value
+        state.info = Int(FEAST_SUCCESS)
         
         # Input validation
         if N <= 0
-            state.info = FEAST_ERROR_N.value
+            state.info = Int(FEAST_ERROR_N.value)
             state.ijob = FEAST_RCI_DONE.value
             return
         end
@@ -70,7 +70,7 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
         end
         
         if Emin >= Emax
-            state.info = FEAST_ERROR_EMIN_EMAX.value
+            state.info = Int(FEAST_ERROR_EMIN_EMAX.value)
             state.ijob = FEAST_RCI_DONE.value
             return
         end
@@ -155,7 +155,7 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
             state.mode = M
             
             if M == 0
-                state.info = FEAST_ERROR_NO_CONVERGENCE.value
+                state.info = Int(FEAST_ERROR_NO_CONVERGENCE.value)
                 state.ijob = FEAST_RCI_DONE.value
                 return
             end
@@ -165,7 +165,7 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
             return
             
         catch e
-            state.info = FEAST_ERROR_LAPACK.value
+            state.info = Int(FEAST_ERROR_LAPACK.value)
             state.ijob = FEAST_RCI_DONE.value
             return
         end

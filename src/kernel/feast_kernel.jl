@@ -24,10 +24,10 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         feastdefault!(fpm)
         
         # Check input parameters
-        info[] = FEAST_SUCCESS.value
+        info[] = Int(FEAST_SUCCESS)
         
         if N <= 0
-            info[] = FEAST_ERROR_N.value
+            info[] = Int(FEAST_ERROR_N.value)
             return
         end
         
@@ -37,7 +37,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         end
         
         if Emin >= Emax
-            info[] = FEAST_ERROR_EMIN_EMAX.value
+            info[] = Int(FEAST_ERROR_EMIN_EMAX.value)
             return
         end
         
@@ -129,7 +129,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 
                 # Check convergence
                 if M == 0
-                    info[] = FEAST_ERROR_NO_CONVERGENCE.value
+                    info[] = Int(FEAST_ERROR_NO_CONVERGENCE.value)
                     ijob[] = FEAST_RCI_DONE.value
                     return
                 end
@@ -140,7 +140,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 return
                 
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK.value)
                 ijob[] = FEAST_RCI_DONE.value
                 return
             end
@@ -201,10 +201,10 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     if ijob[] == -1  # Initialization
         feastdefault!(fpm)
         
-        info[] = FEAST_SUCCESS.value
+        info[] = Int(FEAST_SUCCESS)
         
         if N <= 0
-            info[] = FEAST_ERROR_N.value
+            info[] = Int(FEAST_ERROR_N.value)
             return
         end
         
@@ -214,7 +214,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         end
         
         if Emin >= Emax
-            info[] = FEAST_ERROR_EMIN_EMAX.value
+            info[] = Int(FEAST_ERROR_EMIN_EMAX.value)
             return
         end
         
@@ -271,10 +271,10 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     if ijob[] == -1  # Initialization
         feastdefault!(fpm)
         
-        info[] = FEAST_SUCCESS.value
+        info[] = Int(FEAST_SUCCESS)
         
         if N <= 0
-            info[] = FEAST_ERROR_N.value
+            info[] = Int(FEAST_ERROR_N.value)
             return
         end
         
@@ -284,7 +284,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         end
         
         if r <= 0
-            info[] = FEAST_ERROR_EMID_R.value
+            info[] = Int(FEAST_ERROR_EMID_R.value)
             return
         end
         

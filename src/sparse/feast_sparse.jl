@@ -36,7 +36,7 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                    Emin, Emax, M0, workspace.lambda, workspace.q, 
                    mode, workspace.res, info)
         
-        if ijob[] == Int(FEAST_RCI_FACTORIZE.value)
+        if ijob[] == Int(FEAST_RCI_FACTORIZE)
             # Factorize Ze*B - A for sparse matrices
             z = Ze[]
             sparse_matrix = z * B - A
@@ -49,7 +49,7 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_SOLVE.value)
+        elseif ijob[] == Int(FEAST_RCI_SOLVE)
             # Solve sparse linear systems: (Ze*B - A) * X = B * workspace.work
             rhs = B * workspace.work[:, 1:M0]
             
@@ -61,12 +61,12 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_MULT_A.value)
+        elseif ijob[] == Int(FEAST_RCI_MULT_A)
             # Compute A * q for residual calculation
             M = mode[]
             workspace.work[:, 1:M] .= A * workspace.q[:, 1:M]
             
-        elseif ijob[] == Int(FEAST_RCI_DONE.value)
+        elseif ijob[] == Int(FEAST_RCI_DONE)
             break
         end
     end
@@ -112,7 +112,7 @@ function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
                    Emin, Emax, M0, workspace.lambda, workspace.q, 
                    mode, workspace.res, info)
         
-        if ijob[] == Int(FEAST_RCI_FACTORIZE.value)
+        if ijob[] == Int(FEAST_RCI_FACTORIZE)
             # Factorize Ze*I - A for sparse matrices
             z = Ze[]
             I_sparse = sparse(I, N, N)
@@ -126,7 +126,7 @@ function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_SOLVE.value)
+        elseif ijob[] == Int(FEAST_RCI_SOLVE)
             # Solve sparse linear systems
             try
                 workspace.workc[:, 1:M0] .= sparse_solver \ workspace.workc[:, 1:M0]
@@ -135,12 +135,12 @@ function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_MULT_A.value)
+        elseif ijob[] == Int(FEAST_RCI_MULT_A)
             # Compute A * q for residual calculation
             M = mode[]
             workspace.work[:, 1:M] .= real.(A * workspace.q[:, 1:M])
             
-        elseif ijob[] == Int(FEAST_RCI_DONE.value)
+        elseif ijob[] == Int(FEAST_RCI_DONE)
             break
         end
     end
@@ -191,7 +191,7 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
                    Emid, r, M0, lambda_complex, q_complex, 
                    mode, workspace.res, info)
         
-        if ijob[] == Int(FEAST_RCI_FACTORIZE.value)
+        if ijob[] == Int(FEAST_RCI_FACTORIZE)
             # Factorize Ze*B - A for sparse matrices
             z = Ze[]
             sparse_matrix = z * B - A
@@ -204,7 +204,7 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_SOLVE.value)
+        elseif ijob[] == Int(FEAST_RCI_SOLVE)
             # Solve sparse linear systems: (Ze*B - A) * X = B * workspace.workc
             rhs = B * workspace.workc[:, 1:M0]
             
@@ -215,12 +215,12 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_MULT_A.value)
+        elseif ijob[] == Int(FEAST_RCI_MULT_A)
             # Compute A * q for residual calculation
             M = mode[]
             workspace.workc[:, 1:M] .= A * q_complex[:, 1:M]
             
-        elseif ijob[] == Int(FEAST_RCI_DONE.value)
+        elseif ijob[] == Int(FEAST_RCI_DONE)
             break
         end
     end
@@ -295,12 +295,12 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                    Emin, Emax, M0, workspace.lambda, workspace.q, 
                    mode, workspace.res, info)
         
-        if ijob[] == Int(FEAST_RCI_FACTORIZE.value)
+        if ijob[] == Int(FEAST_RCI_FACTORIZE)
             # For matrix-free, we don't factorize but prepare for iterative solve
             # Store the shift for the iterative solver
             # In practice, you'd set up preconditioners here
             
-        elseif ijob[] == Int(FEAST_RCI_SOLVE.value)
+        elseif ijob[] == Int(FEAST_RCI_SOLVE)
             # Solve (Ze*B - A) * X = B * workspace.work using iterative method
             z = Ze[]
             
@@ -327,14 +327,14 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                 workspace.workc[:, j] .= x
             end
             
-        elseif ijob[] == Int(FEAST_RCI_MULT_A.value)
+        elseif ijob[] == Int(FEAST_RCI_MULT_A)
             # Compute A * q for residual calculation
             M = mode[]
             for j in 1:M
                 A_matvec!(view(workspace.work, :, j), view(workspace.q, :, j))
             end
             
-        elseif ijob[] == Int(FEAST_RCI_DONE.value)
+        elseif ijob[] == Int(FEAST_RCI_DONE)
             break
         end
     end

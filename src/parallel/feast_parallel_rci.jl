@@ -59,19 +59,19 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
         # Input validation
         if N <= 0
             state.info = Int(FEAST_ERROR_N)
-            state.ijob = Int(FEAST_RCI_DONE.value)
+            state.ijob = Int(FEAST_RCI_DONE)
             return
         end
         
         if M0 <= 0 || M0 > N
-            state.info = FEAST_ERROR_M0.value
-            state.ijob = Int(FEAST_RCI_DONE.value)
+            state.info = Int(FEAST_ERROR_M0)
+            state.ijob = Int(FEAST_RCI_DONE)
             return
         end
         
         if Emin >= Emax
             state.info = Int(FEAST_ERROR_EMIN_EMAX)
-            state.ijob = Int(FEAST_RCI_DONE.value)
+            state.ijob = Int(FEAST_RCI_DONE)
             return
         end
         
@@ -100,24 +100,24 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
         
         if state.use_parallel
             # Start parallel computation of all contour points
-            state.ijob = Int(FEAST_RCI_PARALLEL_SOLVE.value)
+            state.ijob = Int(FEAST_RCI_PARALLEL_SOLVE)
         else
             # Traditional RCI: process one point at a time
             state.Ze = state.contour_points[1]
-            state.ijob = Int(FEAST_RCI_FACTORIZE.value)
+            state.ijob = Int(FEAST_RCI_FACTORIZE)
         end
         
         return
     end
     
-    if state.ijob == Int(FEAST_RCI_PARALLEL_SOLVE.value)
+    if state.ijob == Int(FEAST_RCI_PARALLEL_SOLVE)
         # User should solve all contour points in parallel
         # This is a new RCI job type for parallel execution
-        state.ijob = Int(FEAST_RCI_PARALLEL_ACCUMULATE.value)
+        state.ijob = Int(FEAST_RCI_PARALLEL_ACCUMULATE)
         return
     end
     
-    if state.ijob == Int(FEAST_RCI_PARALLEL_ACCUMULATE.value)
+    if state.ijob == Int(FEAST_RCI_PARALLEL_ACCUMULATE)
         # Accumulate results from parallel computation
         # Reset moment matrices
         fill!(Aq, zero(T))
@@ -131,11 +131,11 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
         end
         
         # Proceed to eigenvalue computation
-        state.ijob = Int(FEAST_RCI_EIGEN_SOLVE.value)
+        state.ijob = Int(FEAST_RCI_EIGEN_SOLVE)
         return
     end
     
-    if state.ijob == Int(FEAST_RCI_EIGEN_SOLVE.value)
+    if state.ijob == Int(FEAST_RCI_EIGEN_SOLVE)
         # Solve reduced eigenvalue problem
         try
             F = eigen(Aq[1:M0, 1:M0], Sq[1:M0, 1:M0])
@@ -156,22 +156,22 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
             
             if M == 0
                 state.info = Int(FEAST_ERROR_NO_CONVERGENCE)
-                state.ijob = Int(FEAST_RCI_DONE.value)
+                state.ijob = Int(FEAST_RCI_DONE)
                 return
             end
             
             # Compute residuals
-            state.ijob = Int(FEAST_RCI_MULT_A.value)
+            state.ijob = Int(FEAST_RCI_MULT_A)
             return
             
         catch e
             state.info = Int(FEAST_ERROR_LAPACK)
-            state.ijob = Int(FEAST_RCI_DONE.value)
+            state.ijob = Int(FEAST_RCI_DONE)
             return
         end
     end
     
-    if state.ijob == Int(FEAST_RCI_MULT_A.value)
+    if state.ijob == Int(FEAST_RCI_MULT_A)
         # User has computed A*q, now compute residuals
         M = state.mode
         
@@ -187,7 +187,7 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
         if state.epsout <= eps_tolerance || state.loop >= fpm[4]
             # Converged or maximum iterations reached
             feast_sort!(lambda, q, res, M)
-            state.ijob = Int(FEAST_RCI_DONE.value)
+            state.ijob = Int(FEAST_RCI_DONE)
         else
             # Start new refinement loop
             state.loop += 1
@@ -200,23 +200,23 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
             work[:, 1:M] = q[:, 1:M]
             
             if state.use_parallel
-                state.ijob = Int(FEAST_RCI_PARALLEL_SOLVE.value)
+                state.ijob = Int(FEAST_RCI_PARALLEL_SOLVE)
             else
                 state.current_point = 1
                 state.Ze = state.contour_points[1]
-                state.ijob = Int(FEAST_RCI_FACTORIZE.value)
+                state.ijob = Int(FEAST_RCI_FACTORIZE)
             end
         end
     end
     
     # Traditional RCI paths for serial execution
-    if state.ijob == Int(FEAST_RCI_FACTORIZE.value)
+    if state.ijob == Int(FEAST_RCI_FACTORIZE)
         # User should factorize (Ze*B - A)
-        state.ijob = Int(FEAST_RCI_SOLVE.value)
+        state.ijob = Int(FEAST_RCI_SOLVE)
         return
     end
     
-    if state.ijob == Int(FEAST_RCI_SOLVE.value)
+    if state.ijob == Int(FEAST_RCI_SOLVE)
         # User has solved linear systems for current point
         e = state.current_point
         w = state.contour_weights[e]
@@ -237,11 +237,11 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
         if state.current_point <= state.total_points
             # More points to process
             state.Ze = state.contour_points[state.current_point]
-            state.ijob = Int(FEAST_RCI_FACTORIZE.value)
+            state.ijob = Int(FEAST_RCI_FACTORIZE)
         else
             # All points processed
             state.current_point = 1
-            state.ijob = Int(FEAST_RCI_EIGEN_SOLVE.value)
+            state.ijob = Int(FEAST_RCI_EIGEN_SOLVE)
         end
     end
 end
@@ -338,16 +338,16 @@ function feast_parallel(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         pfeast_srci!(state, N, work, workc, Aq, Sq, fpm, 
                     Emin, Emax, M0, lambda, q, res)
         
-        if state.ijob == Int(FEAST_RCI_PARALLEL_SOLVE.value) && auto_rci
+        if state.ijob == Int(FEAST_RCI_PARALLEL_SOLVE) && auto_rci
             # Automatically handle parallel computation
             pfeast_compute_all_contour_points!(state, A, B, work, M0)
             
-        elseif state.ijob == Int(FEAST_RCI_MULT_A.value) && auto_rci
+        elseif state.ijob == Int(FEAST_RCI_MULT_A) && auto_rci
             # Automatically compute A*q for residual calculation
             M = state.mode
             work[:, 1:M] .= A * q[:, 1:M]
             
-        elseif state.ijob == Int(FEAST_RCI_DONE.value)
+        elseif state.ijob == Int(FEAST_RCI_DONE)
             break
             
         elseif !auto_rci

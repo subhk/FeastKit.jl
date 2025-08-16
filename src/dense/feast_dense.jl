@@ -35,7 +35,7 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
                    Emin, Emax, M0, workspace.lambda, workspace.q, 
                    mode, workspace.res, info)
         
-        if ijob[] == Int(FEAST_RCI_FACTORIZE.value)
+        if ijob[] == Int(FEAST_RCI_FACTORIZE)
             # Factorize Ze*B - A
             z = Ze[]
             LU_factors .= z .* B .- A
@@ -49,7 +49,7 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_SOLVE.value)
+        elseif ijob[] == Int(FEAST_RCI_SOLVE)
             # Solve linear systems: (Ze*B - A) * X = B * workspace.work
             rhs = B * workspace.work[:, 1:M0]
             
@@ -61,12 +61,12 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_MULT_A.value)
+        elseif ijob[] == Int(FEAST_RCI_MULT_A)
             # Compute A * q for residual calculation
             M = mode[]
             workspace.work[:, 1:M] .= A * workspace.q[:, 1:M]
             
-        elseif ijob[] == Int(FEAST_RCI_DONE.value)
+        elseif ijob[] == Int(FEAST_RCI_DONE)
             break
         end
     end
@@ -112,7 +112,7 @@ function feast_heev!(A::Matrix{Complex{T}},
                    Emin, Emax, M0, workspace.lambda, workspace.q, 
                    mode, workspace.res, info)
         
-        if ijob[] == Int(FEAST_RCI_FACTORIZE.value)
+        if ijob[] == Int(FEAST_RCI_FACTORIZE)
             # Factorize Ze*I - A
             z = Ze[]
             LU_factors .= z .* I .- A
@@ -125,7 +125,7 @@ function feast_heev!(A::Matrix{Complex{T}},
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_SOLVE.value)
+        elseif ijob[] == Int(FEAST_RCI_SOLVE)
             # Solve linear systems: (Ze*I - A) * X = workspace.workc
             try
                 workspace.workc[:, 1:M0] .= LU_factors \ workspace.workc[:, 1:M0]
@@ -134,12 +134,12 @@ function feast_heev!(A::Matrix{Complex{T}},
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_MULT_A.value)
+        elseif ijob[] == Int(FEAST_RCI_MULT_A)
             # Compute A * q for residual calculation
             M = mode[]
             workspace.work[:, 1:M] .= real.(A * workspace.q[:, 1:M])
             
-        elseif ijob[] == Int(FEAST_RCI_DONE.value)
+        elseif ijob[] == Int(FEAST_RCI_DONE)
             break
         end
     end
@@ -190,7 +190,7 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
                    Emid, r, M0, lambda_complex, q_complex, 
                    mode, workspace.res, info)
         
-        if ijob[] == Int(FEAST_RCI_FACTORIZE.value)
+        if ijob[] == Int(FEAST_RCI_FACTORIZE)
             # Factorize Ze*B - A
             z = Ze[]
             LU_factors .= z .* B .- A
@@ -203,7 +203,7 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_SOLVE.value)
+        elseif ijob[] == Int(FEAST_RCI_SOLVE)
             # Solve linear systems: (Ze*B - A) * X = B * workspace.workc
             rhs = B * workspace.workc[:, 1:M0]
             
@@ -214,12 +214,12 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_MULT_A.value)
+        elseif ijob[] == Int(FEAST_RCI_MULT_A)
             # Compute A * q for residual calculation
             M = mode[]
             workspace.workc[:, 1:M] .= A * q_complex[:, 1:M]
             
-        elseif ijob[] == Int(FEAST_RCI_DONE.value)
+        elseif ijob[] == Int(FEAST_RCI_DONE)
             break
         end
     end

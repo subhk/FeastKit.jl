@@ -45,7 +45,7 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
                 F = lu!(LU_factors)
                 ipiv .= F.p
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             
@@ -57,7 +57,7 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
                 # Solve with LU factors
                 workspace.workc[:, 1:M0] .= LU_factors \ rhs
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             
@@ -121,7 +121,7 @@ function feast_heev!(A::Matrix{Complex{T}},
             try
                 lu!(LU_factors)
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             
@@ -130,7 +130,7 @@ function feast_heev!(A::Matrix{Complex{T}},
             try
                 workspace.workc[:, 1:M0] .= LU_factors \ workspace.workc[:, 1:M0]
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             
@@ -199,7 +199,7 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
             try
                 lu!(LU_factors)
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             
@@ -210,7 +210,7 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
             try
                 workspace.workc[:, 1:M0] .= LU_factors \ rhs
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             

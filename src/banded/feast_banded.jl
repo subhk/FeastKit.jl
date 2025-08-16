@@ -63,7 +63,7 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
             try
                 banded_factors = lu(full_matrix)
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             
@@ -76,7 +76,7 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
                 # Solve with banded factors
                 workspace.workc[:, 1:M0] .= banded_factors \ rhs
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             
@@ -146,7 +146,7 @@ function feast_hbev!(A::Matrix{Complex{T}}, ka::Int,
             try
                 banded_factors = lu(full_matrix)
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             
@@ -155,7 +155,7 @@ function feast_hbev!(A::Matrix{Complex{T}}, ka::Int,
             try
                 workspace.workc[:, 1:M0] .= banded_factors \ workspace.workc[:, 1:M0]
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             

@@ -45,7 +45,7 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             try
                 sparse_solver = lu(sparse_matrix)
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             
@@ -57,7 +57,7 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                 # Solve with sparse LU factors
                 workspace.workc[:, 1:M0] .= sparse_solver \ rhs
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             
@@ -122,7 +122,7 @@ function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
             try
                 sparse_solver = lu(sparse_matrix)
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             
@@ -131,7 +131,7 @@ function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
             try
                 workspace.workc[:, 1:M0] .= sparse_solver \ workspace.workc[:, 1:M0]
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             
@@ -200,7 +200,7 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
             try
                 sparse_solver = lu(sparse_matrix)
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             
@@ -211,7 +211,7 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
             try
                 workspace.workc[:, 1:M0] .= sparse_solver \ rhs
             catch e
-                info[] = FEAST_ERROR_LAPACK.value
+                info[] = Int(FEAST_ERROR_LAPACK)
                 break
             end
             

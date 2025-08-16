@@ -1,6 +1,8 @@
 # FEAST auxiliary routines
 # Translated from feast_aux.f90
 
+using Printf
+
 function check_feast_srci_input(N::Int, M0::Int, Emin::T, Emax::T, 
                                fpm::Vector{Int}) where T<:Real
     # Check validity of RCI FEAST inputs for symmetric/Hermitian problems

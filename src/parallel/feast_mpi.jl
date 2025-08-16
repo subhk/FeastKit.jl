@@ -1,7 +1,7 @@
 # MPI-based parallel FEAST implementation
 # True MPI support for HPC clusters and distributed computing
 
-using MPI
+# Note: MPI should already be loaded when this file is included
 using LinearAlgebra
 using SparseArrays
 

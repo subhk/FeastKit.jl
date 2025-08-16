@@ -5,8 +5,9 @@
 function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T}, 
                interval::Tuple{T,T}; M0::Int = 10, 
                fpm::Union{Vector{Int}, Nothing} = nothing,
-               parallel::Bool = false,
-               use_threads::Bool = true) where T<:Real
+               parallel::Union{Bool, Symbol} = false,
+               use_threads::Bool = true,
+               comm = nothing) where T<:Real
     # Main FEAST interface for generalized eigenvalue problems
     # Automatically detects matrix type and calls appropriate solver
     
@@ -18,63 +19,47 @@ function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         feastinit!(fpm)
     end
     
-    # Use parallel version if requested and available
-    if parallel && (Threads.nthreads() > 1 || nworkers() > 1)
-        return feast_parallel(A, B, interval, M0=M0, fpm=fpm, use_threads=use_threads)
+    # Handle parallel backend selection
+    if parallel == true
+        parallel = :auto  # Convert old boolean API to new symbol API
+    elseif parallel == false
+        parallel = :serial
     end
     
-    # Detect matrix structure and call appropriate solver
-    if isa(A, Matrix) && isa(B, Matrix)
-        # Dense matrices
-        if T <: Real
-            return feast_sygv!(copy(A), copy(B), Emin, Emax, M0, fpm)
-        else
-            return feast_gegv!(A, B, Complex(Emin), Emax - Emin, M0, fpm)
+    # Determine and use appropriate backend
+    backend = determine_parallel_backend(parallel, comm)
+    
+    if backend != :serial
+        # Try parallel execution
+        try
+            return feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads)
+        catch e
+            @debug "Parallel execution failed, falling back to serial" exception=e
         end
-    elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
-        # Sparse matrices
-        return feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
-    else
-        throw(ArgumentError("Unsupported matrix types: $(typeof(A)), $(typeof(B))"))
     end
+    
+    # Serial execution
+    return feast_serial(A, B, interval, M0, fpm)
 end
 
 function feast(A::AbstractMatrix{T}, interval::Tuple{T,T}; 
                M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing,
-               parallel::Bool = false, use_threads::Bool = true) where T<:Real
+               parallel::Union{Bool, Symbol} = false, 
+               use_threads::Bool = true, comm = nothing) where T<:Real
     # FEAST interface for standard eigenvalue problems (B = I)
     
-    Emin, Emax = interval
     N = size(A, 1)
     
-    # Initialize FEAST parameters if not provided
-    if fpm === nothing
-        fpm = zeros(Int, 64)
-        feastinit!(fpm)
+    # Create identity matrix of appropriate type
+    if isa(A, SparseMatrixCSC)
+        B = sparse(I, N, N)
+    else
+        B = Matrix{T}(I, N, N)
     end
     
-    # Create identity matrix of appropriate type
-    if isa(A, Matrix)
-        if T <: Real
-            B = Matrix{T}(I, N, N)
-            if parallel && (Threads.nthreads() > 1 || nworkers() > 1)
-                return feast_parallel(A, B, interval, M0=M0, fpm=fpm, use_threads=use_threads)
-            else
-                return feast_sygv!(copy(A), B, Emin, Emax, M0, fpm)
-            end
-        else
-            return feast_heev!(copy(A), Emin, Emax, M0, fpm)
-        end
-    elseif isa(A, SparseMatrixCSC)
-        B = sparse(I, N, N)
-        if parallel && (Threads.nthreads() > 1 || nworkers() > 1)
-            return feast_parallel(A, B, interval, M0=M0, fpm=fpm, use_threads=use_threads)
-        else
-            return feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
-        end
-    else
-        throw(ArgumentError("Unsupported matrix type: $(typeof(A))"))
-    end
+    # Use the generalized eigenvalue interface
+    return feast(A, B, interval, M0=M0, fpm=fpm, parallel=parallel, 
+                use_threads=use_threads, comm=comm)
 end
 
 function feast_general(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},

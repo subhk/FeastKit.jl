@@ -132,7 +132,7 @@ FEAST.jl supports parallel computation where each contour integration point is s
 
 ```julia
 # Enable parallel computation using threads
-result = feast(A, (0.5, 1.5), M0=10, parallel=true, use_threads=true)
+result = feast(A, (0.5, 1.5), M0=10, parallel=:threads)
 
 # Or use the explicit parallel interface
 result = feast_parallel(A, B, (0.5, 1.5), M0=10, use_threads=true)
@@ -147,7 +147,81 @@ using Distributed
 addprocs(4)
 
 # Use distributed computing for contour integration
-result = feast(A, (0.5, 1.5), M0=10, parallel=true, use_threads=false)
+result = feast(A, (0.5, 1.5), M0=10, parallel=:distributed)
+```
+
+### MPI Support for HPC Clusters
+
+FEAST.jl provides full MPI support for high-performance computing clusters:
+
+```julia
+using MPI
+using FEAST
+
+# Initialize MPI (if not already done)
+MPI.Init()
+
+# Basic MPI FEAST
+result = feast(A, B, (0.5, 1.5), M0=10, parallel=:mpi)
+
+# Explicit MPI interface with communicator
+comm = MPI.COMM_WORLD
+result = mpi_feast(A, B, (0.5, 1.5), M0=10, comm=comm)
+
+# Hybrid MPI + threading (best for modern HPC)
+result = feast_hybrid(A, B, (0.5, 1.5), M0=10, 
+                     comm=comm, use_threads_per_rank=true)
+```
+
+#### Running on HPC Systems
+
+Create a job script for SLURM/PBS:
+
+```bash
+#!/bin/bash
+#SBATCH --nodes=4
+#SBATCH --ntasks-per-node=8
+#SBATCH --cpus-per-task=4
+#SBATCH --time=01:00:00
+
+module load julia mpi
+
+# Run with MPI + threading
+mpirun -np 32 julia --threads=4 feast_mpi_example.jl
+```
+
+Julia script (`feast_mpi_example.jl`):
+```julia
+using MPI
+using FEAST
+using LinearAlgebra
+
+MPI.Init()
+
+# Create distributed problem
+comm = MPI.COMM_WORLD
+rank = MPI.Comm_rank(comm)
+size = MPI.Comm_size(comm)
+
+if rank == 0
+    println("Running FEAST on $size MPI processes with $(Threads.nthreads()) threads each")
+end
+
+# Large eigenvalue problem
+n = 10000
+A = spdiagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))
+B = sparse(I, n, n)
+
+# Hybrid MPI + threading execution
+result = feast_hybrid(A, B, (0.5, 1.5), M0=20, 
+                     comm=comm, use_threads_per_rank=true)
+
+if rank == 0
+    println("Found $(result.M) eigenvalues")
+    println("Computation time measured on each rank")
+end
+
+MPI.Finalize()
 ```
 
 ### Parallel RCI Interface
@@ -196,22 +270,57 @@ end
 # Compare serial vs parallel performance
 pfeast_benchmark(A, B, (0.5, 1.5), 10)
 
-# Output:
-# FEAST Parallel Performance Benchmark
+# Compare all available parallel backends
+feast_parallel_comparison(A, B, (0.5, 1.5), 10)
+
+# Check parallel computing capabilities
+feast_parallel_info()
+
+# Output example:
+# FEAST Parallel Backend Comparison
 # ==================================================
 # Matrix size: 1000
 # Search interval: (0.5, 1.5)
-# Available threads: 8
-# Available workers: 4
+# Available backends:
+#   Threads: 8
+#   Workers: 4  
+#   MPI: Yes
 # 
-# Serial execution:
-# Time: 2.345 seconds
-# Eigenvalues found: 7
+# 1. Serial execution:
+#    Time: 2.345 seconds
+#    Eigenvalues: 7
 # 
-# Parallel execution (threads):
-# Time: 0.412 seconds
-# Eigenvalues found: 7
-# Speedup: 5.69x
+# 2. Threading execution:
+#    Time: 0.412 seconds
+#    Eigenvalues: 7
+#    Speedup: 5.69x
+# 
+# 3. Distributed execution:
+#    Time: 0.523 seconds
+#    Eigenvalues: 7
+#    Speedup: 4.48x
+# 
+# 4. MPI execution:
+#    Time: 0.298 seconds
+#    Eigenvalues: 7
+#    Speedup: 7.87x
+# 
+# 5. Hybrid MPI+Threading:
+#    Time: 0.156 seconds
+#    Eigenvalues: 7
+#    Speedup: 15.03x
+```
+
+### Automatic Backend Selection
+
+```julia
+# FEAST automatically selects the best available backend
+result = feast(A, B, (0.5, 1.5), M0=10, parallel=:auto)
+
+# Manual backend selection
+result = feast(A, B, (0.5, 1.5), M0=10, parallel=:mpi)      # Force MPI
+result = feast(A, B, (0.5, 1.5), M0=10, parallel=:threads)  # Force threading
+result = feast(A, B, (0.5, 1.5), M0=10, parallel=:serial)   # Force serial
 ```
 
 ## Algorithm Overview
@@ -260,9 +369,10 @@ end
 2. **Integration points**: More points (fpm[2]) improve accuracy but increase cost
 3. **Sparse matrices**: Use sparse format for large problems with few non-zeros
 4. **Initial guess**: Provide good initial guess when available (fpm[5] = 1)
-5. **Parallel execution**: Use `parallel=true` for large matrices to leverage multiple cores
-6. **Thread vs distributed**: Use threads for shared-memory systems, distributed for clusters
-7. **Load balancing**: Ensure workers have similar computational loads for best parallel efficiency
+5. **Parallel execution**: Use `parallel=:auto` to automatically select the best backend
+6. **HPC clusters**: Use `parallel=:mpi` or `feast_hybrid()` for optimal cluster performance  
+7. **Hybrid parallelism**: Combine MPI processes with threading for maximum performance
+8. **Load balancing**: FEAST automatically distributes contour points for optimal load balancing
 
 ## Limitations
 

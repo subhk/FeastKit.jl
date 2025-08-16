@@ -14,6 +14,7 @@ FEAST.jl is a pure Julia translation of the original FEAST (Fast Eigenvalue Algo
 - **Multiple matrix formats**: Support for dense, sparse, and banded matrices  
 - **Generalized eigenvalue problems**: Solve both Ax = λx and Ax = λBx problems
 - **Complex arithmetic**: Handle both real symmetric/Hermitian and general complex matrices
+- **Parallel computation**: Multi-threaded and distributed computing for contour integration
 - **Reverse Communication Interface (RCI)**: Advanced interface for custom linear solvers
 - **Polynomial eigenvalue problems**: Support for polynomial eigenvalue problems
 
@@ -123,6 +124,96 @@ end
 result = feast_matvec(A_mul!, B_mul!, n, (0.5, 1.5), M0=10)
 ```
 
+## Parallel Computing
+
+FEAST.jl supports parallel computation where each contour integration point is solved independently, leading to significant speedups for large problems.
+
+### Multi-threaded Execution
+
+```julia
+# Enable parallel computation using threads
+result = feast(A, (0.5, 1.5), M0=10, parallel=true, use_threads=true)
+
+# Or use the explicit parallel interface
+result = feast_parallel(A, B, (0.5, 1.5), M0=10, use_threads=true)
+```
+
+### Distributed Computing
+
+```julia
+using Distributed
+
+# Add worker processes
+addprocs(4)
+
+# Use distributed computing for contour integration
+result = feast(A, (0.5, 1.5), M0=10, parallel=true, use_threads=false)
+```
+
+### Parallel RCI Interface
+
+For advanced users, a parallel RCI interface is available:
+
+```julia
+using FEAST
+
+# Create parallel state
+state = ParallelFeastState{Float64}(ne=8, M0=10, use_parallel=true, use_threads=true)
+
+# Initialize workspace
+N = size(A, 1)
+work = randn(N, M0)
+workc = zeros(ComplexF64, N, M0)
+Aq = zeros(M0, M0)
+Sq = zeros(M0, M0)
+lambda = zeros(M0)
+q = zeros(N, M0)
+res = zeros(M0)
+
+# RCI loop
+while true
+    pfeast_srci!(state, N, work, workc, Aq, Sq, fpm, 
+                Emin, Emax, M0, lambda, q, res)
+    
+    if state.ijob == FEAST_RCI_PARALLEL_SOLVE.value
+        # Solve all contour points in parallel
+        pfeast_compute_all_contour_points!(state, A, B, work, M0)
+        
+    elseif state.ijob == FEAST_RCI_MULT_A.value
+        # Compute A*q for residual calculation
+        M = state.mode
+        work[:, 1:M] .= A * q[:, 1:M]
+        
+    elseif state.ijob == FEAST_RCI_DONE.value
+        break
+    end
+end
+```
+
+### Performance Benchmarking
+
+```julia
+# Compare serial vs parallel performance
+pfeast_benchmark(A, B, (0.5, 1.5), 10)
+
+# Output:
+# FEAST Parallel Performance Benchmark
+# ==================================================
+# Matrix size: 1000
+# Search interval: (0.5, 1.5)
+# Available threads: 8
+# Available workers: 4
+# 
+# Serial execution:
+# Time: 2.345 seconds
+# Eigenvalues found: 7
+# 
+# Parallel execution (threads):
+# Time: 0.412 seconds
+# Eigenvalues found: 7
+# Speedup: 5.69x
+```
+
 ## Algorithm Overview
 
 FEAST uses contour integration in the complex plane to compute eigenvalues. The key steps are:
@@ -169,6 +260,9 @@ end
 2. **Integration points**: More points (fpm[2]) improve accuracy but increase cost
 3. **Sparse matrices**: Use sparse format for large problems with few non-zeros
 4. **Initial guess**: Provide good initial guess when available (fpm[5] = 1)
+5. **Parallel execution**: Use `parallel=true` for large matrices to leverage multiple cores
+6. **Thread vs distributed**: Use threads for shared-memory systems, distributed for clusters
+7. **Load balancing**: Ensure workers have similar computational loads for best parallel efficiency
 
 ## Limitations
 

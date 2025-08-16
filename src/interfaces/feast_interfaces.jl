@@ -4,7 +4,9 @@
 # Main FEAST interface functions
 function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T}, 
                interval::Tuple{T,T}; M0::Int = 10, 
-               fpm::Union{Vector{Int}, Nothing} = nothing) where T<:Real
+               fpm::Union{Vector{Int}, Nothing} = nothing,
+               parallel::Bool = false,
+               use_threads::Bool = true) where T<:Real
     # Main FEAST interface for generalized eigenvalue problems
     # Automatically detects matrix type and calls appropriate solver
     
@@ -14,6 +16,11 @@ function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     if fpm === nothing
         fpm = zeros(Int, 64)
         feastinit!(fpm)
+    end
+    
+    # Use parallel version if requested and available
+    if parallel && (Threads.nthreads() > 1 || nworkers() > 1)
+        return feast_parallel(A, B, interval, M0=M0, fpm=fpm, use_threads=use_threads)
     end
     
     # Detect matrix structure and call appropriate solver
@@ -33,7 +40,8 @@ function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
 end
 
 function feast(A::AbstractMatrix{T}, interval::Tuple{T,T}; 
-               M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing) where T<:Real
+               M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing,
+               parallel::Bool = false, use_threads::Bool = true) where T<:Real
     # FEAST interface for standard eigenvalue problems (B = I)
     
     Emin, Emax = interval
@@ -49,13 +57,21 @@ function feast(A::AbstractMatrix{T}, interval::Tuple{T,T};
     if isa(A, Matrix)
         if T <: Real
             B = Matrix{T}(I, N, N)
-            return feast_sygv!(copy(A), B, Emin, Emax, M0, fpm)
+            if parallel && (Threads.nthreads() > 1 || nworkers() > 1)
+                return feast_parallel(A, B, interval, M0=M0, fpm=fpm, use_threads=use_threads)
+            else
+                return feast_sygv!(copy(A), B, Emin, Emax, M0, fpm)
+            end
         else
             return feast_heev!(copy(A), Emin, Emax, M0, fpm)
         end
     elseif isa(A, SparseMatrixCSC)
         B = sparse(I, N, N)
-        return feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
+        if parallel && (Threads.nthreads() > 1 || nworkers() > 1)
+            return feast_parallel(A, B, interval, M0=M0, fpm=fpm, use_threads=use_threads)
+        else
+            return feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
+        end
     else
         throw(ArgumentError("Unsupported matrix type: $(typeof(A))"))
     end

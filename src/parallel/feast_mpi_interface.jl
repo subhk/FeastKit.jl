@@ -1,103 +1,10 @@
 # High-level MPI interfaces for FEAST
 # Provides seamless integration between threaded, distributed, and MPI parallelism
 
-# Enhanced main interface with MPI support
-function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T}, 
-               interval::Tuple{T,T}; M0::Int = 10, 
-               fpm::Union{Vector{Int}, Nothing} = nothing,
-               parallel::Symbol = :auto,  # :auto, :threads, :distributed, :mpi, :serial
-               comm::Union{MPI.Comm, Nothing} = nothing) where T<:Real
-    # Unified FEAST interface with automatic parallel backend selection
-    
-    Emin, Emax = interval
-    
-    # Initialize FEAST parameters
-    if fpm === nothing
-        fpm = zeros(Int, 64)
-        feastinit!(fpm)
-    end
-    
-    # Determine parallel backend
-    backend = determine_parallel_backend(parallel, comm)
-    
-    if backend == :mpi
-        # Use MPI backend
-        mpi_comm = comm !== nothing ? comm : MPI.COMM_WORLD
-        return mpi_feast(A, B, interval, M0=M0, fpm=fpm, comm=mpi_comm)
-        
-    elseif backend == :distributed
-        # Use Distributed.jl backend
-        return feast_parallel(A, B, interval, M0=M0, fpm=fpm, use_threads=false)
-        
-    elseif backend == :threads
-        # Use threading backend
-        return feast_parallel(A, B, interval, M0=M0, fpm=fpm, use_threads=true)
-        
-    else
-        # Serial execution
-        if isa(A, Matrix) && isa(B, Matrix)
-            return feast_sygv!(copy(A), copy(B), Emin, Emax, M0, fpm)
-        elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
-            return feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
-        else
-            throw(ArgumentError("Unsupported matrix types: $(typeof(A)), $(typeof(B))"))
-        end
-    end
-end
+# Note: Main feast() interfaces are defined in feast_interfaces.jl
+# The MPI features are accessed through the existing interface with comm parameter
 
-# Standard eigenvalue problem with MPI support
-function feast(A::AbstractMatrix{T}, interval::Tuple{T,T}; 
-               M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing,
-               parallel::Symbol = :auto,
-               comm::Union{MPI.Comm, Nothing} = nothing) where T<:Real
-    
-    N = size(A, 1)
-    
-    # Create identity matrix
-    if isa(A, SparseMatrixCSC)
-        B = sparse(I, N, N)
-    else
-        B = Matrix{T}(I, N, N)
-    end
-    
-    return feast(A, B, interval, M0=M0, fpm=fpm, parallel=parallel, comm=comm)
-end
-
-# Determine optimal parallel backend
-function determine_parallel_backend(parallel::Symbol, comm)
-    if parallel == :mpi
-        # Explicit MPI request
-        if !isdefined(FEAST, :MPI_AVAILABLE) || !FEAST.MPI_AVAILABLE[]
-            @warn "MPI requested but not available, falling back to distributed"
-            return nworkers() > 1 ? :distributed : (Threads.nthreads() > 1 ? :threads : :serial)
-        end
-        return :mpi
-        
-    elseif parallel == :distributed
-        return nworkers() > 1 ? :distributed : :serial
-        
-    elseif parallel == :threads
-        return Threads.nthreads() > 1 ? :threads : :serial
-        
-    elseif parallel == :serial
-        return :serial
-        
-    elseif parallel == :auto
-        # Automatic backend selection based on available resources
-        if (comm !== nothing || (isdefined(FEAST, :MPI_AVAILABLE) && FEAST.MPI_AVAILABLE[]))
-            return :mpi
-        elseif nworkers() > 1
-            return :distributed
-        elseif Threads.nthreads() > 1
-            return :threads
-        else
-            return :serial
-        end
-        
-    else
-        throw(ArgumentError("Unknown parallel backend: $parallel. Use :auto, :mpi, :distributed, :threads, or :serial"))
-    end
-end
+# Note: determine_parallel_backend is defined in feast_backend_utils.jl
 
 # Hybrid parallel approach: MPI + threads within each MPI process
 function feast_hybrid(A::AbstractMatrix{T}, B::AbstractMatrix{T},
@@ -336,49 +243,4 @@ function feast_parallel_comparison(A::AbstractMatrix, B::AbstractMatrix, interva
     return results
 end
 
-# Utility to check and report parallel capabilities
-function feast_parallel_info()
-    println("FEAST Parallel Computing Capabilities")
-    println("="^40)
-    
-    # Threading info
-    println("Threading:")
-    println("  Available threads: $(Threads.nthreads())")
-    println("  Status: $(Threads.nthreads() > 1 ? "Enabled" : "Disabled")")
-    
-    # Distributed info
-    println("\nDistributed Computing:")
-    println("  Available workers: $(nworkers())")
-    println("  Worker processes: $(workers())")
-    println("  Status: $(nworkers() > 1 ? "Enabled" : "Disabled")")
-    
-    # MPI info
-    println("\nMPI:")
-    if mpi_available()
-        comm = MPI.COMM_WORLD
-        rank = MPI.Comm_rank(comm)
-        size = MPI.Comm_size(comm)
-        println("  MPI initialized: Yes")
-        println("  Current rank: $rank")
-        println("  Total processes: $size")
-        println("  Status: Enabled")
-    else
-        println("  MPI initialized: No")
-        println("  Status: Disabled")
-    end
-    
-    # Recommendations
-    println("\nRecommendations:")
-    if mpi_available()
-        println("  Best for HPC clusters: Use parallel=:mpi")
-        if Threads.nthreads() > 1
-            println("  Best for hybrid: Use feast_hybrid() for MPI+threading")
-        end
-    elseif nworkers() > 1
-        println("  Best for multi-core: Use parallel=:distributed")
-    elseif Threads.nthreads() > 1
-        println("  Best for multi-core: Use parallel=:threads")
-    else
-        println("  Consider starting Julia with multiple threads or adding workers")
-    end
-end
+# Note: feast_parallel_info() is defined in feast_backend_utils.jl

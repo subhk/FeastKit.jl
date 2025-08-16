@@ -104,11 +104,21 @@ function feast_parallel_info()
     println("  Worker processes: $(workers())")
     println("  Status: $(nworkers() > 1 ? "Enabled" : "Disabled")")
     
-    # MPI info
+    # MPI info (if available)
     println("\nMPI:")
     if mpi_available()
-        println("  MPI initialized: Yes")
-        println("  Status: Enabled")
+        try
+            comm = @eval MPI.COMM_WORLD
+            rank = @eval MPI.Comm_rank(comm)
+            size = @eval MPI.Comm_size(comm)
+            println("  MPI initialized: Yes")
+            println("  Current rank: $rank")
+            println("  Total processes: $size")
+            println("  Status: Enabled")
+        catch
+            println("  MPI loaded but not properly initialized")
+            println("  Status: Disabled")
+        end
     else
         println("  MPI initialized: No")
         println("  Status: Disabled")

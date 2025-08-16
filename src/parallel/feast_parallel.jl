@@ -181,7 +181,7 @@ function pfeast_compute_moments_distributed(A::Matrix{T}, B::Matrix{T},
     
     for (i, chunk) in enumerate(work_chunks)
         moment_futures[i] = @spawnat workers()[i] begin
-            pfeast_solve_contour_chunk(A, B, work, contour, chunk, M0)
+            pfeast_solve_contour_chunk(A, B, work, contour.Zne, contour.Wne, chunk, M0)
         end
     end
     
@@ -214,14 +214,15 @@ function pfeast_compute_moments_serial(A::Matrix{T}, B::Matrix{T},
 end
 
 # Solve a chunk of contour points on a worker
-@everywhere function pfeast_solve_contour_chunk(A::Matrix{T}, B::Matrix{T}, 
-                                               work::Matrix{T}, contour::FeastContour{T}, 
-                                               chunk_indices::Vector{Int}, M0::Int) where T<:Real
+function pfeast_solve_contour_chunk(A::Matrix{T}, B::Matrix{T}, 
+                                   work::Matrix{T}, contour_nodes::Vector{Complex{T}}, 
+                                   contour_weights::Vector{Complex{T}},
+                                   chunk_indices::Vector{Int}, M0::Int) where T<:Real
     chunk_moments = Vector{Tuple{Matrix{T}, Matrix{T}}}(undef, length(chunk_indices))
     
     for (i, e) in enumerate(chunk_indices)
-        z = contour.Zne[e]
-        w = contour.Wne[e]
+        z = contour_nodes[e]
+        w = contour_weights[e]
         chunk_moments[i] = pfeast_solve_single_point(A, B, work, z, w, M0)
     end
     
@@ -439,7 +440,7 @@ function pfeast_compute_sparse_moments_distributed(A::SparseMatrixCSC{T,Int},
     
     for (i, chunk) in enumerate(work_chunks)
         moment_futures[i] = @spawnat workers()[i] begin
-            pfeast_solve_sparse_chunk(A, B, work, contour, chunk, M0)
+            pfeast_solve_sparse_chunk(A, B, work, contour.Zne, contour.Wne, chunk, M0)
         end
     end
     
@@ -474,15 +475,16 @@ function pfeast_compute_sparse_moments_serial(A::SparseMatrixCSC{T,Int},
 end
 
 # Solve sparse chunk on worker
-@everywhere function pfeast_solve_sparse_chunk(A::SparseMatrixCSC{T,Int}, 
-                                              B::SparseMatrixCSC{T,Int},
-                                              work::Matrix{T}, contour::FeastContour{T}, 
-                                              chunk_indices::Vector{Int}, M0::Int) where T<:Real
+function pfeast_solve_sparse_chunk(A::SparseMatrixCSC{T,Int}, 
+                                  B::SparseMatrixCSC{T,Int},
+                                  work::Matrix{T}, contour_nodes::Vector{Complex{T}},
+                                  contour_weights::Vector{Complex{T}}, 
+                                  chunk_indices::Vector{Int}, M0::Int) where T<:Real
     chunk_moments = Vector{Tuple{Matrix{T}, Matrix{T}}}(undef, length(chunk_indices))
     
     for (i, e) in enumerate(chunk_indices)
-        z = contour.Zne[e]
-        w = contour.Wne[e]
+        z = contour_nodes[e]
+        w = contour_weights[e]
         chunk_moments[i] = pfeast_solve_sparse_single_point(A, B, work, z, w, M0)
     end
     

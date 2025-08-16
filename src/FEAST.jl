@@ -36,11 +36,9 @@ const MPI_AVAILABLE = Ref(false)
 function __init__()
     try
         # Try to load MPI components
-        eval(:(
-            using MPI
-            include(joinpath(@__DIR__, "parallel", "feast_mpi.jl"))
-            include(joinpath(@__DIR__, "parallel", "feast_mpi_interface.jl"))
-        ))
+        @eval using MPI
+        include(joinpath(@__DIR__, "parallel", "feast_mpi.jl"))
+        include(joinpath(@__DIR__, "parallel", "feast_mpi_interface.jl"))
         MPI_AVAILABLE[] = true
     catch e
         @debug "MPI.jl not available or failed to load. MPI features will be disabled." exception=e

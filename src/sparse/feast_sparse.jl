@@ -1,6 +1,8 @@
 # FEAST sparse matrix routines
 # Translated from dzfeast_sparse.f90 and related files
 
+using SparseArrays
+
 function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                        Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
     # FEAST for sparse real symmetric generalized eigenvalue problem in CSR format

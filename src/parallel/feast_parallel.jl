@@ -72,7 +72,7 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
             
             if M == 0
                 return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
-                                       Int(FEAST_ERROR_NO_CONVERGENCE.value), zero(T), loop)
+                                       Int(FEAST_ERROR_NO_CONVERGENCE), zero(T), loop)
             end
             
             # Update eigenvectors
@@ -95,14 +95,14 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
             
         catch e
             return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
-                                   Int(FEAST_ERROR_LAPACK.value), zero(T), loop)
+                                   Int(FEAST_ERROR_LAPACK), zero(T), loop)
         end
     end
     
     # Maximum iterations reached
     M = count(i -> feast_inside_contour(workspace.lambda[i], Emin, Emax), 1:M0)
     return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M, 
-                           workspace.res[1:M], Int(FEAST_ERROR_NO_CONVERGENCE.value), 
+                           workspace.res[1:M], Int(FEAST_ERROR_NO_CONVERGENCE), 
                            maximum(workspace.res[1:M]), max_loops)
 end
 
@@ -340,7 +340,7 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             
             if M == 0
                 return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
-                                       Int(FEAST_ERROR_NO_CONVERGENCE.value), zero(T), loop)
+                                       Int(FEAST_ERROR_NO_CONVERGENCE), zero(T), loop)
             end
             
             # Update solution
@@ -361,14 +361,14 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             
         catch e
             return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
-                                   Int(FEAST_ERROR_LAPACK.value), zero(T), loop)
+                                   Int(FEAST_ERROR_LAPACK), zero(T), loop)
         end
     end
     
     # Did not converge
     M = count(i -> feast_inside_contour(workspace.lambda[i], Emin, Emax), 1:M0)
     return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M, 
-                           workspace.res[1:M], Int(FEAST_ERROR_NO_CONVERGENCE.value), 
+                           workspace.res[1:M], Int(FEAST_ERROR_NO_CONVERGENCE), 
                            maximum(workspace.res[1:M]), max_loops)
 end
 

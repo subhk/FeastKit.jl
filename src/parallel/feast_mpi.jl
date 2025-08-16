@@ -134,7 +134,7 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             end
             
             if M == 0
-                mpi_state.info = Int(FEAST_ERROR_NO_CONVERGENCE.value)
+                mpi_state.info = Int(FEAST_ERROR_NO_CONVERGENCE)
                 break
             end
             
@@ -159,14 +159,14 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             workspace.work[:, 1:M] = workspace.q[:, 1:M]
             
         catch e
-            mpi_state.info = Int(FEAST_ERROR_LAPACK.value)
+            mpi_state.info = Int(FEAST_ERROR_LAPACK)
             break
         end
     end
     
     # Final result processing
     if !mpi_state.converged && mpi_state.info == 0
-        mpi_state.info = Int(FEAST_ERROR_NO_CONVERGENCE.value)
+        mpi_state.info = Int(FEAST_ERROR_NO_CONVERGENCE)
     end
     
     # Count final eigenvalues
@@ -325,7 +325,7 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             end
             
             if M == 0
-                mpi_state.info = Int(FEAST_ERROR_NO_CONVERGENCE.value)
+                mpi_state.info = Int(FEAST_ERROR_NO_CONVERGENCE)
                 break
             end
             
@@ -347,14 +347,14 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             workspace.work[:, 1:M] = workspace.q[:, 1:M]
             
         catch e
-            mpi_state.info = Int(FEAST_ERROR_LAPACK.value)
+            mpi_state.info = Int(FEAST_ERROR_LAPACK)
             break
         end
     end
     
     # Final processing
     if !mpi_state.converged && mpi_state.info == 0
-        mpi_state.info = Int(FEAST_ERROR_NO_CONVERGENCE.value)
+        mpi_state.info = Int(FEAST_ERROR_NO_CONVERGENCE)
     end
     
     M = count(i -> feast_inside_contour(workspace.lambda[i], Emin, Emax), 1:M0)

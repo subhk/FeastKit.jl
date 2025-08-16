@@ -27,7 +27,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         info[] = Int(FEAST_SUCCESS)
         
         if N <= 0
-            info[] = Int(FEAST_ERROR_N.value)
+            info[] = Int(FEAST_ERROR_N)
             return
         end
         
@@ -37,7 +37,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         end
         
         if Emin >= Emax
-            info[] = Int(FEAST_ERROR_EMIN_EMAX.value)
+            info[] = Int(FEAST_ERROR_EMIN_EMAX)
             return
         end
         
@@ -68,18 +68,18 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         # Set first integration point
         Ze[] = state[:Zne][1]
         
-        ijob[] = FEAST_RCI_FACTORIZE.value
+        ijob[] = Int(FEAST_RCI_FACTORIZE.value)
         return
     end
     
     # Main FEAST iteration loop
-    if ijob[] == FEAST_RCI_FACTORIZE.value
+    if ijob[] == Int(FEAST_RCI_FACTORIZE.value)
         # User should factorize (Ze*B - A)
-        ijob[] = FEAST_RCI_SOLVE.value
+        ijob[] = Int(FEAST_RCI_SOLVE.value)
         return
     end
     
-    if ijob[] == FEAST_RCI_SOLVE.value
+    if ijob[] == Int(FEAST_RCI_SOLVE.value)
         # User has solved linear systems
         e = state[:e]
         ne = state[:ne]
@@ -102,7 +102,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         if e < ne
             # More integration points to process
             Ze[] = Zne[e+1]
-            ijob[] = FEAST_RCI_FACTORIZE.value
+            ijob[] = Int(FEAST_RCI_FACTORIZE.value)
             return
         else
             # All integration points processed, solve reduced eigenvalue problem
@@ -129,25 +129,25 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 
                 # Check convergence
                 if M == 0
-                    info[] = Int(FEAST_ERROR_NO_CONVERGENCE.value)
-                    ijob[] = FEAST_RCI_DONE.value
+                    info[] = Int(FEAST_ERROR_NO_CONVERGENCE)
+                    ijob[] = Int(FEAST_RCI_DONE.value)
                     return
                 end
                 
                 # Compute residuals
-                ijob[] = FEAST_RCI_MULT_A.value
+                ijob[] = Int(FEAST_RCI_MULT_A.value)
                 mode[] = 1  # Compute A*q
                 return
                 
             catch e
-                info[] = Int(FEAST_ERROR_LAPACK.value)
-                ijob[] = FEAST_RCI_DONE.value
+                info[] = Int(FEAST_ERROR_LAPACK)
+                ijob[] = Int(FEAST_RCI_DONE.value)
                 return
             end
         end
     end
     
-    if ijob[] == FEAST_RCI_MULT_A.value
+    if ijob[] == Int(FEAST_RCI_MULT_A.value)
         # User has computed A*q, now compute residuals
         M = state[:M]
         
@@ -163,7 +163,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             # Converged or maximum iterations reached
             feast_sort!(lambda, q, res, M)
             mode[] = M
-            ijob[] = FEAST_RCI_DONE.value
+            ijob[] = Int(FEAST_RCI_DONE.value)
         else
             # Start new refinement loop
             loop[] += 1
@@ -176,7 +176,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             work[:, 1:M] = q[:, 1:M]
             
             Ze[] = state[:Zne][1]
-            ijob[] = FEAST_RCI_FACTORIZE.value
+            ijob[] = Int(FEAST_RCI_FACTORIZE.value)
         end
     end
 end
@@ -204,7 +204,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         info[] = Int(FEAST_SUCCESS)
         
         if N <= 0
-            info[] = Int(FEAST_ERROR_N.value)
+            info[] = Int(FEAST_ERROR_N)
             return
         end
         
@@ -214,7 +214,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         end
         
         if Emin >= Emax
-            info[] = Int(FEAST_ERROR_EMIN_EMAX.value)
+            info[] = Int(FEAST_ERROR_EMIN_EMAX)
             return
         end
         
@@ -239,7 +239,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         fill!(res, zero(T))
         
         Ze[] = state[:Zne][1]
-        ijob[] = FEAST_RCI_FACTORIZE.value
+        ijob[] = Int(FEAST_RCI_FACTORIZE.value)
         return
     end
     
@@ -274,7 +274,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         info[] = Int(FEAST_SUCCESS)
         
         if N <= 0
-            info[] = Int(FEAST_ERROR_N.value)
+            info[] = Int(FEAST_ERROR_N)
             return
         end
         
@@ -284,7 +284,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         end
         
         if r <= 0
-            info[] = Int(FEAST_ERROR_EMID_R.value)
+            info[] = Int(FEAST_ERROR_EMID_R)
             return
         end
         
@@ -309,7 +309,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         fill!(res, zero(T))
         
         Ze[] = state[:Zne][1]
-        ijob[] = FEAST_RCI_FACTORIZE.value
+        ijob[] = Int(FEAST_RCI_FACTORIZE.value)
         return
     end
     

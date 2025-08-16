@@ -88,7 +88,7 @@ function feast_hybrid(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             if M == 0
                 # No eigenvalues found
                 return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
-                                       Int(FEAST_ERROR_NO_CONVERGENCE.value), zero(T), loop)
+                                       Int(FEAST_ERROR_NO_CONVERGENCE), zero(T), loop)
             end
             
             workspace.lambda[1:M] = lambda_red[valid_indices]
@@ -112,14 +112,14 @@ function feast_hybrid(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             
         catch e
             return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
-                                   Int(FEAST_ERROR_LAPACK.value), zero(T), loop)
+                                   Int(FEAST_ERROR_LAPACK), zero(T), loop)
         end
     end
     
     # Did not converge
     M = count(i -> feast_inside_contour(workspace.lambda[i], interval[1], interval[2]), 1:M0)
     return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M,
-                           workspace.res[1:M], Int(FEAST_ERROR_NO_CONVERGENCE.value),
+                           workspace.res[1:M], Int(FEAST_ERROR_NO_CONVERGENCE),
                            maximum(workspace.res[1:M]), max_loops)
 end
 

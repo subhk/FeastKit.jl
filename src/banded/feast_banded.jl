@@ -38,7 +38,7 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
                    Emin, Emax, M0, workspace.lambda, workspace.q, 
                    mode, workspace.res, info)
         
-        if ijob[] == FEAST_RCI_FACTORIZE.value
+        if ijob[] == Int(FEAST_RCI_FACTORIZE.value)
             # Factorize Ze*B - A for banded matrices
             z = Ze[]
             
@@ -67,7 +67,7 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
                 break
             end
             
-        elseif ijob[] == FEAST_RCI_SOLVE.value
+        elseif ijob[] == Int(FEAST_RCI_SOLVE.value)
             # Solve linear systems: (Ze*B - A) * X = B * workspace.work
             B_full = banded_to_full(B, klb, N)
             rhs = B_full * workspace.work[:, 1:M0]
@@ -80,13 +80,13 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
                 break
             end
             
-        elseif ijob[] == FEAST_RCI_MULT_A.value
+        elseif ijob[] == Int(FEAST_RCI_MULT_A.value)
             # Compute A * q for residual calculation using banded multiplication
             M = mode[]
             A_full = banded_to_full(A, kla, N)
             workspace.work[:, 1:M] .= A_full * workspace.q[:, 1:M]
             
-        elseif ijob[] == FEAST_RCI_DONE.value
+        elseif ijob[] == Int(FEAST_RCI_DONE.value)
             break
         end
     end
@@ -134,7 +134,7 @@ function feast_hbev!(A::Matrix{Complex{T}}, ka::Int,
                    Emin, Emax, M0, workspace.lambda, workspace.q, 
                    mode, workspace.res, info)
         
-        if ijob[] == FEAST_RCI_FACTORIZE.value
+        if ijob[] == Int(FEAST_RCI_FACTORIZE.value)
             # Factorize Ze*I - A for banded Hermitian matrix
             z = Ze[]
             
@@ -150,7 +150,7 @@ function feast_hbev!(A::Matrix{Complex{T}}, ka::Int,
                 break
             end
             
-        elseif ijob[] == FEAST_RCI_SOLVE.value
+        elseif ijob[] == Int(FEAST_RCI_SOLVE.value)
             # Solve linear systems
             try
                 workspace.workc[:, 1:M0] .= banded_factors \ workspace.workc[:, 1:M0]
@@ -159,13 +159,13 @@ function feast_hbev!(A::Matrix{Complex{T}}, ka::Int,
                 break
             end
             
-        elseif ijob[] == FEAST_RCI_MULT_A.value
+        elseif ijob[] == Int(FEAST_RCI_MULT_A.value)
             # Compute A * q for residual calculation
             M = mode[]
             A_full = banded_to_full_hermitian(A, ka, N)
             workspace.work[:, 1:M] .= real.(A_full * workspace.q[:, 1:M])
             
-        elseif ijob[] == FEAST_RCI_DONE.value
+        elseif ijob[] == Int(FEAST_RCI_DONE.value)
             break
         end
     end

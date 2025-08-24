@@ -1,0 +1,304 @@
+/* Custom CSS for FEAST.jl documentation */
+
+/* Custom color scheme for Julia/FEAST branding */
+:root {
+  --md-primary-fg-color: #389826;        /* Julia green */
+  --md-primary-fg-color--light: #4CAF50;
+  --md-primary-fg-color--dark: #2E7D20;
+  --md-accent-fg-color: #CB3C33;         /* Julia red */
+  --md-accent-fg-color--transparent: rgba(203, 60, 51, 0.1);
+  
+  /* Custom FEAST colors */
+  --feast-blue: #1976D2;
+  --feast-light-blue: #42A5F5;
+  --feast-orange: #FF9800;
+  --feast-green: #4CAF50;
+}
+
+/* Header customization */
+.md-header {
+  background: linear-gradient(135deg, var(--md-primary-fg-color), var(--feast-blue));
+}
+
+/* Logo and title styling */
+.md-header__title {
+  font-weight: 700;
+  font-size: 1.2em;
+}
+
+/* Navigation tabs */
+.md-tabs {
+  background: linear-gradient(to right, var(--md-primary-fg-color), var(--feast-blue));
+}
+
+.md-tabs__link {
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+.md-tabs__link--active {
+  opacity: 1;
+  font-weight: 700;
+}
+
+/* Content styling */
+.md-content {
+  max-width: 1200px;
+}
+
+/* Code block enhancements */
+.highlight {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.highlight .gp {
+  user-select: none;
+}
+
+/* Julia-specific code styling */
+.language-julia .k { color: #d73a49; }    /* Keywords */
+.language-julia .n { color: #24292e; }    /* Names */
+.language-julia .s { color: #032f62; }    /* Strings */
+.language-julia .c1 { color: #6a737d; }  /* Comments */
+.language-julia .nb { color: #005cc5; }  /* Built-ins */
+
+/* Admonition boxes */
+.md-typeset .admonition,
+.md-typeset details {
+  border-left: 4px solid;
+  border-radius: 4px;
+}
+
+.md-typeset .admonition.note,
+.md-typeset .admonition.seealso,
+.md-typeset .admonition.info {
+  border-left-color: var(--feast-blue);
+}
+
+.md-typeset .admonition.tip,
+.md-typeset .admonition.hint,
+.md-typeset .admonition.important {
+  border-left-color: var(--feast-green);
+}
+
+.md-typeset .admonition.warning,
+.md-typeset .admonition.caution,
+.md-typeset .admonition.attention {
+  border-left-color: var(--feast-orange);
+}
+
+.md-typeset .admonition.danger,
+.md-typeset .admonition.error {
+  border-left-color: var(--md-accent-fg-color);
+}
+
+/* Performance boxes */
+.performance-tip {
+  background: linear-gradient(135deg, #E8F5E8, #F1F8E9);
+  border-left: 4px solid var(--feast-green);
+  padding: 16px;
+  margin: 16px 0;
+  border-radius: 4px;
+}
+
+.performance-tip::before {
+  content: "⚡ Performance Tip";
+  font-weight: bold;
+  color: var(--feast-green);
+  display: block;
+  margin-bottom: 8px;
+}
+
+/* Example boxes */
+.example-box {
+  background: linear-gradient(135deg, #F3E5F5, #FCE4EC);
+  border-left: 4px solid var(--feast-blue);
+  padding: 16px;
+  margin: 16px 0;
+  border-radius: 4px;
+}
+
+.example-box::before {
+  content: "📊 Example";
+  font-weight: bold;
+  color: var(--feast-blue);
+  display: block;
+  margin-bottom: 8px;
+}
+
+/* API reference styling */
+.api-function {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 6px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.api-function h4 {
+  margin-top: 0;
+  color: var(--feast-blue);
+  font-family: var(--md-code-font);
+  font-size: 1.1em;
+}
+
+.api-function .api-signature {
+  background: #2d3748;
+  color: #e2e8f0;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-family: var(--md-code-font);
+  font-size: 0.9em;
+  margin: 8px 0;
+  overflow-x: auto;
+}
+
+/* Table enhancements */
+.md-typeset table:not([class]) {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.md-typeset table:not([class]) th {
+  background: linear-gradient(135deg, var(--md-primary-fg-color), var(--feast-blue));
+  color: white;
+  font-weight: 600;
+  text-align: left;
+  padding: 12px 16px;
+}
+
+.md-typeset table:not([class]) td {
+  padding: 12px 16px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.md-typeset table:not([class]) tbody tr:hover {
+  background-color: rgba(25, 118, 210, 0.04);
+}
+
+/* Button styling */
+.md-button {
+  background: linear-gradient(135deg, var(--feast-blue), var(--feast-light-blue));
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-weight: 500;
+  text-transform: none;
+  transition: all 0.2s ease;
+}
+
+.md-button:hover {
+  background: linear-gradient(135deg, var(--feast-light-blue), var(--feast-blue));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3);
+}
+
+.md-button--primary {
+  background: linear-gradient(135deg, var(--md-accent-fg-color), #E53935);
+}
+
+.md-button--primary:hover {
+  background: linear-gradient(135deg, #E53935, var(--md-accent-fg-color));
+}
+
+/* Search enhancements */
+.md-search__form {
+  border-radius: 6px;
+}
+
+.md-search__input {
+  border-radius: 6px;
+}
+
+/* Footer */
+.md-footer {
+  background: linear-gradient(135deg, #2d3748, #1a1a1a);
+}
+
+/* Responsive design */
+@media screen and (max-width: 76.25em) {
+  .md-nav--primary .md-nav__title {
+    background: var(--md-primary-fg-color);
+  }
+}
+
+/* Print styles */
+@media print {
+  .md-header,
+  .md-footer,
+  .md-sidebar {
+    display: none !important;
+  }
+  
+  .md-content {
+    max-width: none !important;
+  }
+}
+
+/* Dark mode adjustments */
+[data-md-color-scheme="slate"] {
+  --feast-blue: #64B5F6;
+  --feast-light-blue: #90CAF9;
+  --feast-green: #81C784;
+}
+
+[data-md-color-scheme="slate"] .api-function {
+  background: #2d3748;
+  border-color: #4a5568;
+}
+
+[data-md-color-scheme="slate"] .performance-tip {
+  background: linear-gradient(135deg, #2d5a2d, #1e4b1e);
+}
+
+[data-md-color-scheme="slate"] .example-box {
+  background: linear-gradient(135deg, #3d2d5a, #2d1e4b);
+}
+
+/* Animation for interactive elements */
+.md-typeset details summary {
+  transition: color 0.2s ease;
+}
+
+.md-typeset details summary:hover {
+  color: var(--feast-blue);
+}
+
+/* Code copy button styling */
+.md-clipboard {
+  color: var(--feast-blue);
+}
+
+.md-clipboard:hover {
+  background: var(--md-accent-fg-color--transparent);
+}
+
+/* Table of contents */
+.md-nav--secondary .md-nav__link--active {
+  color: var(--feast-blue);
+  font-weight: 500;
+}
+
+/* Custom admonition types for FEAST */
+.md-typeset .admonition.feast-tip {
+  border-left-color: var(--feast-blue);
+}
+
+.md-typeset .admonition.feast-tip > .admonition-title::before {
+  background-color: var(--feast-blue);
+  -webkit-mask-image: var(--md-admonition-icon--tip);
+  mask-image: var(--md-admonition-icon--tip);
+}
+
+.md-typeset .admonition.performance {
+  border-left-color: var(--feast-green);
+}
+
+.md-typeset .admonition.performance > .admonition-title::before {
+  background-color: var(--feast-green);
+  content: "⚡";
+  -webkit-mask: none;
+  mask: none;
+}

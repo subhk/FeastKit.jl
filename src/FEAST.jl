@@ -12,6 +12,11 @@ export feast_parallel_info, feast_parallel_comparison
 export determine_parallel_backend, mpi_available, feast_parallel_capabilities
 export feast_with_backend, feast_serial
 export FeastResult, FeastParameters, FeastWorkspaceReal, FeastWorkspaceComplex
+# Matrix-free interface exports
+export MatrixFreeOperator, MatrixVecFunction, LinearOperator
+export feast_matfree_srci!, feast_matfree_grci!
+export feast_contour_expert, feast_contour_custom_weights!, feast_rational_expert
+export feast_polynomial, create_iterative_solver, allocate_matfree_workspace
 
 using LinearAlgebra
 using SparseArrays
@@ -29,6 +34,7 @@ include("banded/feast_banded.jl")
 include("parallel/feast_parallel.jl")
 include("parallel/feast_parallel_rci.jl")
 include("interfaces/feast_interfaces.jl")
+include("interfaces/feast_matfree.jl")
 
 # Conditional MPI loading - include at end to allow proper loading
 const MPI_AVAILABLE = Ref(false)

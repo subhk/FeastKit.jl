@@ -1,15 +1,74 @@
 # FEAST utility and contour generation tools
 # Translated from feast_tools.f90
 
+# Helper functions for integration nodes
+function gauss_legendre_point(n::Int, k::Int)
+    # Compute k-th Gauss-Legendre point and weight for n-point quadrature
+    # This is a simplified implementation - for production use, consider using
+    # a specialized library like FastGaussQuadrature.jl
+    
+    # Approximate roots using Chebyshev approximation
+    x = cos(π * (k - 0.25) / (n + 0.5))
+    
+    # Newton-Raphson refinement
+    for _ in 1:10
+        p1 = 1.0
+        p2 = 0.0
+        
+        # Compute Legendre polynomial P_n(x) using recurrence
+        for j in 1:n
+            p3 = p2
+            p2 = p1
+            p1 = ((2*j - 1) * x * p2 - (j - 1) * p3) / j
+        end
+        
+        # Compute derivative
+        pp = n * (x * p1 - p2) / (x * x - 1)
+        
+        # Newton step
+        x1 = x
+        x = x1 - p1 / pp
+        
+        if abs(x - x1) < 1e-14
+            break
+        end
+    end
+    
+    # Compute weight
+    pp = n * (x * p1 - p2) / (x * x - 1)
+    w = 2 / ((1 - x * x) * pp * pp)
+    
+    return x, w
+end
+
+function zolotarev_point(n::Int, k::Int)
+    # Zolotarev rational approximation points and weights
+    # Optimal for elliptical domains - simplified implementation
+    # For full implementation, see original FEAST Fortran code
+    
+    if k == 0  # Special case for initialization
+        return 0.0 + 0.0im, 1.0 + 0.0im
+    end
+    
+    # Approximate Zolotarev points using Chebyshev mapping
+    theta = π * (2*k - 1) / (2*n)
+    r_zol = 0.5  # Simplified radius
+    
+    zxe = r_zol * (cos(theta) + im * sin(theta))
+    zwe = (π / n) * im * zxe  # Simplified weight
+    
+    return zxe, zwe
+end
+
 function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:Real
     ne = fpm[2]  # Number of integration points (half-contour)
     fpm16 = get(fpm, 16, 0)  # Integration type: 0=Gauss, 1=Trapezoidal, 2=Zolotarev
-    fmp18 = get(fmp, 18, 100)  # Ellipse ratio a/b * 100 (default: 100 = circle)
+    fpm18 = get(fpm, 18, 100)  # Ellipse ratio a/b * 100 (default: 100 = circle)
     
     # Parameters from Fortran implementation
     r = (Emax - Emin) / 2  # Semi-major axis
     Emid = Emin + r        # Center point
-    aspect_ratio = fmp18 * 0.01  # Convert percentage to ratio
+    aspect_ratio = fpm18 * 0.01  # Convert percentage to ratio
     
     # Generate half-contour (symmetric about real axis)
     Zne = Vector{Complex{T}}(undef, ne)

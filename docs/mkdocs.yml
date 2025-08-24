@@ -1,0 +1,160 @@
+# MkDocs configuration for FEAST.jl documentation
+site_name: FEAST.jl Documentation
+site_description: Fast Eigenvalue Algorithm using Spectral Transformations in Julia
+site_author: FEAST.jl Team
+site_url: https://your-domain.github.io/FEAST.jl
+
+# Repository
+repo_name: FEAST.jl
+repo_url: https://github.com/your-repo/FEAST.jl
+edit_uri: edit/main/docs/
+
+# Copyright
+copyright: Copyright &copy; 2024 FEAST.jl Contributors
+
+# Configuration
+theme:
+  name: material
+  language: en
+  palette:
+    # Palette toggle for light mode
+    - scheme: default
+      primary: blue
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode  
+    - scheme: slate
+      primary: blue
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  
+  font:
+    text: Roboto
+    code: Roboto Mono
+    
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - navigation.top
+    - search.highlight
+    - search.share
+    - content.code.annotate
+    - content.code.copy
+    - content.action.edit
+    - toc.integrate
+
+  icon:
+    repo: fontawesome/brands/github
+    edit: material/pencil
+    view: material/eye
+
+# Plugins
+plugins:
+  - search:
+      lang: en
+  - minify:
+      minify_html: true
+  - git-revision-date-localized:
+      enable_creation_date: true
+
+# Extensions
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_generator: !!python/name:materialx.emoji.to_svg
+      emoji_index: !!python/name:materialx.emoji.twemoji
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink:
+      repo_url_shorthand: true
+      user: your-repo
+      repo: FEAST.jl
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+# Extra CSS and JavaScript  
+extra_css:
+  - stylesheets/extra.css
+  - stylesheets/julia-highlighting.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+  - javascripts/julia-highlighting.js
+
+# Extra
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/your-repo/FEAST.jl
+    - icon: fontawesome/brands/julia
+      link: https://julialang.org
+  version:
+    provider: mike
+    default: stable
+    alias: true
+  analytics:
+    provider: google
+    property: G-XXXXXXXXXX  # Replace with your Google Analytics ID
+
+# Page tree
+nav:
+  - Home: index.md
+  - Getting Started: getting_started.md
+  - User Guide:
+    - Examples: examples.md
+    - Matrix-Free Interface: matrix_free_interface.md
+    - Performance Tips: performance.md
+    - Custom Contours: custom_contours.md
+  - API Reference: api_reference.md
+  - Advanced Topics:
+    - Parallel Computing: parallel_computing.md
+    - Complex Eigenvalues: complex_eigenvalues.md
+    - Polynomial Problems: polynomial_problems.md
+  - Development:
+    - Contributing: contributing.md
+    - Developer Guide: developer_guide.md
+    - Testing: testing.md
+  - About:
+    - License: license.md
+    - Changelog: changelog.md
+    - Bibliography: bibliography.md
+
+# Watch extra files
+watch:
+  - ../src/
+  - ../examples/

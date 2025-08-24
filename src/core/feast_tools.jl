@@ -2,26 +2,46 @@
 # Translated from feast_tools.f90
 
 function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:Real
-    ne = fpm[2]  # Number of integration points
+    ne = fpm[2]  # Number of integration points (half-contour)
+    fpm16 = get(fpm, 16, 0)  # Integration type: 0=Gauss, 1=Trapezoidal, 2=Zolotarev
+    fmp18 = get(fmp, 18, 100)  # Ellipse ratio a/b * 100 (default: 100 = circle)
     
-    # Generate elliptical contour in complex plane
+    # Parameters from Fortran implementation
+    r = (Emax - Emin) / 2  # Semi-major axis
+    Emid = Emin + r        # Center point
+    aspect_ratio = fmp18 * 0.01  # Convert percentage to ratio
+    
+    # Generate half-contour (symmetric about real axis)
     Zne = Vector{Complex{T}}(undef, ne)
     Wne = Vector{Complex{T}}(undef, ne)
     
-    # Center and semi-axes of ellipse
-    center = (Emax + Emin) / 2
-    radius = (Emax - Emin) / 2
-    
-    # Generate integration points on ellipse
-    for i in 1:ne
-        theta = 2π * (i - 1) / ne
-        z = center + radius * (cos(theta) + im * sin(theta) * 0.5)
-        
-        # Integration node
-        Zne[i] = z
-        
-        # Integration weight
-        Wne[i] = radius * (-sin(theta) + im * cos(theta) * 0.5) * 2π / ne
+    for e in 1:ne
+        if fpm16 == 0  # Gauss-Legendre integration
+            xe, we = gauss_legendre_point(ne, e)
+            theta = -π/2 * xe + π/2  # Map [-1,1] to [-π/2, π/2]
+            
+            # Elliptical contour point
+            Zne[e] = Emid + r * cos(theta) + im * r * aspect_ratio * sin(theta)
+            
+            # Jacobian and weight
+            jac = r * im * sin(theta) + r * aspect_ratio * cos(theta)
+            Wne[e] = 0.25 * we * jac
+            
+        elseif fpm16 == 2  # Zolotarev integration (optimal for ellipses)
+            zxe, zwe = zolotarev_point(ne, e)
+            Zne[e] = zxe * r + Emid
+            Wne[e] = zwe * r
+            
+        else  # Trapezoidal integration (fpm16 == 1)
+            theta = π - (π/ne)/2 - (π/ne) * (e-1)
+            
+            # Elliptical contour point
+            Zne[e] = Emid + r * cos(theta) + im * r * aspect_ratio * sin(theta) 
+            
+            # Jacobian and weight
+            jac = r * im * sin(theta) + r * aspect_ratio * cos(theta)
+            Wne[e] = (1.0 / (2 * ne)) * jac
+        end
     end
     
     return FeastContour{T}(Zne, Wne)

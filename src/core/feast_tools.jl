@@ -148,6 +148,97 @@ function feast_customcontour(Zne::Vector{Complex{T}},
     return FeastContour{T}(Zne, Wne)
 end
 
+# Advanced contour generation functions following Fortran interface
+
+"""
+    feast_contour_expert(Emin, Emax, ne, integration_type, ellipse_ratio)
+
+Generate FEAST integration contour with expert-level control matching original Fortran implementation.
+
+# Arguments
+- `Emin, Emax`: Search interval bounds
+- `ne`: Number of integration points (half-contour)
+- `integration_type`: 0=Gauss-Legendre, 1=Trapezoidal, 2=Zolotarev  
+- `ellipse_ratio`: Aspect ratio a/b * 100 (100 = circle)
+
+# Returns
+- `FeastContour` with integration nodes and weights
+"""
+function feast_contour_expert(Emin::T, Emax::T, ne::Int, 
+                            integration_type::Int=0, 
+                            ellipse_ratio::Int=100) where T<:Real
+    fpm = zeros(Int, 64)
+    fpm[2] = ne
+    fpm[16] = integration_type  
+    fpm[18] = ellipse_ratio
+    
+    return feast_contour(Emin, Emax, fpm)
+end
+
+"""
+    feast_contour_custom_weights!(Zne, Wne)
+
+Custom contour integration with user-provided nodes and weights.
+Follows the Fortran expert interface pattern.
+
+# Arguments  
+- `Zne`: Complex integration nodes
+- `Wne`: Complex integration weights (modified in-place)
+
+# Returns
+- `FeastContour` using provided nodes and computed/modified weights
+"""  
+function feast_contour_custom_weights!(Zne::Vector{Complex{T}}, 
+                                     Wne::Vector{Complex{T}}) where T<:Real
+    ne = length(Zne)
+    
+    # Validate input
+    if length(Wne) != ne
+        throw(ArgumentError("Zne and Wne must have same length"))
+    end
+    
+    # User is responsible for providing correct weights
+    # This interface allows maximum flexibility like the Fortran version
+    
+    return FeastContour{T}(copy(Zne), copy(Wne))
+end
+
+"""
+    feast_rational_expert(Zne, Wne, lambda)
+
+Compute rational function values using custom integration nodes and weights.
+Direct translation of dfeast_rationalx from Fortran.
+
+# Arguments
+- `Zne`: Integration nodes  
+- `Wne`: Integration weights
+- `lambda`: Eigenvalues to evaluate
+
+# Returns  
+- Vector of rational function values
+"""
+function feast_rational_expert(Zne::Vector{Complex{T}}, 
+                             Wne::Vector{Complex{T}},
+                             lambda::Vector{T}) where T<:Real
+    ne = length(Zne)
+    M = length(lambda) 
+    f = zeros(T, M)
+    
+    # Compute rational function: f(λ) = (1/2πi) ∫ w(z)/(z-λ) dz
+    for j in 1:M
+        sum_val = zero(Complex{T})
+        for i in 1:ne
+            z = Zne[i] 
+            w = Wne[i]
+            sum_val += w / (z - lambda[j])
+        end
+        # Factor of 2 accounts for symmetry (half-contour integration) 
+        f[j] = 2 * real(sum_val)
+    end
+    
+    return f
+end
+
 function feast_rational(lambda::Vector{T}, Emin::T, Emax::T, 
                        fpm::Vector{Int}) where T<:Real
     # Compute rational function values for eigenvalue filtering

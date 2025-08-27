@@ -6,7 +6,7 @@ A Julia implementation of the FEAST eigenvalue solver for finding eigenvalues an
 
 ## Overview
 
-FEAST.jl is a pure Julia translation of the original FEAST (Fast Eigenvalue Algorithm using Spectral Transformations) library. FEAST is a numerical algorithm for solving both standard and generalized eigenvalue problems by computing eigenvalues located inside a given region in the complex plane.
+FEAST.jl is a pure Julia translation of the original FEAST library. FEAST is a numerical algorithm for solving both standard and generalized eigenvalue problems by computing eigenvalues located inside a given region in the complex plane.
 
 ### Key Features
 

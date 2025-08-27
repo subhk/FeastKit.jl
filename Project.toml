@@ -3,6 +3,10 @@ uuid = "fb02c795-5df5-4db3-94bf-d2cc9bf113f2"
 authors = ["Subhajit Kar <subhajitkar19@gmail.com>"]
 version = "1.0.0"
 
+[deps]
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+
 [compat]
 julia = "1.6.7"
 

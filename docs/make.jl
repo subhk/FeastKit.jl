@@ -10,9 +10,9 @@ using FEAST
 const PRETTY_URLS = get(ENV, "CI", "") == "true"
 
 makedocs(
-    sitename = "FEAST.jl",
-    modules = [FEAST],
-    authors = "FEAST.jl Contributors",
+    sitename = "Feast.jl",
+    modules = [Feast],
+    authors = "Feast.jl Contributors",
     source = @__DIR__,
     build = joinpath(@__DIR__, "build"),
     clean = true,
@@ -23,7 +23,7 @@ makedocs(
     ),
     pages = [
         "Home" => "index.md",
-        "Zero to FEAST" => "zero_to_feast.md",
+        "Zero to Feast" => "zero_to_feast.md",
         "Getting Started" => "getting_started.md",
         "User Guide" => Any[
             "Examples" => "examples.md",
@@ -55,4 +55,4 @@ makedocs(
 #     target = "build", # build directory from makedocs
 # )
 
-println("\n✔ FEAST.jl docs built at: ", joinpath(@__DIR__, "build", "index.html"))
+println("\n FEAST.jl docs built at: ", joinpath(@__DIR__, "build", "index.html"))

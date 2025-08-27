@@ -1,6 +1,9 @@
 #!/usr/bin/env julia
 
 using Documenter
+
+# Make the package available when building from the repository without installing
+push!(LOAD_PATH, joinpath(@__DIR__, ".."))
 using FEAST
 
 # Enable pretty URLs on CI (GitHub Actions) and plain URLs locally

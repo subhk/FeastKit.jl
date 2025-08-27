@@ -265,53 +265,6 @@ while true
 end
 ```
 
-### Performance Benchmarking
-
-```julia
-# Compare serial vs parallel performance
-pfeast_benchmark(A, B, (0.5, 1.5), 10)
-
-# Compare all available parallel backends
-feast_parallel_comparison(A, B, (0.5, 1.5), 10)
-
-# Check parallel computing capabilities
-feast_parallel_info()
-
-# Output example:
-# FEAST Parallel Backend Comparison
-# ==================================================
-# Matrix size: 1000
-# Search interval: (0.5, 1.5)
-# Available backends:
-#   Threads: 8
-#   Workers: 4  
-#   MPI: Yes
-# 
-# 1. Serial execution:
-#    Time: 2.345 seconds
-#    Eigenvalues: 7
-# 
-# 2. Threading execution:
-#    Time: 0.412 seconds
-#    Eigenvalues: 7
-#    Speedup: 5.69x
-# 
-# 3. Distributed execution:
-#    Time: 0.523 seconds
-#    Eigenvalues: 7
-#    Speedup: 4.48x
-# 
-# 4. MPI execution:
-#    Time: 0.298 seconds
-#    Eigenvalues: 7
-#    Speedup: 7.87x
-# 
-# 5. Hybrid MPI+Threading:
-#    Time: 0.156 seconds
-#    Eigenvalues: 7
-#    Speedup: 15.03x
-```
-
 ### Automatic Backend Selection
 
 ```julia

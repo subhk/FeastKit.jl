@@ -4,10 +4,10 @@
 title: FEAST.jl Documentation
 description: Fast Eigenvalue Algorithm using Spectral Transformations in Julia
 baseurl: "/FEAST.jl" # the subpath of your site, e.g. /blog
-url: "https://your-username.github.io" # the base hostname & protocol for your site
+url: "https://subhk.github.io" # the base hostname & protocol for your site
 
 # Repository settings
-repository: your-username/FEAST.jl
+repository: subhk/FEAST.jl
 repository_tree: main
 
 # Build settings
@@ -80,7 +80,7 @@ author:
 
 social:
   - platform: github
-    user_url: "https://github.com/your-username/FEAST.jl"
+    user_url: "https://github.com/subhk/FEAST.jl"
   - platform: julia
     user_url: "https://julialang.org"
 

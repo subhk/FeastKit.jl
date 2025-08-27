@@ -1,12 +1,16 @@
 # FEAST.jl
 
-[![Build Status](https://github.com/subhk/FEAST.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/subhk/FEAST.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![CI](https://github.com/subhk/FEAST.jl/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/subhk/FEAST.jl/actions/workflows/ci.yml?query=branch%3Amain)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://subhk.github.io/FEAST.jl/)
 
 A Julia implementation of the FEAST eigenvalue solver for finding eigenvalues and eigenvectors of large-scale eigenvalue problems within a specified region.
 
 ## Overview
 
 FEAST.jl is a pure Julia translation of the original FEAST library. FEAST is a numerical algorithm for solving both standard and generalized eigenvalue problems by computing eigenvalues located inside a given region in the complex plane.
+
+- Website: https://subhk.github.io/FEAST.jl/
+- Zero to FEAST guide: https://subhk.github.io/FEAST.jl/zero_to_feast.html
 
 ### Key Features
 

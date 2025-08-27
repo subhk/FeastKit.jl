@@ -299,7 +299,9 @@ function feast_banded_info(A_banded::Matrix{T}, k::Int, N::Int) where T
     println("  Bandwidth: $(bandwidth)")
     println("  Super-diagonals: $(k)")
     println("  Stored elements: $(stored_elements)")
-    println("  Storage efficiency: $(stored_elements/total_elements*100:.1f)%")
+    # Use Printf for formatted percentage
+    pct = stored_elements / total_elements * 100
+    println("  Storage efficiency: ", Printf.@sprintf("%.1f", pct), "%")
     
     return (N, bandwidth, stored_elements)
 end

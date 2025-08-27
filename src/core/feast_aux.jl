@@ -23,8 +23,12 @@ function check_feast_srci_input(N::Int, M0::Int, Emin::T, Emax::T,
         throw(ArgumentError("fpm array must have at least 64 elements"))
     end
     
-    if fpm[2] < 3
-        throw(ArgumentError("Number of integration points must be at least 3"))
+    # If user provided a positive number of integration points, validate it.
+    # Allow 0 to defer to default handling elsewhere.
+    if length(fpm) >= 2
+        if fpm[2] > 0 && fpm[2] < 3
+            throw(ArgumentError("Number of integration points must be at least 3"))
+        end
     end
     
     return true

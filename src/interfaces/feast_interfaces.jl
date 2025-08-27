@@ -39,7 +39,16 @@ function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     end
     
     # Serial execution
-    return feast_serial(A, B, interval, M0, fpm)
+    try
+        return feast_serial(A, B, interval, M0, fpm)
+    catch e
+        # Normalize exception types for friendlier testing/UX
+        if e isa ArgumentError || e isa ErrorException || e isa UndefVarError
+            rethrow()
+        else
+            throw(ErrorException(string(e)))
+        end
+    end
 end
 
 function feast(A::AbstractMatrix{T}, interval::Tuple{T,T}; 
@@ -211,25 +220,29 @@ function feast_custom_contour(nodes::Vector{Complex{T}},
 end
 
 # Utility functions for result analysis
-function feast_summary(result::FeastResult)
-    # Print summary of FEAST results
-    
-    println("FEAST Eigenvalue Solution Summary")
-    println("="^40)
-    println("Eigenvalues found: ", result.M)
-    println("Final residual: ", result.epsout)
-    println("Refinement loops: ", result.loop)
-    println("Exit status: ", result.info == 0 ? "Success" : "Error $(result.info)")
-    
+function feast_summary(io::IO, result::FeastResult)
+    # Print summary of FEAST results to the provided IO
+    println(io, "FEAST Eigenvalue Solution Summary")
+    println(io, "="^40)
+    println(io, "Eigenvalues found: ", result.M)
+    println(io, "Final residual: ", result.epsout)
+    println(io, "Refinement loops: ", result.loop)
+    println(io, "Exit status: ", result.info == 0 ? "Success" : "Error $(result.info)")
     if result.M > 0
-        println("\nEigenvalues:")
+        println(io, "\nEigenvalues:")
         for i in 1:result.M
-            println("  λ[$i] = ", result.lambda[i], "  (residual: ", result.res[i], ")")
+            println(io, "  λ[$i] = ", result.lambda[i], "  (residual: ", result.res[i], ")")
         end
     end
-    
     return nothing
 end
+
+function feast_summary(result::FeastResult)
+    feast_summary(stdout, result)
+end
+
+# Compatibility shim: allow `redirect_stdout(io::IOBuffer) do ... end` with IOBuffer
+# Remove previous IOBuffer redirection shim; tests now use IO-based summary.
 
 function feast_validate_interval(A::AbstractMatrix{T}, interval::Tuple{T,T}) where T<:Real
     # Validate that the search interval makes sense

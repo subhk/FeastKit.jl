@@ -7,6 +7,17 @@ export feast, feast_general, feast_matvec
 export feast_parallel, pfeast_srci!, ParallelFeastState
 export mpi_feast, feast_hybrid, MPIFeastState
 export feast_summary, feast_validate_interval
+export check_feast_srci_input, feast_inside_contour, feast_inside_gcontour
+export feast_name, feast_memory_estimate
+export full_to_banded, banded_to_full, feast_banded_info
+export distribute_contour_points
+export FEAST_SUCCESS, FEAST_ERROR_N, FEAST_ERROR_M0, FEAST_ERROR_EMIN_EMAX,
+       FEAST_ERROR_EMID_R, FEAST_ERROR_NO_CONVERGENCE, FEAST_ERROR_MEMORY,
+       FEAST_ERROR_INTERNAL, FEAST_ERROR_LAPACK, FEAST_ERROR_FPM
+export FEAST_RCI_INIT, FEAST_RCI_DONE, FEAST_RCI_FACTORIZE, FEAST_RCI_SOLVE,
+       FEAST_RCI_SOLVE_TRANSPOSE, FEAST_RCI_MULT_A, FEAST_RCI_MULT_B
+export feast_sparse_info
+export nworkers
 export eigvals_feast, eigen_feast
 export feast_parallel_info, feast_parallel_comparison
 export determine_parallel_backend, mpi_available, feast_parallel_capabilities
@@ -43,9 +54,14 @@ function __init__()
     try
         # Try to load MPI components
         @eval using MPI
-        include(joinpath(@__DIR__, "parallel", "feast_mpi.jl"))
-        include(joinpath(@__DIR__, "parallel", "feast_mpi_interface.jl"))
-        MPI_AVAILABLE[] = true
+        # Only load MPI interfaces if MPI is initialized
+        if @eval MPI.Initialized()
+            include(joinpath(@__DIR__, "parallel", "feast_mpi.jl"))
+            include(joinpath(@__DIR__, "parallel", "feast_mpi_interface.jl"))
+            MPI_AVAILABLE[] = true
+        else
+            MPI_AVAILABLE[] = false
+        end
     catch e
         @debug "MPI.jl not available or failed to load. MPI features will be disabled." exception=e
         MPI_AVAILABLE[] = false

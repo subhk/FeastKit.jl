@@ -110,3 +110,6 @@ end
     FEAST_ERROR_LAPACK = 8
     FEAST_ERROR_FPM = 9
 end
+
+# Provide `.value` property for enum constants as expected by tests
+Base.getproperty(x::FeastError, s::Symbol) = s === :value ? Int(x) : getfield(x, s)

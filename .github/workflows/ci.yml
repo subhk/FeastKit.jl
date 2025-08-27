@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/**'
+      - 'Project.toml'
+      - 'Manifest.toml'
+      - 'src/**'
+      - 'test/**'
+      - 'docs/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/**'
+      - 'Project.toml'
+      - 'Manifest.toml'
+      - 'src/**'
+      - 'test/**'
+      - 'docs/**'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Julia Tests (${{ matrix.julia-version }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        julia-version: ['1.6', '1.11']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@v1
+        with:
+          version: ${{ matrix.julia-version }}
+
+      - name: Cache Julia artifacts
+        uses: julia-actions/cache@v1
+
+      - name: Instantiate
+        run: julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
+      - name: Run tests
+        env:
+          JULIA_NUM_THREADS: '2'
+        run: julia --project -e 'using Pkg; Pkg.test()'
+
+  docs-links:
+    name: Docs Link Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Link Checker
+        uses: lycheeverse/lychee-action@v1.9.0
+        with:
+          args: >-
+            --verbose --no-progress --max-concurrency 8
+            --exclude-mail
+            --accept 200,206,429
+            docs/**/*.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

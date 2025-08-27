@@ -1,6 +1,6 @@
 # FEAST.jl Documentation
 
-This directory contains the complete documentation for FEAST.jl, designed to be deployed as a modern, interactive web documentation site.
+This directory contains the complete documentation for FEAST.jl. It is configured to be served directly from the repository via GitHub Pages using the `docs/` folder on the `main` branch (no separate gh-pages branch).
 
 ## 📚 Documentation Structure
 
@@ -13,108 +13,33 @@ docs/
 ├── matrix_free_interface.md  # Matrix-free methods guide
 ├── performance.md            # Performance optimization
 ├── custom_contours.md        # Advanced contour integration
-├── mkdocs.yml               # MkDocs configuration
-├── _config.yml              # GitHub Pages configuration
-├── Makefile                 # Build automation
-├── stylesheets/             # Custom CSS styling
-│   ├── extra.css           # Main custom styles
-│   └── julia-highlighting.css # Julia syntax highlighting
-└── javascripts/            # Custom JavaScript
-    ├── mathjax.js          # Mathematical notation
-    └── julia-highlighting.js # Enhanced code highlighting
+├── _config.yml              # GitHub Pages (Jekyll) configuration
+└── assets/                  # Optional images/static assets (add as needed)
 ```
 
 ## 🚀 Quick Start
 
-### View Documentation Locally
+### Publish on GitHub Pages (from main/docs)
 
-1. **Install dependencies**:
-   ```bash
-   cd docs/
-   make install
-   ```
-
-2. **Serve locally**:
-   ```bash
-   make serve
-   ```
-
-3. **Open your browser** to `http://localhost:8000`
-
-### Build Static Site
-
-```bash
-make build
-```
-
-The static site will be generated in the `site/` directory.
+1) In your GitHub repository: Settings → Pages  
+2) Source: Deploy from a branch → Branch: `main`, Folder: `/docs`  
+3) Save. The site will be available at `https://<username>.github.io/<repo>/`
 
 ## 🔧 Build Options
 
-### Using MkDocs (Recommended)
+### Configure site metadata
 
-```bash
-# Install MkDocs and dependencies
-pip install mkdocs mkdocs-material pymdown-extensions
-
-# Serve documentation locally
-mkdocs serve
-
-# Build static documentation  
-mkdocs build
-
-# Deploy to GitHub Pages
-mkdocs gh-deploy
-```
-
-### Using GitHub Pages (Alternative)
-
-1. **Enable GitHub Pages** in repository settings
-2. **Choose source**: `docs/` folder from `main` branch  
-3. **Configure** `_config.yml` with your repository details
-4. **Push changes** - documentation will auto-deploy
-
-### Using Make (Automated)
-
-```bash
-# Full development setup
-make dev-setup
-
-# Start development server
-make serve
-
-# Production build with optimizations
-make prod-build
-
-# Deploy to GitHub Pages
-make deploy
-```
+Edit `docs/_config.yml` and set:
+- `url`: `https://<username>.github.io`
+- `baseurl`: `/<repo>` (e.g. `/FEAST.jl`)
+- `repository`: `<username>/<repo>`
 
 ## 📖 Documentation Features
 
-### 🎨 Modern Design
-- **Material Design** theme with FEAST.jl branding
-- **Dark/light mode** toggle
-- **Responsive** design for all devices
-- **Fast search** with instant results
-
-### 💻 Code Features
-- **Julia syntax highlighting** with FEAST-specific functions
-- **Copy-to-clipboard** for all code blocks
-- **Interactive examples** with expected outputs
-- **Collapsible sections** for long code blocks
-
-### 📊 Mathematical Notation
-- **MathJax** rendering for equations
-- **Custom macros** for FEAST-specific notation
-- **Equation numbering** for references
-- **Interactive math** with hover effects
-
-### 🔍 Navigation
-- **Multi-level navigation** with expand/collapse
-- **Table of contents** for each page
-- **Cross-references** between sections
-- **Search integration** across all content
+### What you get
+- Clear landing page, getting-started guide, “Zero to FEAST” walkthrough
+- API overview and examples
+- Advanced topic stubs you can expand over time
 
 ## 📝 Content Overview
 
@@ -162,26 +87,10 @@ make deploy
 
 ## 🛠️ Customization
 
-### Styling
-Edit `stylesheets/extra.css` to customize:
-- Color scheme and branding
-- Typography and spacing
-- Component styling
-- Responsive behavior
-
-### JavaScript
-Modify `javascripts/` files for:
-- Enhanced code highlighting
-- Interactive features
-- Mathematical notation
-- Custom functionality
-
 ### Configuration
-Update `mkdocs.yml` to change:
-- Site metadata and navigation
-- Plugin configuration
-- Theme settings
-- Build options
+Update `_config.yml` to change:
+- Site metadata and repository links
+- Theme and plugin settings supported by GitHub Pages
 
 ## 📦 Deployment Options
 
@@ -191,31 +100,8 @@ Update `mkdocs.yml` to change:
 3. Choose `docs/` folder as source
 4. Documentation automatically builds and deploys
 
-### GitHub Actions (CI/CD)
-```yaml
-# .github/workflows/docs.yml
-name: Deploy Documentation
-on:
-  push:
-    branches: [ main ]
-    paths: [ 'docs/**' ]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-python@v4
-      with:
-        python-version: 3.x
-    - run: pip install mkdocs-material
-    - run: mkdocs gh-deploy --force
-```
-
 ### Custom Hosting
-1. Run `make build` to generate static site
-2. Deploy `site/` directory to your web server
-3. Configure server for proper routing
+If you prefer to host elsewhere, any static-site host that supports Jekyll can serve `docs/` directly.
 
 ## 🧪 Testing
 
@@ -279,28 +165,10 @@ make stats
 
 ### Common Issues
 
-**MkDocs not found**:
-```bash
-pip install --user mkdocs mkdocs-material
-# or
-make install
-```
-
-**Port already in use**:
-```bash
-mkdocs serve --dev-addr localhost:8001
-# or
-make serve SERVE_PORT=8001
-```
-
-**Build failures**:
-```bash
-# Check configuration
-make validate-config
-
-# Clean and rebuild
-make clean build
-```
+**Pages not updating**:
+- Verify GitHub Pages is set to `main` + `/docs`
+- Check `_config.yml` `url` and `baseurl` are correct
+- Wait a few minutes; Pages builds are asynchronous
 
 ### Getting Help
 
@@ -312,5 +180,5 @@ make clean build
 
 <div align="center">
   <p><strong>Build beautiful, comprehensive documentation for FEAST.jl</strong></p>
-  <p><a href="https://your-domain.github.io/FEAST.jl">View Live Documentation</a></p>
+  <p><a href="https://subhk.github.io/FEAST.jl">View Live Documentation</a></p>
 </div>

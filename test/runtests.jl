@@ -209,11 +209,9 @@ using SparseArrays
         result = FeastResult{Float64, Float64}(lambda, q, 2, res, 0, 1e-12, 3)
         
         # Capture output to avoid cluttering test results
-        captured_output = IOBuffer()
-        redirect_stdout(captured_output) do
-            feast_summary(result)
-        end
-        output_str = String(take!(captured_output))
+        buf = IOBuffer()
+        feast_summary(buf, result)
+        output_str = String(take!(buf))
         @test length(output_str) > 0  # Should produce some output
     end
     

@@ -358,7 +358,8 @@ function feast_sparse_info(A::SparseMatrixCSC)
     println("Sparse Matrix Information:")
     println("  Size: $(N) x $(N)")
     println("  Non-zeros: $(nnz_A)")
-    println("  Density: $(density:.2f)%")
+    # Use Printf for formatted percentage
+    println("  Density: ", Printf.@sprintf("%.2f", density), "%")
     
     return (N, nnz_A, density)
 end

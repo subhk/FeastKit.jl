@@ -11,6 +11,9 @@ function gauss_legendre_point(n::Int, k::Int)
     x = cos(π * (k - 0.25) / (n + 0.5))
     
     # Newton-Raphson refinement
+    # Initialize outside the loop so they are defined for weight calculation
+    p1 = 1.0
+    p2 = 0.0
     for _ in 1:10
         p1 = 1.0
         p2 = 0.0
@@ -34,7 +37,7 @@ function gauss_legendre_point(n::Int, k::Int)
         end
     end
     
-    # Compute weight
+    # Compute weight using last-updated Legendre values
     pp = n * (x * p1 - p2) / (x * x - 1)
     w = 2 / ((1 - x * x) * pp * pp)
     

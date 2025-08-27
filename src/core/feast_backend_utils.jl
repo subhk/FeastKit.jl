@@ -1,5 +1,8 @@
 # Utility functions for parallel backend management and consistency
 
+# Convenience wrapper so `nworkers()` is available when `Distributed` isn't imported by users
+nworkers() = Distributed.nworkers()
+
 # Check if MPI is available
 function mpi_available()
     return isdefined(FEAST, :MPI_AVAILABLE) && FEAST.MPI_AVAILABLE[]

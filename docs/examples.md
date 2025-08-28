@@ -1,6 +1,6 @@
 # Examples and Tutorials
 
-Comprehensive collection of FEAST.jl examples from basic usage to advanced applications.
+Comprehensive collection of Feast.jl examples from basic usage to advanced applications.
 
 ## Table of Contents
 
@@ -15,12 +15,12 @@ Comprehensive collection of FEAST.jl examples from basic usage to advanced appli
 
 ## Basic Examples
 
-### Example 1: Your First FEAST Calculation
+### Example 1: Your First Feast Calculation
 
 **Problem**: Find eigenvalues of a simple symmetric matrix.
 
 ```julia
-using FEAST, LinearAlgebra
+using Feast, LinearAlgebra
 
 # Create a 5×5 symmetric matrix
 A = [4.0  -1.0   0.0   0.0   0.0
@@ -64,7 +64,7 @@ Found 5 eigenvalues
 **Problem**: Find eigenvalues of a large sparse tridiagonal matrix.
 
 ```julia
-using FEAST, SparseArrays, LinearAlgebra
+using Feast, SparseArrays, LinearAlgebra
 
 # Create large sparse tridiagonal matrix  
 n = 1000
@@ -80,7 +80,7 @@ println("Sparse matrix: $(n)×$(n) with $(nnz(A)) nonzeros")
 println("Expected λ₁ ≈ $λ_min")
 println("Expected λ₁₀ ≈ $λ_10")
 
-# FEAST search
+# Feast search
 result = feast(A, (λ_min * 0.9, λ_10 * 1.1), M0=12)
 
 println("\\nFEAST found $(result.M) eigenvalues:")
@@ -97,7 +97,7 @@ end
 **Problem**: Solve A*x = λ*B*x with two different matrices.
 
 ```julia
-using FEAST, LinearAlgebra
+using Feast, LinearAlgebra
 
 # Create matrices A (stiffness) and B (mass)
 n = 100
@@ -141,7 +141,7 @@ end
 **Problem**: Find natural frequencies of a vibrating string.
 
 ```julia
-using FEAST, LinearAlgebra, Plots
+using Feast, LinearAlgebra, Plots
 
 # Physical parameters
 L = 1.0      # String length
@@ -197,7 +197,7 @@ end
 **Problem**: Find vibrational modes of a circular drum.
 
 ```julia
-using FEAST, LinearAlgebra
+using Feast, LinearAlgebra
 
 # 2D Laplacian on square domain (approximating circular drum)
 nx, ny = 50, 50
@@ -274,7 +274,7 @@ end
 **Problem**: Find energy levels of quantum harmonic oscillator.
 
 ```julia
-using FEAST, LinearAlgebra
+using Feast, LinearAlgebra
 
 # 1D Quantum Harmonic Oscillator: H = -½d²/dx² + ½x²
 # Discretized on [-L, L] with N points
@@ -349,7 +349,7 @@ end
 **Problem**: Structural eigenanalysis without storing global matrices.
 
 ```julia
-using FEAST, SparseArrays
+using Feast, SparseArrays
 
 # Simulate large finite element problem  
 # In reality, this would come from FE assembly
@@ -426,10 +426,10 @@ println("Peak memory usage: ~$(8 * n_dofs * result.M / 1e6) MB")
 
 ### Example 8: Iterative Solver Comparison
 
-**Problem**: Compare different iterative solvers for matrix-free FEAST.
+**Problem**: Compare different iterative solvers for matrix-free Feast.
 
 ```julia
-using FEAST, LinearAlgebra, BenchmarkTools
+using Feast, LinearAlgebra, BenchmarkTools
 
 # Test problem: 2D Poisson equation
 nx, ny = 200, 200  
@@ -489,7 +489,7 @@ for (solver_name, description) in solvers
     println("Solver: $description")
     println("  Time: $(time_taken) seconds")
     println("  Eigenvalues found: $(result.M)")
-    println("  FEAST status: $(result.info == 0 ? "Success" : "Failed")")
+    println("  Feast status: $(result.info == 0 ? "Success" : "Failed")")
     println("  Convergence: $(result.epsout)")
     
     if result.M > 0
@@ -523,7 +523,7 @@ end
 **Problem**: Use advanced integration methods for challenging problems.
 
 ```julia
-using FEAST, LinearAlgebra
+using Feast, LinearAlgebra
 
 # Create a challenging matrix (clustered eigenvalues)
 n = 200
@@ -585,7 +585,7 @@ end
 **Problem**: Find eigenvalues of non-Hermitian matrices in complex regions.
 
 ```julia
-using FEAST, LinearAlgebra, Random
+using Feast, LinearAlgebra, Random
 
 Random.seed!(123)
 
@@ -658,7 +658,7 @@ try
     p = scatter(real.(true_eigenvalues), imag.(true_eigenvalues), 
                label="All eigenvalues", alpha=0.6, ms=4)
     scatter!(p, real.(all_found_eigenvalues), imag.(all_found_eigenvalues),
-            label="FEAST found", color=:red, ms=6, alpha=0.8)
+            label="Feast found", color=:red, ms=6, alpha=0.8)
     
     # Draw search circles
     θ = 0:0.1:2π
@@ -684,7 +684,7 @@ end
 **Problem**: Solve quadratic eigenvalue problem (λ²M + λC + K)x = 0.
 
 ```julia
-using FEAST, LinearAlgebra
+using Feast, LinearAlgebra
 
 # Quadratic eigenvalue problem: (λ²M + λC + K)x = 0
 # Example: Damped vibration problem
@@ -700,7 +700,7 @@ println("Quadratic Eigenvalue Problem: (λ²M + λC + K)x = 0")
 println("Damped vibration system")
 println("System size: $(n)×$(n)")
 
-# Convert to matrix-free operators for polynomial FEAST
+# Convert to matrix-free operators for polynomial Feast
 K_op = LinearOperator{ComplexF64}((y, x) -> mul!(y, K, real.(x)), (n, n))
 C_op = LinearOperator{ComplexF64}((y, x) -> mul!(y, C, real.(x)), (n, n))  
 M_op = LinearOperator{ComplexF64}((y, x) -> mul!(y, M, real.(x)), (n, n))
@@ -787,7 +787,7 @@ end
 **Problem**: Compare memory usage of different approaches.
 
 ```julia
-using FEAST, LinearAlgebra, SparseArrays
+using Feast, LinearAlgebra, SparseArrays
 
 # Test different problem sizes and approaches
 problem_sizes = [1000, 5000, 10000, 20000]
@@ -805,7 +805,7 @@ for n in problem_sizes
     nnz_sparse = round(Int, 0.001 * n^2)
     sparse_memory = (8 * nnz_sparse + 4 * (nnz_sparse + n + 1)) / 1e6  # data + indices
     
-    # Matrix-free memory (just vectors for FEAST)
+    # Matrix-free memory (just vectors for Feast)
     M0 = 10
     matfree_memory = 8 * n * M0 / 1e6  # Workspace vectors
     
@@ -863,19 +863,19 @@ end
 
 ### Example 13: Parallel Performance
 
-**Problem**: Demonstrate parallel FEAST capabilities.
+**Problem**: Demonstrate parallel Feast capabilities.
 
 ```julia
-using FEAST, LinearAlgebra, Distributed
+using Feast, LinearAlgebra, Distributed
 
 # Add worker processes
 if nprocs() == 1
     addprocs(4)  # Add 4 worker processes
 end
 
-@everywhere using FEAST, LinearAlgebra
+@everywhere using Feast, LinearAlgebra
 
-println("Parallel FEAST Performance Test")
+println("Parallel Feast Performance Test")
 println("Available processes: $(nprocs())")
 println("Worker processes: $(nworkers())")
 
@@ -893,8 +893,8 @@ println("Max eigenvalues: $M0")
 println("\\n" * "="^50)
 println("Performance Comparison:")
 
-# Serial FEAST
-println("\\nSerial FEAST:")
+# Serial Feast
+println("\\nSerial Feast:")
 GC.gc()  # Clean garbage before timing
 serial_time = @elapsed begin
     result_serial = feast(A, interval, M0=M0, parallel=false)
@@ -904,9 +904,9 @@ println("  Time: $(serial_time) seconds")
 println("  Eigenvalues found: $(result_serial.M)")
 println("  Status: $(result_serial.info == 0 ? "Success" : "Failed")")
 
-# Parallel FEAST with threading  
+# Parallel Feast with threading  
 if Threads.nthreads() > 1
-    println("\\nThreaded FEAST ($(Threads.nthreads()) threads):")
+    println("\\nThreaded Feast ($(Threads.nthreads()) threads):")
     GC.gc()
     threaded_time = @elapsed begin
         result_threaded = feast(A, interval, M0=M0, parallel=:threads)
@@ -918,9 +918,9 @@ if Threads.nthreads() > 1
     println("  Status: $(result_threaded.info == 0 ? "Success" : "Failed")")
 end
 
-# Distributed parallel FEAST
+# Distributed parallel Feast
 if nworkers() > 1
-    println("\\nDistributed FEAST ($(nworkers()) workers):")
+    println("\\nDistributed Feast ($(nworkers()) workers):")
     GC.gc()
     distributed_time = @elapsed begin
         result_distributed = feast(A, interval, M0=M0, parallel=:distributed)
@@ -965,7 +965,7 @@ println("Larger problems generally show better parallel scalability.")
 **Problem**: Find electronic band structure using tight-binding approximation.
 
 ```julia
-using FEAST, LinearAlgebra
+using Feast, LinearAlgebra
 
 # 1D Tight-binding model for electrons in a periodic chain
 # H = -t∑(c†ᵢcᵢ₊₁ + c†ᵢ₊₁cᵢ) + ε∑c†ᵢcᵢ
@@ -1049,7 +1049,7 @@ end
 **Problem**: Linear stability analysis of fluid flow.
 
 ```julia
-using FEAST, LinearAlgebra
+using Feast, LinearAlgebra
 
 # Linear stability analysis of 2D channel flow
 # Solve generalized eigenvalue problem: (A - λB)φ = 0
@@ -1205,7 +1205,7 @@ end
 ---
 
 <div align="center">
-  <p><strong>Complete Examples Collection for FEAST.jl</strong></p>
+  <p><strong>Complete Examples Collection for Feast.jl</strong></p>
   <p>From basic usage to advanced scientific applications</p>
   <p><a href="getting_started.html">← Getting Started</a> | <a href="api_reference.html">API Reference →</a></p>
 </div>

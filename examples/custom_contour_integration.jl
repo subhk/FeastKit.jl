@@ -1,7 +1,7 @@
 # Custom Contour Integration Examples
 # Demonstrates advanced contour integration features following the original Fortran implementation
 
-using FEAST
+using Feast
 using LinearAlgebra, Plots
 
 """
@@ -96,7 +96,7 @@ end
 
 """
 Example 4: Rational Function Evaluation
-Demonstrates evaluation of the FEAST rational function using custom contours
+Demonstrates evaluation of the Feast rational function using custom contours
 """
 function example_rational_function()
     println("\\n=== Example 4: Rational Function Evaluation ===")
@@ -147,7 +147,7 @@ function example_eigenvalue_problem()
     
     # Use different contour types 
     println("\\nUsing Gauss-Legendre integration (8 points):")
-    # This would typically be used in a full FEAST solver
+    # This would typically be used in a full Feast solver
     contour_gauss = feast_contour_expert(Emin, Emax, 8, 0, 100)
     println("Integration nodes generated: $(length(contour_gauss.Zne))")
     
@@ -162,7 +162,7 @@ end
 Run all examples
 """
 function run_all_examples()
-    println("FEAST Custom Contour Integration Examples")
+    println("Feast Custom Contour Integration Examples")
     println("========================================")
     
     try

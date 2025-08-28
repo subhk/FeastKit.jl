@@ -1,6 +1,6 @@
-# Getting Started with FEAST.jl
+# Getting Started with Feast.jl
 
-This guide will get you up and running with FEAST.jl in minutes. Whether you're new to eigenvalue problems or an experienced user, this tutorial covers everything you need to know.
+This guide will get you up and running with Feast.jl in minutes. Whether you're new to eigenvalue problems or an experienced user, this tutorial covers everything you need to know.
 
 ## Table of Contents
 
@@ -17,31 +17,31 @@ This guide will get you up and running with FEAST.jl in minutes. Whether you're 
 
 ### Prerequisites
 
-FEAST.jl requires Julia 1.6 or later. Install Julia from [julialang.org](https://julialang.org/downloads/).
+Feast.jl requires Julia 1.6 or later. Install Julia from [julialang.org](https://julialang.org/downloads/).
 
-### Installing FEAST.jl
+### Installing Feast.jl
 
 ```julia
 # Start Julia and enter package mode with ]
 julia> ]
 
-# Install FEAST.jl
-pkg> add FEAST
+# Install Feast.jl
+pkg> add Feast
 
 # Or for the development version:
-pkg> add https://github.com/your-repo/FEAST.jl.git
+pkg> add https://github.com/your-repo/Feast.jl.git
 
 # Return to Julia mode
 pkg> <backspace>
 
 # Load the package
-julia> using FEAST
+julia> using Feast
 ```
 
 ### Verify Installation
 
 ```julia
-using FEAST, LinearAlgebra
+using Feast, LinearAlgebra
 
 # Create a small test problem
 A = [2.0 -1.0; -1.0 2.0]
@@ -61,7 +61,7 @@ Expected output: `Installation successful! Found 2 eigenvalues.`
 Let's solve a classic eigenvalue problem step by step:
 
 ```julia
-using FEAST, LinearAlgebra
+using Feast, LinearAlgebra
 
 # Step 1: Create a matrix
 # (This is a 1D discrete Laplacian - common in scientific computing)
@@ -81,11 +81,11 @@ println("Searching for eigenvalues in [$Emin, $Emax]")
 ```
 
 ```julia
-# Step 3: Run FEAST
+# Step 3: Run Feast
 # M0 = maximum number of eigenvalues to find
 result = feast(A, (Emin, Emax), M0=10)
 
-println("FEAST completed:")
+println("Feast completed:")
 println("  Status: $(result.info == 0 ? "Success" : "Error")")
 println("  Found: $(result.M) eigenvalues")
 println("  Iterations: $(result.loop)")
@@ -103,7 +103,7 @@ end
 
 ### Understanding What Happened
 
-🎯 **FEAST searched only in `[0.5, 1.5]`** - it didn't compute all eigenvalues  
+🎯 **Feast searched only in `[0.5, 1.5]`** - it didn't compute all eigenvalues  
 ⚡ **Found eigenvalues efficiently** - using contour integration  
 ✅ **Verified convergence** - `result.info == 0` means success  
 📊 **Provided eigenvectors too** - stored in `result.q`
@@ -117,7 +117,7 @@ end
 For problems of the form **A⋅x = λ⋅x**:
 
 ```julia
-using FEAST
+using Feast
 
 # Your matrix (dense, sparse, whatever!)
 A = your_matrix()
@@ -132,7 +132,7 @@ eigenvectors = result.q[:, 1:result.M]
 
 **Real-world example:**
 ```julia
-using FEAST, SparseArrays
+using Feast, SparseArrays
 
 # Large sparse matrix from discretized PDE
 n = 10000
@@ -158,7 +158,7 @@ result = feast(A, B, (Emin, Emax), M0=15)
 
 **Real-world example:**
 ```julia
-using FEAST
+using Feast
 
 # Structural dynamics: K⋅u = ω²⋅M⋅u
 K = stiffness_matrix()  # Stiffness
@@ -202,7 +202,7 @@ result = feast(A_op, (Emin, Emax), M0=10, solver=:cg)
 For non-symmetric matrices with complex eigenvalues:
 
 ```julia
-using FEAST
+using Feast
 
 # Non-symmetric matrix
 A = your_nonsymmetric_matrix()
@@ -224,7 +224,7 @@ complex_eigenvalues = result.lambda[1:result.M]
 
 ### The FeastResult Structure
 
-Every FEAST calculation returns a `FeastResult` with these fields:
+Every Feast calculation returns a `FeastResult` with these fields:
 
 ```julia
 result = feast(A, (Emin, Emax), M0=10)
@@ -283,7 +283,7 @@ println("Orthogonality error: $orthogonality_error")
 **Problem**: You need the 10 eigenvalues closest to 5.0
 
 ```julia
-using FEAST
+using Feast
 
 # Strategy: Search in a small interval around 5.0
 center = 5.0
@@ -303,7 +303,7 @@ end
 **Problem**: How many eigenvalues are in `[0, 1]`?
 
 ```julia
-# Use FEAST to count eigenvalues
+# Use Feast to count eigenvalues
 result = feast(A, (0.0, 1.0), M0=100)  # Large M0 for counting
 
 println("Number of eigenvalues in [0,1]: $(result.M)")
@@ -315,14 +315,14 @@ rational_values = feast_rational(test_points, 0.0, 1.0, fpm)
 
 ### Workflow 3: Parameter Tuning
 
-**Problem**: FEAST isn't converging well
+**Problem**: Feast isn't converging well
 
 ```julia
 # Step 1: Check if eigenvalues exist in your interval
 bounds = feast_validate_interval(A, (Emin, Emax))
 println("Estimated eigenvalue range: $bounds")
 
-# Step 2: Adjust FEAST parameters
+# Step 2: Adjust Feast parameters
 fpm = zeros(Int, 64)
 feastinit!(fpm)
 fpm[1] = 1      # Print level (0=silent, 1=summary, 2=detailed)
@@ -412,13 +412,13 @@ end
 ### Getting Help
 
 - 📖 **Full API**: [API Reference](api_reference.html)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/your-repo/FEAST.jl/issues)  
-- 💬 **Community**: [GitHub Discussions](https://github.com/your-repo/FEAST.jl/discussions)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/your-repo/Feast.jl/issues)  
+- 💬 **Community**: [GitHub Discussions](https://github.com/your-repo/Feast.jl/discussions)
 - 📧 **Contact**: your-email@domain.com
 
 ---
 
 <div align="center">
-  <p><strong>Congratulations! You're now ready to use FEAST.jl effectively.</strong></p>
+  <p><strong>Congratulations! You're now ready to use Feast.jl effectively.</strong></p>
   <p><a href="api_reference.html">Explore the API →</a> | <a href="examples.html">See More Examples →</a></p>
 </div>

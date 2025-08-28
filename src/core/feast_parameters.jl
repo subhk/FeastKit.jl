@@ -1,4 +1,4 @@
-# FEAST parameter initialization and management
+# Feast parameter initialization and management
 # Translated from feast_tools.f90
 
 function feastinit!(fpm::Vector{Int})
@@ -44,7 +44,7 @@ function feastinit()
 end
 
 function feastdefault!(fpm::Vector{Int})
-    # Validate and set default values for FEAST parameters
+    # Validate and set default values for Feast parameters
     length(fpm) >= 64 || throw(ArgumentError("fpm array must have at least 64 elements"))
     
     # Validate fpm[1] - print level

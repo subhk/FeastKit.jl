@@ -1,7 +1,7 @@
-# Matrix-Free FEAST Examples
-# Demonstrates how to use FEAST without storing explicit matrices
+# Matrix-Free Feast Examples
+# Demonstrates how to use Feast without storing explicit matrices
 
-using FEAST
+using Feast
 using LinearAlgebra, SparseArrays
 using Random
 
@@ -48,14 +48,14 @@ function example_tridiagonal_matfree()
     println("Search interval: $interval")
     println("Expected eigenvalues in interval: approximately 6-8")
     
-    # Solve using matrix-free FEAST
-    println("\\nSolving with matrix-free FEAST...")
+    # Solve using matrix-free Feast
+    println("\\nSolving with matrix-free Feast...")
     result = feast(A_op, B_op, interval, M0=10, 
                   solver=:cg,  # CG works well for symmetric positive definite systems
                   solver_opts=(rtol=1e-8, maxiter=1000))
     
     println("Eigenvalues found: $(result.M)")
-    println("FEAST convergence: $(result.info == 0 ? "Success" : "Failed")")
+    println("Feast convergence: $(result.info == 0 ? "Success" : "Failed")")
     println("Final residual: $(result.epsout)")
     println("Refinement loops: $(result.loop)")
     
@@ -77,7 +77,7 @@ end
 """
 Example 2: Finite Difference Laplacian (2D)
 
-Matrix-free FEAST for 2D discrete Laplacian arising from finite differences.
+Matrix-free Feast for 2D discrete Laplacian arising from finite differences.
 This is a common application in PDEs and scientific computing.
 """
 function example_2d_laplacian_matfree()
@@ -137,14 +137,14 @@ function example_2d_laplacian_matfree()
     println("Approximate smallest eigenvalue: $λ_min_approx")
     println("Search interval: $interval")
     
-    # Solve with matrix-free FEAST
-    println("\\nSolving with matrix-free FEAST...")
+    # Solve with matrix-free Feast
+    println("\\nSolving with matrix-free Feast...")
     result = feast(A_op, B_op, interval, M0=15,
                   solver=:cg,
                   solver_opts=(rtol=1e-6, maxiter=500))
     
     println("Eigenvalues found: $(result.M)")
-    println("FEAST status: $(result.info == 0 ? "Success" : "Error $(result.info)")")
+    println("Feast status: $(result.info == 0 ? "Success" : "Error $(result.info)")")
     
     if result.M > 0
         println("\\nSmallest eigenvalues:")
@@ -216,7 +216,7 @@ function example_custom_solver()
         for i in 1:result.M
             closest_true = true_eigvals[argmin(abs.(true_eigvals .- result.lambda[i]))]
             error = abs(result.lambda[i] - closest_true)
-            println("  FEAST: λ[$i] = $(result.lambda[i])")
+            println("  Feast: λ[$i] = $(result.lambda[i])")
             println("  Exact:       λ = $closest_true")
             println("  Error:           $(error)")
             println()
@@ -229,7 +229,7 @@ end
 """
 Example 4: Matrix-Free General (Non-Hermitian) Problem
 
-Demonstrates FEAST for general eigenvalue problems using matrix-free operators.
+Demonstrates Feast for general eigenvalue problems using matrix-free operators.
 """
 function example_general_matfree()
     println("\\n=== Example 4: General (Non-Hermitian) Matrix-Free ===")
@@ -272,7 +272,7 @@ function example_general_matfree()
                           solver_opts=(restart=20, rtol=1e-8))
     
     println("Eigenvalues found: $(result.M)")
-    println("FEAST status: $(result.info == 0 ? "Success" : "Error $(result.info)")")
+    println("Feast status: $(result.info == 0 ? "Success" : "Error $(result.info)")")
     
     if result.M > 0
         println("\\nEigenvalues in search region:")
@@ -333,14 +333,14 @@ function example_sparse_as_matfree()
     println("Approximate largest eigenvalue: $λ_max_approx")
     println("Search interval: $interval")
     
-    # Solve with matrix-free FEAST
-    println("\\nSolving with matrix-free FEAST...")
+    # Solve with matrix-free Feast
+    println("\\nSolving with matrix-free Feast...")
     result = feast(A_op, B_op, interval, M0=8,
                   solver=:gmres,
                   solver_opts=(restart=50, rtol=1e-6, maxiter=200))
     
     println("Eigenvalues found: $(result.M)")
-    println("FEAST status: $(result.info == 0 ? "Success" : "Error $(result.info)")")
+    println("Feast status: $(result.info == 0 ? "Success" : "Error $(result.info)")")
     
     if result.M > 0
         println("\\nLargest eigenvalues:")
@@ -356,7 +356,7 @@ end
 Run all matrix-free examples
 """
 function run_matfree_examples()
-    println("FEAST Matrix-Free Interface Examples")
+    println("Feast Matrix-Free Interface Examples")
     println("=====================================")
     
     try

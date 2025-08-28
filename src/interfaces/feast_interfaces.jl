@@ -1,19 +1,19 @@
-# High-level FEAST interfaces for easy use
-# These provide simplified interfaces to the FEAST algorithms
+# High-level Feast interfaces for easy use
+# These provide simplified interfaces to the Feast algorithms
 
-# Main FEAST interface functions
+# Main Feast interface functions
 function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T}, 
                interval::Tuple{T,T}; M0::Int = 10, 
                fpm::Union{Vector{Int}, Nothing} = nothing,
                parallel::Union{Bool, Symbol} = false,
                use_threads::Bool = true,
                comm = nothing) where T<:Real
-    # Main FEAST interface for generalized eigenvalue problems
+    # Main Feast interface for generalized eigenvalue problems
     # Automatically detects matrix type and calls appropriate solver
     
     Emin, Emax = interval
     
-    # Initialize FEAST parameters if not provided
+    # Initialize Feast parameters if not provided
     if fpm === nothing
         fpm = zeros(Int, 64)
         feastinit!(fpm)
@@ -55,7 +55,7 @@ function feast(A::AbstractMatrix{T}, interval::Tuple{T,T};
                M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing,
                parallel::Union{Bool, Symbol} = false, 
                use_threads::Bool = true, comm = nothing) where T<:Real
-    # FEAST interface for standard eigenvalue problems (B = I)
+    # Feast interface for standard eigenvalue problems (B = I)
     
     N = size(A, 1)
     
@@ -74,10 +74,10 @@ end
 function feast_general(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
                       center::Complex{T}, radius::T; M0::Int = 10,
                       fpm::Union{Vector{Int}, Nothing} = nothing) where T<:Real
-    # FEAST interface for general (non-Hermitian) eigenvalue problems
+    # Feast interface for general (non-Hermitian) eigenvalue problems
     # Uses circular contour in complex plane
     
-    # Initialize FEAST parameters if not provided
+    # Initialize Feast parameters if not provided
     if fpm === nothing
         fpm = zeros(Int, 64)
         feastinit!(fpm)
@@ -95,11 +95,11 @@ end
 function feast_banded(A::Matrix{T}, kla::Int, interval::Tuple{T,T};
                      B::Union{Matrix{T}, Nothing} = nothing, klb::Int = 0,
                      M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing) where T<:Real
-    # FEAST interface for banded matrices
+    # Feast interface for banded matrices
     
     Emin, Emax = interval
     
-    # Initialize FEAST parameters if not provided
+    # Initialize Feast parameters if not provided
     if fpm === nothing
         fpm = zeros(Int, 64)
         feastinit!(fpm)
@@ -151,10 +151,10 @@ end
 function feast_polynomial(coeffs::Vector{<:AbstractMatrix{Complex{T}}},
                          center::Complex{T}, radius::T; M0::Int = 10,
                          fpm::Union{Vector{Int}, Nothing} = nothing) where T<:Real
-    # FEAST for polynomial eigenvalue problems
+    # Feast for polynomial eigenvalue problems
     # P(λ) = coeffs[1] + λ*coeffs[2] + λ²*coeffs[3] + ...
     
-    # Initialize FEAST parameters if not provided
+    # Initialize Feast parameters if not provided
     if fpm === nothing
         fpm = zeros(Int, 64)
         feastinit!(fpm)
@@ -168,13 +168,13 @@ end
 function feast_matvec(A_mul!::Function, B_mul!::Function, N::Int, 
                      interval::Tuple{T,T}; M0::Int = 10,
                      fpm::Union{Vector{Int}, Nothing} = nothing) where T<:Real
-    # FEAST with matrix-free operations
+    # Feast with matrix-free operations
     # A_mul!(y, x) computes y = A*x
     # B_mul!(y, x) computes y = B*x
     
     Emin, Emax = interval
     
-    # Initialize FEAST parameters if not provided
+    # Initialize Feast parameters if not provided
     if fpm === nothing
         fpm = zeros(Int, 64)
         feastinit!(fpm)
@@ -189,7 +189,7 @@ function feast_set_defaults!(fpm::Vector{Int};
                             integration_points::Int = 8,
                             tolerance_exp::Int = 12,
                             max_refinement::Int = 20)
-    # Set common FEAST parameters with user-friendly names
+    # Set common Feast parameters with user-friendly names
     
     fpm[1] = print_level
     fpm[2] = integration_points  
@@ -203,9 +203,9 @@ function feast_custom_contour(nodes::Vector{Complex{T}},
                              A::AbstractMatrix, B::AbstractMatrix;
                              M0::Int = 10,
                              fpm::Union{Vector{Int}, Nothing} = nothing) where T<:Real
-    # FEAST with custom integration contour
+    # Feast with custom integration contour
     
-    # Initialize FEAST parameters if not provided  
+    # Initialize Feast parameters if not provided  
     if fpm === nothing
         fpm = zeros(Int, 64)
         feastinit!(fpm)
@@ -221,8 +221,8 @@ end
 
 # Utility functions for result analysis
 function feast_summary(io::IO, result::FeastResult)
-    # Print summary of FEAST results to the provided IO
-    println(io, "FEAST Eigenvalue Solution Summary")
+    # Print summary of Feast results to the provided IO
+    println(io, "Feast Eigenvalue Solution Summary")
     println(io, "="^40)
     println(io, "Eigenvalues found: ", result.M)
     println(io, "Final residual: ", result.epsout)

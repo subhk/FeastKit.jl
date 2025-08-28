@@ -1,11 +1,11 @@
-# MPI-based parallel FEAST implementation
+# MPI-based parallel Feast implementation
 # True MPI support for HPC clusters and distributed computing
 
 # Note: MPI should already be loaded when this file is included
 using LinearAlgebra
 using SparseArrays
 
-# MPI-specific FEAST state
+# MPI-specific Feast state
 mutable struct MPIFeastState{T<:Real}
     # MPI communication info
     comm::MPI.Comm
@@ -13,7 +13,7 @@ mutable struct MPIFeastState{T<:Real}
     size::Int
     root::Int
     
-    # FEAST parameters
+    # Feast parameters
     N::Int
     M0::Int
     ne::Int
@@ -53,12 +53,12 @@ mutable struct MPIFeastState{T<:Real}
     end
 end
 
-# Main MPI FEAST interface
+# Main MPI Feast interface
 function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                          Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                          comm::MPI.Comm = MPI.COMM_WORLD,
                          root::Int = 0) where T<:Real
-    # MPI parallel FEAST for real symmetric generalized eigenvalue problems
+    # MPI parallel Feast for real symmetric generalized eigenvalue problems
     
     # Initialize MPI if not already done
     if !MPI.Initialized()
@@ -99,12 +99,12 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     # Broadcast initial subspace from root
     MPI.Bcast!(workspace.work, root, comm)
     
-    # Initialize FEAST parameters
+    # Initialize Feast parameters
     feastdefault!(fpm)
     eps_tolerance = feast_tolerance(fpm)
     max_loops = fpm[4]
     
-    # Main FEAST refinement loop
+    # Main Feast refinement loop
     for loop in 1:max_loops
         mpi_state.loop = loop
         
@@ -134,7 +134,7 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             end
             
             if M == 0
-                mpi_state.info = Int(FEAST_ERROR_NO_CONVERGENCE)
+                mpi_state.info = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
             end
             
@@ -151,7 +151,7 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             # Check convergence
             if mpi_state.epsout <= eps_tolerance
                 mpi_state.converged = true
-                mpi_state.info = Int(FEAST_SUCCESS)
+                mpi_state.info = Int(Feast_SUCCESS)
                 break
             end
             
@@ -159,14 +159,14 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             workspace.work[:, 1:M] = workspace.q[:, 1:M]
             
         catch e
-            mpi_state.info = Int(FEAST_ERROR_LAPACK)
+            mpi_state.info = Int(Feast_ERROR_LAPACK)
             break
         end
     end
     
     # Final result processing
     if !mpi_state.converged && mpi_state.info == 0
-        mpi_state.info = Int(FEAST_ERROR_NO_CONVERGENCE)
+        mpi_state.info = Int(Feast_ERROR_NO_CONVERGENCE)
     end
     
     # Count final eigenvalues
@@ -254,12 +254,12 @@ function mpi_compute_residuals!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     MPI.Allreduce!(local_res, res, MPI.SUM, comm)
 end
 
-# MPI sparse FEAST
+# MPI sparse Feast
 function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                           Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                           comm::MPI.Comm = MPI.COMM_WORLD,
                           root::Int = 0) where T<:Real
-    # MPI parallel FEAST for sparse matrices
+    # MPI parallel Feast for sparse matrices
     # Similar structure to dense version but with sparse linear algebra
     
     rank = MPI.Comm_rank(comm)
@@ -291,7 +291,7 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     randn!(workspace.work)
     MPI.Bcast!(workspace.work, root, comm)
     
-    # FEAST parameters
+    # Feast parameters
     feastdefault!(fpm)
     eps_tolerance = feast_tolerance(fpm)
     max_loops = fpm[4]
@@ -325,7 +325,7 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             end
             
             if M == 0
-                mpi_state.info = Int(FEAST_ERROR_NO_CONVERGENCE)
+                mpi_state.info = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
             end
             
@@ -340,21 +340,21 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             
             if mpi_state.epsout <= eps_tolerance
                 mpi_state.converged = true
-                mpi_state.info = Int(FEAST_SUCCESS)
+                mpi_state.info = Int(Feast_SUCCESS)
                 break
             end
             
             workspace.work[:, 1:M] = workspace.q[:, 1:M]
             
         catch e
-            mpi_state.info = Int(FEAST_ERROR_LAPACK)
+            mpi_state.info = Int(Feast_ERROR_LAPACK)
             break
         end
     end
     
     # Final processing
     if !mpi_state.converged && mpi_state.info == 0
-        mpi_state.info = Int(FEAST_ERROR_NO_CONVERGENCE)
+        mpi_state.info = Int(Feast_ERROR_NO_CONVERGENCE)
     end
     
     M = count(i -> feast_inside_contour(workspace.lambda[i], Emin, Emax), 1:M0)
@@ -435,7 +435,7 @@ function mpi_compute_sparse_residuals!(A::SparseMatrixCSC{T,Int}, B::SparseMatri
     MPI.Allreduce!(local_res, res, MPI.SUM, comm)
 end
 
-# High-level MPI FEAST interface
+# High-level MPI Feast interface
 function mpi_feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                    interval::Tuple{T,T}; M0::Int = 10,
                    fpm::Union{Vector{Int}, Nothing} = nothing,
@@ -485,13 +485,13 @@ end
 # MPI performance benchmarking
 function mpi_feast_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple, M0::Int;
                             comm::MPI.Comm = MPI.COMM_WORLD)
-    # Benchmark MPI FEAST performance
+    # Benchmark MPI Feast performance
     
     rank = MPI.Comm_rank(comm)
     size = MPI.Comm_size(comm)
     
     if rank == 0
-        println("MPI FEAST Performance Benchmark")
+        println("MPI Feast Performance Benchmark")
         println("="^40)
         println("Matrix size: $(size(A, 1))")
         println("Search interval: $interval")
@@ -510,7 +510,7 @@ function mpi_feast_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tup
     elapsed_time = end_time - start_time
     
     if rank == 0
-        println("\nMPI FEAST Results:")
+        println("\nMPI Feast Results:")
         println("Time: $(elapsed_time:.3f) seconds")
         println("Eigenvalues found: $(result.M)")
         println("Convergence loops: $(result.loop)")
@@ -540,7 +540,7 @@ function mpi_feast_available()
     end
 end
 
-# Utility: Initialize MPI for FEAST if needed
+# Utility: Initialize MPI for Feast if needed
 function mpi_feast_init()
     if !MPI.Initialized()
         MPI.Init()
@@ -551,7 +551,7 @@ function mpi_feast_init()
     size = MPI.Comm_size(comm)
     
     if rank == 0
-        println("MPI FEAST initialized with $size processes")
+        println("MPI Feast initialized with $size processes")
     end
     
     return comm, rank, size

@@ -1,6 +1,6 @@
 # Performance Guide
 
-Optimize FEAST.jl for maximum performance in your eigenvalue calculations.
+Optimize Feast.jl for maximum performance in your eigenvalue calculations.
 
 ## Table of Contents
 
@@ -15,9 +15,9 @@ Optimize FEAST.jl for maximum performance in your eigenvalue calculations.
 
 ## Performance Overview
 
-### FEAST Algorithm Complexity
+### Feast Algorithm Complexity
 
-The FEAST algorithm has the following computational complexity:
+The Feast algorithm has the following computational complexity:
 
 | Operation | Complexity | Description |
 |-----------|------------|-------------|
@@ -40,7 +40,7 @@ Where T_solve is the cost of solving (zB - A)X = Y linear systems.
 ### Memory Usage Patterns
 
 ```julia
-using FEAST, LinearAlgebra
+using Feast, LinearAlgebra
 
 # Problem sizes and memory requirements
 function memory_analysis(N, M0, ne=8)
@@ -59,7 +59,7 @@ function memory_analysis(N, M0, ne=8)
     println("Workspace vectors: $(workspace_mb) MB")
     println("Integration data: $(integration_mb) MB") 
     println("Reduced matrices: $(reduced_mb) MB")
-    println("Total FEAST memory: $(workspace_mb + integration_mb + reduced_mb) MB")
+    println("Total Feast memory: $(workspace_mb + integration_mb + reduced_mb) MB")
     
     # Matrix storage (if not matrix-free)
     matrix_dense_gb = 8 * N^2 / 1e9
@@ -140,7 +140,7 @@ end
 Different integration methods have varying computational costs:
 
 ```julia
-using FEAST, BenchmarkTools
+using Feast, BenchmarkTools
 
 function benchmark_integration_methods(A, interval)
     methods = [
@@ -236,24 +236,24 @@ end
 ### Shared Memory Parallelization
 
 ```julia
-using FEAST, LinearAlgebra
+using Feast, LinearAlgebra
 BLAS.set_num_threads(8)  # Use 8 threads for BLAS operations
 
-# Enable threading in FEAST
+# Enable threading in Feast
 result = feast(A, interval, M0=20, parallel=:threads)
 ```
 
 ### Distributed Memory Parallelization
 
 ```julia
-using Distributed, FEAST
+using Distributed, Feast
 
 # Add worker processes
 addprocs(4)
 
-@everywhere using FEAST
+@everywhere using Feast
 
-# Distributed FEAST
+# Distributed Feast
 result = feast(A, interval, M0=20, parallel=:mpi)
 ```
 
@@ -310,7 +310,7 @@ end
 ### Sparse Matrix Optimizations
 
 ```julia
-using SparseArrays, FEAST
+using SparseArrays, Feast
 
 function optimize_sparse_feast(A_sparse, interval)
     println("Sparse Matrix Optimization")
@@ -393,10 +393,10 @@ end
 ### Comprehensive Benchmarking Suite
 
 ```julia
-using FEAST, BenchmarkTools, Profile
+using Feast, BenchmarkTools, Profile
 
 function feast_benchmark_suite()
-    println("FEAST.jl Comprehensive Benchmark Suite")
+    println("Feast.jl Comprehensive Benchmark Suite")
     println("="^50)
     
     # Test problems of increasing size
@@ -474,15 +474,15 @@ end
 results = feast_benchmark_suite()
 ```
 
-### Profiling FEAST Performance
+### Profiling Feast Performance
 
 ```julia
 using Profile, ProfileView
 
 function profile_feast(A, interval)
-    println("Profiling FEAST Performance")
+    println("Profiling Feast Performance")
     
-    # Profile a typical FEAST run
+    # Profile a typical Feast run
     @profile result = feast(A, interval, M0=20)
     
     # Show profile results
@@ -507,7 +507,7 @@ profile_feast(A, (0.1, 1.0))
 
 ```julia
 function memory_profile_feast(A, interval)
-    println("Memory Profiling FEAST")
+    println("Memory Profiling Feast")
     
     # Track memory allocation
     GC.gc()  # Clean up before profiling
@@ -548,7 +548,7 @@ end
 
 !!! performance "Parallelization Checklist" 
     - [ ] **BLAS threads**: Set to number of physical cores
-    - [ ] **FEAST parallel**: Use :threads for shared memory
+    - [ ] **Feast parallel**: Use :threads for shared memory
     - [ ] **MPI**: For distributed memory systems  
     - [ ] **Load balancing**: Ensure even work distribution
     - [ ] **Communication**: Minimize for distributed systems
@@ -556,6 +556,6 @@ end
 ---
 
 <div align="center">
-  <p><strong>Optimize your FEAST.jl calculations for maximum performance</strong></p>
+  <p><strong>Optimize your Feast.jl calculations for maximum performance</strong></p>
   <p><a href="examples.html">← Examples</a> | <a href="api_reference.html">API Reference →</a></p>
 </div>

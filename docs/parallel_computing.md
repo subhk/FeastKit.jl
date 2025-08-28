@@ -1,6 +1,6 @@
 # Parallel Computing
 
-FEAST supports multiple parallel backends:
+Feast supports multiple parallel backends:
 
 - Threads: `parallel = :threads`
 - Distributed workers: `parallel = :distributed`
@@ -9,7 +9,7 @@ FEAST supports multiple parallel backends:
 Quick check and usage:
 
 ```julia
-using FEAST
+using Feast
 cap = feast_parallel_capabilities()
 @info cap
 res = feast(A, (Emin, Emax), M0=20, parallel=:threads)

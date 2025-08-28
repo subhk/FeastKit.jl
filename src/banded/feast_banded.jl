@@ -1,9 +1,9 @@
-# FEAST banded matrix routines
+# Feast banded matrix routines
 # Translated from dzfeast_banded.f90
 
 function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
                      Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
-    # FEAST for banded real symmetric generalized eigenvalue problem
+    # Feast for banded real symmetric generalized eigenvalue problem
     # Solves: A*q = lambda*B*q where A and B are symmetric banded matrices
     # kla, klb are the number of super-diagonals of A and B respectively
     
@@ -32,13 +32,13 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
     ipiv = Vector{Int}(undef, N)
     
     while true
-        # Call FEAST RCI kernel
+        # Call Feast RCI kernel
         feast_srci!(ijob, N, Ze, workspace.work, workspace.workc,
                    workspace.Aq, workspace.Sq, fpm, epsout, loop,
                    Emin, Emax, M0, workspace.lambda, workspace.q, 
                    mode, workspace.res, info)
         
-        if ijob[] == Int(FEAST_RCI_FACTORIZE)
+        if ijob[] == Int(Feast_RCI_FACTORIZE)
             # Factorize Ze*B - A for banded matrices
             z = Ze[]
             
@@ -63,11 +63,11 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
             try
                 banded_factors = lu(full_matrix)
             catch e
-                info[] = Int(FEAST_ERROR_LAPACK)
+                info[] = Int(Feast_ERROR_LAPACK)
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_SOLVE)
+        elseif ijob[] == Int(Feast_RCI_SOLVE)
             # Solve linear systems: (Ze*B - A) * X = B * workspace.work
             B_full = banded_to_full(B, klb, N)
             rhs = B_full * workspace.work[:, 1:M0]
@@ -76,17 +76,17 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
                 # Solve with banded factors
                 workspace.workc[:, 1:M0] .= banded_factors \ rhs
             catch e
-                info[] = Int(FEAST_ERROR_LAPACK)
+                info[] = Int(Feast_ERROR_LAPACK)
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_MULT_A)
+        elseif ijob[] == Int(Feast_RCI_MULT_A)
             # Compute A * q for residual calculation using banded multiplication
             M = mode[]
             A_full = banded_to_full(A, kla, N)
             workspace.work[:, 1:M] .= A_full * workspace.q[:, 1:M]
             
-        elseif ijob[] == Int(FEAST_RCI_DONE)
+        elseif ijob[] == Int(Feast_RCI_DONE)
             break
         end
     end
@@ -102,7 +102,7 @@ end
 
 function feast_hbev!(A::Matrix{Complex{T}}, ka::Int,
                      Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
-    # FEAST for banded complex Hermitian eigenvalue problem
+    # Feast for banded complex Hermitian eigenvalue problem
     # Solves: A*q = lambda*q where A is Hermitian banded
     
     N = size(A, 2)
@@ -128,13 +128,13 @@ function feast_hbev!(A::Matrix{Complex{T}}, ka::Int,
     banded_factors = nothing
     
     while true
-        # Call FEAST RCI kernel
+        # Call Feast RCI kernel
         feast_hrci!(ijob, N, Ze, workspace.work, workspace.workc,
                    workspace.zAq, workspace.zSq, fpm, epsout, loop,
                    Emin, Emax, M0, workspace.lambda, workspace.q, 
                    mode, workspace.res, info)
         
-        if ijob[] == Int(FEAST_RCI_FACTORIZE)
+        if ijob[] == Int(Feast_RCI_FACTORIZE)
             # Factorize Ze*I - A for banded Hermitian matrix
             z = Ze[]
             
@@ -146,26 +146,26 @@ function feast_hbev!(A::Matrix{Complex{T}}, ka::Int,
             try
                 banded_factors = lu(full_matrix)
             catch e
-                info[] = Int(FEAST_ERROR_LAPACK)
+                info[] = Int(Feast_ERROR_LAPACK)
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_SOLVE)
+        elseif ijob[] == Int(Feast_RCI_SOLVE)
             # Solve linear systems
             try
                 workspace.workc[:, 1:M0] .= banded_factors \ workspace.workc[:, 1:M0]
             catch e
-                info[] = Int(FEAST_ERROR_LAPACK)
+                info[] = Int(Feast_ERROR_LAPACK)
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_MULT_A)
+        elseif ijob[] == Int(Feast_RCI_MULT_A)
             # Compute A * q for residual calculation
             M = mode[]
             A_full = banded_to_full_hermitian(A, ka, N)
             workspace.work[:, 1:M] .= real.(A_full * workspace.q[:, 1:M])
             
-        elseif ijob[] == Int(FEAST_RCI_DONE)
+        elseif ijob[] == Int(Feast_RCI_DONE)
             break
         end
     end

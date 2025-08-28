@@ -1,4 +1,4 @@
-module FEAST
+module Feast
 
 export feastinit, feastinit!, feastdefault!
 export feast_srci!, feast_hrci!, feast_grci!
@@ -11,11 +11,11 @@ export check_feast_srci_input, feast_inside_contour, feast_inside_gcontour
 export feast_name, feast_memory_estimate
 export full_to_banded, banded_to_full, feast_banded_info
 export distribute_contour_points
-export FEAST_SUCCESS, FEAST_ERROR_N, FEAST_ERROR_M0, FEAST_ERROR_EMIN_EMAX,
-       FEAST_ERROR_EMID_R, FEAST_ERROR_NO_CONVERGENCE, FEAST_ERROR_MEMORY,
-       FEAST_ERROR_INTERNAL, FEAST_ERROR_LAPACK, FEAST_ERROR_FPM
-export FEAST_RCI_INIT, FEAST_RCI_DONE, FEAST_RCI_FACTORIZE, FEAST_RCI_SOLVE,
-       FEAST_RCI_SOLVE_TRANSPOSE, FEAST_RCI_MULT_A, FEAST_RCI_MULT_B
+export Feast_SUCCESS, Feast_ERROR_N, Feast_ERROR_M0, Feast_ERROR_EMIN_EMAX,
+       Feast_ERROR_EMID_R, Feast_ERROR_NO_CONVERGENCE, Feast_ERROR_MEMORY,
+       Feast_ERROR_INTERNAL, Feast_ERROR_LAPACK, Feast_ERROR_FPM
+export Feast_RCI_INIT, Feast_RCI_DONE, Feast_RCI_FACTORIZE, Feast_RCI_SOLVE,
+       Feast_RCI_SOLVE_TRANSPOSE, Feast_RCI_MULT_A, Feast_RCI_MULT_B
 export feast_sparse_info
 export nworkers
 export eigvals_feast, eigen_feast
@@ -46,6 +46,7 @@ include("parallel/feast_parallel.jl")
 include("parallel/feast_parallel_rci.jl")
 include("interfaces/feast_interfaces.jl")
 include("interfaces/feast_matfree.jl")
+include("deprecations.jl")
 
 # Conditional MPI loading - include at end to allow proper loading
 const MPI_AVAILABLE = Ref(false)

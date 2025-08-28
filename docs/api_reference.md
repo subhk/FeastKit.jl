@@ -1,6 +1,6 @@
 # API Reference
 
-Complete reference for all FEAST.jl functions, types, and interfaces.
+Complete reference for all Feast.jl functions, types, and interfaces.
 
 ## Table of Contents
 
@@ -18,7 +18,7 @@ Complete reference for all FEAST.jl functions, types, and interfaces.
 
 ### feast
 
-Main FEAST interface for symmetric/Hermitian eigenvalue problems.
+Main Feast interface for symmetric/Hermitian eigenvalue problems.
 
 ```julia
 feast(A, interval; M0=10, fpm=nothing, kwargs...)
@@ -32,7 +32,7 @@ feast(A, B, interval; M0=10, fpm=nothing, kwargs...)
 
 **Keyword Arguments:**
 - `M0::Int=10`: Maximum number of eigenvalues to find
-- `fpm::Vector{Int}`: FEAST parameter array (auto-initialized if `nothing`)
+- `fpm::Vector{Int}`: Feast parameter array (auto-initialized if `nothing`)
 - `parallel::Union{Bool,Symbol}=false`: Parallelization mode
 - `use_threads::Bool=true`: Enable threading
 - `comm`: MPI communicator (if using MPI)
@@ -56,7 +56,7 @@ result = feast(A, (0, 1), M0=20, fpm=fpm)
 
 ### feast_general
 
-FEAST interface for general (non-Hermitian) eigenvalue problems using circular contours.
+Feast interface for general (non-Hermitian) eigenvalue problems using circular contours.
 
 ```julia
 feast_general(A, B, center, radius; M0=10, fpm=nothing)
@@ -78,7 +78,7 @@ result = feast_general(A, B, 1.0+0.5im, 2.0, M0=10)
 
 ### feast_banded
 
-FEAST interface for banded matrices.
+Feast interface for banded matrices.
 
 ```julia  
 feast_banded(A, kla, interval; B=nothing, klb=0, M0=10, fpm=nothing)
@@ -130,7 +130,7 @@ end
 # Create operator
 A_op = LinearOperator{Float64}(A_mul!, (n, n), issymmetric=true)
 
-# Use with FEAST
+# Use with Feast
 result = feast(A_op, (0.5, 1.5), M0=10, solver=:cg)
 ```
 
@@ -148,7 +148,7 @@ MatrixVecFunction{T}(mul!, size; kwargs...)
 
 ### feast (Matrix-Free)
 
-Matrix-free FEAST interfaces.
+Matrix-free Feast interfaces.
 
 ```julia
 # Symmetric/Hermitian problems
@@ -173,7 +173,7 @@ feast_general(A_op::MatrixFreeOperator{Complex}, B_op, center, radius; kwargs...
 
 ### create_iterative_solver
 
-Create iterative linear solver for matrix-free FEAST.
+Create iterative linear solver for matrix-free Feast.
 
 ```julia
 create_iterative_solver(A_op, B_op, solver_type=:gmres; kwargs...)
@@ -268,7 +268,7 @@ feast_rational_expert(Zne, Wne, lambda)
 
 ### feast (Parallel)
 
-Parallel FEAST interfaces.
+Parallel Feast interfaces.
 
 ```julia
 feast(A, interval; parallel=:mpi, comm=MPI.COMM_WORLD, kwargs...)
@@ -290,7 +290,7 @@ mpi_feast(A, B, interval, comm; kwargs...)
 
 ### ParallelFeastState
 
-State structure for parallel FEAST calculations.
+State structure for parallel Feast calculations.
 
 ```julia
 state = ParallelFeastState(comm, A, B, interval, M0)
@@ -303,7 +303,7 @@ result = feast_parallel!(state)
 
 ### FeastResult
 
-Result structure returned by FEAST calculations.
+Result structure returned by Feast calculations.
 
 ```julia
 struct FeastResult{T<:Real, VT}
@@ -339,7 +339,7 @@ end
 
 ### FeastParameters
 
-FEAST parameter structure.
+Feast parameter structure.
 
 ```julia
 struct FeastParameters
@@ -365,17 +365,17 @@ abstract type MatrixFreeOperator{T} end
 
 ### feastinit!
 
-Initialize FEAST parameter array.
+Initialize Feast parameter array.
 
 ```julia
 feastinit!(fpm::Vector{Int})
 ```
 
-Sets default values for all FEAST parameters.
+Sets default values for all Feast parameters.
 
 ### feastdefault!
 
-Reset FEAST parameters to defaults.
+Reset Feast parameters to defaults.
 
 ```julia
 feastdefault!(fpm::Vector{Int})
@@ -383,7 +383,7 @@ feastdefault!(fpm::Vector{Int})
 
 ### feast_set_defaults!
 
-Set common FEAST parameters with user-friendly names.
+Set common Feast parameters with user-friendly names.
 
 ```julia
 feast_set_defaults!(fpm; print_level=1, integration_points=8, 
@@ -403,7 +403,7 @@ feast_validate_interval(A, interval)
 
 ### feast_summary
 
-Print summary of FEAST results.
+Print summary of Feast results.
 
 ```julia
 feast_summary(result::FeastResult)
@@ -411,7 +411,7 @@ feast_summary(result::FeastResult)
 
 ### eigvals_feast
 
-Extract only eigenvalues from FEAST calculation.
+Extract only eigenvalues from Feast calculation.
 
 ```julia
 eigvals_feast(A, interval; kwargs...)
@@ -422,7 +422,7 @@ eigvals_feast(A, interval; kwargs...)
 
 ### eigen_feast  
 
-Return Eigen object from FEAST calculation.
+Return Eigen object from Feast calculation.
 
 ```julia
 eigen_feast(A, interval; kwargs...)
@@ -448,32 +448,32 @@ allocate_matfree_workspace(T, N, M0)
 
 ## Error Codes
 
-FEAST functions return status codes in `result.info`:
+Feast functions return status codes in `result.info`:
 
 | Code | Name | Description |
 |------|------|-------------|
-| 0 | `FEAST_SUCCESS` | Success |
-| 1 | `FEAST_ERROR_N` | Invalid matrix size N |
-| 2 | `FEAST_ERROR_M0` | Invalid M0 parameter |
-| 3 | `FEAST_ERROR_EMIN_EMAX` | Invalid search interval |
-| 4 | `FEAST_ERROR_EMID_R` | Invalid center/radius for complex problems |
-| 5 | `FEAST_ERROR_NO_CONVERGENCE` | No convergence achieved |
-| 6 | `FEAST_ERROR_MEMORY` | Memory allocation failed |
-| 7 | `FEAST_ERROR_INTERNAL` | Internal error |
-| 8 | `FEAST_ERROR_LAPACK` | Linear algebra error |
-| 9 | `FEAST_ERROR_FPM` | Invalid FEAST parameters |
+| 0 | `Feast_SUCCESS` | Success |
+| 1 | `Feast_ERROR_N` | Invalid matrix size N |
+| 2 | `Feast_ERROR_M0` | Invalid M0 parameter |
+| 3 | `Feast_ERROR_EMIN_EMAX` | Invalid search interval |
+| 4 | `Feast_ERROR_EMID_R` | Invalid center/radius for complex problems |
+| 5 | `Feast_ERROR_NO_CONVERGENCE` | No convergence achieved |
+| 6 | `Feast_ERROR_MEMORY` | Memory allocation failed |
+| 7 | `Feast_ERROR_INTERNAL` | Internal error |
+| 8 | `Feast_ERROR_LAPACK` | Linear algebra error |
+| 9 | `Feast_ERROR_FPM` | Invalid Feast parameters |
 
 **Error handling:**
 ```julia
 result = feast(A, interval)
 
 if result.info != 0
-    error_name = ["FEAST_SUCCESS", "FEAST_ERROR_N", "FEAST_ERROR_M0", 
-                  "FEAST_ERROR_EMIN_EMAX", "FEAST_ERROR_EMID_R",
-                  "FEAST_ERROR_NO_CONVERGENCE", "FEAST_ERROR_MEMORY",
-                  "FEAST_ERROR_INTERNAL", "FEAST_ERROR_LAPACK", 
-                  "FEAST_ERROR_FPM"][result.info + 1]
-    @warn "FEAST failed with $error_name"
+    error_name = ["Feast_SUCCESS", "Feast_ERROR_N", "Feast_ERROR_M0", 
+                  "Feast_ERROR_EMIN_EMAX", "Feast_ERROR_EMID_R",
+                  "Feast_ERROR_NO_CONVERGENCE", "Feast_ERROR_MEMORY",
+                  "Feast_ERROR_INTERNAL", "Feast_ERROR_LAPACK", 
+                  "Feast_ERROR_FPM"][result.info + 1]
+    @warn "Feast failed with $error_name"
 end
 ```
 
@@ -481,7 +481,7 @@ end
 
 ## Parameter Reference
 
-The `fpm` parameter array controls FEAST behavior:
+The `fpm` parameter array controls Feast behavior:
 
 | Index | Parameter | Default | Description |
 |-------|-----------|---------|-------------|
@@ -539,6 +539,6 @@ result = feast(A, interval, M0=10, fpm=fpm)
 ---
 
 <div align="center">
-  <p><strong>Complete API documentation for FEAST.jl</strong></p>
+  <p><strong>Complete API documentation for Feast.jl</strong></p>
   <p><a href="getting_started.html">← Getting Started</a> | <a href="examples.html">Examples →</a></p>
 </div>

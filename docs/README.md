@@ -1,6 +1,6 @@
-# FEAST.jl Documentation
+# Feast.jl Documentation
 
-This directory contains the complete documentation for FEAST.jl. It is configured to be served directly from the repository via GitHub Pages using the `docs/` folder on the `main` branch (no separate gh-pages branch).
+This directory contains the complete documentation for Feast.jl. It is configured to be served directly from the repository via GitHub Pages using the `docs/` folder on the `main` branch (no separate gh-pages branch).
 
 ## 📚 Documentation Structure
 
@@ -31,13 +31,13 @@ docs/
 
 Edit `docs/_config.yml` and set:
 - `url`: `https://<username>.github.io`
-- `baseurl`: `/<repo>` (e.g. `/FEAST.jl`)
+- `baseurl`: `/<repo>` (e.g. `/Feast.jl`)
 - `repository`: `<username>/<repo>`
 
 ## 📖 Documentation Features
 
 ### What you get
-- Clear landing page, getting-started guide, “Zero to FEAST” walkthrough
+- Clear landing page, getting-started guide, “Zero to Feast” walkthrough
 - API overview and examples
 - Advanced topic stubs you can expand over time
 
@@ -55,7 +55,7 @@ Edit `docs/_config.yml` and set:
 
 ## ✨ Key Features Documented
 
-### Core FEAST Algorithm
+### Core Feast Algorithm
 - Standard and generalized eigenvalue problems
 - Real symmetric and complex Hermitian matrices
 - Non-Hermitian general eigenvalue problems
@@ -172,13 +172,13 @@ make stats
 
 ### Getting Help
 
-- **Documentation Issues**: [GitHub Issues](https://github.com/your-repo/FEAST.jl/issues)
+- **Documentation Issues**: [GitHub Issues](https://github.com/your-repo/Feast.jl/issues)
 - **MkDocs Help**: [MkDocs Documentation](https://www.mkdocs.org/)
 - **Material Theme**: [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/)
 
 ---
 
 <div align="center">
-  <p><strong>Build beautiful, comprehensive documentation for FEAST.jl</strong></p>
-  <p><a href="https://subhk.github.io/FEAST.jl">View Live Documentation</a></p>
+  <p><strong>Build beautiful, comprehensive documentation for Feast.jl</strong></p>
+  <p><a href="https://subhk.github.io/Feast.jl">View Live Documentation</a></p>
 </div>

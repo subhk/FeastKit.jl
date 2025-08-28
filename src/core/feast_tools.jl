@@ -1,4 +1,4 @@
-# FEAST utility and contour generation tools
+# Feast utility and contour generation tools
 # Translated from feast_tools.f90
 
 # Helper functions for integration nodes
@@ -47,7 +47,7 @@ end
 function zolotarev_point(n::Int, k::Int)
     # Zolotarev rational approximation points and weights
     # Optimal for elliptical domains - simplified implementation
-    # For full implementation, see original FEAST Fortran code
+    # For full implementation, see original Feast Fortran code
     
     if k == 0  # Special case for initialization
         return 0.0 + 0.0im, 1.0 + 0.0im
@@ -156,7 +156,7 @@ end
 """
     feast_contour_expert(Emin, Emax, ne, integration_type, ellipse_ratio)
 
-Generate FEAST integration contour with expert-level control matching original Fortran implementation.
+Generate Feast integration contour with expert-level control matching original Fortran implementation.
 
 # Arguments
 - `Emin, Emax`: Search interval bounds
@@ -321,7 +321,7 @@ function feast_residual!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     return nothing
 end
 
-# Extract name from FEAST code (similar to feast_name subroutine)
+# Extract name from Feast code (similar to feast_name subroutine)
 function feast_name(code::Int)
     digits = Vector{Int}(undef, 6)
     rem = code

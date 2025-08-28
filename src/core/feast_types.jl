@@ -1,7 +1,7 @@
-# FEAST type definitions and structures
-# Translated from FEAST Fortran library
+# Feast type definitions and structures
+# Translated from Feast Fortran library
 
-# FEAST parameter structure
+# Feast parameter structure
 struct FeastParameters
     fpm::Vector{Int}
     
@@ -16,7 +16,7 @@ struct FeastParameters
     end
 end
 
-# FEAST workspace structure for real symmetric problems
+# Feast workspace structure for real symmetric problems
 mutable struct FeastWorkspaceReal{T<:Real}
     N::Int
     M0::Int
@@ -40,7 +40,7 @@ mutable struct FeastWorkspaceReal{T<:Real}
     end
 end
 
-# FEAST workspace structure for complex Hermitian problems
+# Feast workspace structure for complex Hermitian problems
 mutable struct FeastWorkspaceComplex{T<:Real}
     N::Int
     M0::Int
@@ -64,7 +64,7 @@ mutable struct FeastWorkspaceComplex{T<:Real}
     end
 end
 
-# FEAST result structure
+# Feast result structure
 struct FeastResult{T<:Real, VT}
     lambda::Vector{T}
     q::Matrix{VT}
@@ -86,29 +86,29 @@ struct FeastContour{T<:Real}
     end
 end
 
-# FEAST RCI job identifiers
+# Feast RCI job identifiers
 @enum FeastRCIJob begin
-    FEAST_RCI_INIT = -1
-    FEAST_RCI_DONE = 0
-    FEAST_RCI_FACTORIZE = 10
-    FEAST_RCI_SOLVE = 20
-    FEAST_RCI_SOLVE_TRANSPOSE = 21
-    FEAST_RCI_MULT_A = 30
-    FEAST_RCI_MULT_B = 40
+    Feast_RCI_INIT = -1
+    Feast_RCI_DONE = 0
+    Feast_RCI_FACTORIZE = 10
+    Feast_RCI_SOLVE = 20
+    Feast_RCI_SOLVE_TRANSPOSE = 21
+    Feast_RCI_MULT_A = 30
+    Feast_RCI_MULT_B = 40
 end
 
 # Error codes
 @enum FeastError begin
-    FEAST_SUCCESS = 0
-    FEAST_ERROR_N = 1
-    FEAST_ERROR_M0 = 2
-    FEAST_ERROR_EMIN_EMAX = 3
-    FEAST_ERROR_EMID_R = 4
-    FEAST_ERROR_NO_CONVERGENCE = 5
-    FEAST_ERROR_MEMORY = 6
-    FEAST_ERROR_INTERNAL = 7
-    FEAST_ERROR_LAPACK = 8
-    FEAST_ERROR_FPM = 9
+    Feast_SUCCESS = 0
+    Feast_ERROR_N = 1
+    Feast_ERROR_M0 = 2
+    Feast_ERROR_EMIN_EMAX = 3
+    Feast_ERROR_EMID_R = 4
+    Feast_ERROR_NO_CONVERGENCE = 5
+    Feast_ERROR_MEMORY = 6
+    Feast_ERROR_INTERNAL = 7
+    Feast_ERROR_LAPACK = 8
+    Feast_ERROR_FPM = 9
 end
 
 # Provide `.value` property for enum constants as expected by tests

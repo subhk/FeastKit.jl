@@ -1,6 +1,6 @@
-# Matrix-Free FEAST Interface
+# Matrix-Free Feast Interface
 
-The matrix-free interface allows you to use FEAST without explicitly storing matrices, making it ideal for large-scale problems where memory is limited or when matrices are too expensive to construct.
+The matrix-free interface allows you to use Feast without explicitly storing matrices, making it ideal for large-scale problems where memory is limited or when matrices are too expensive to construct.
 
 ## Overview
 
@@ -16,7 +16,7 @@ Instead of providing explicit matrices `A` and `B`, you provide functions that c
 The main interface for defining matrix-free operators:
 
 ```julia
-using FEAST
+using Feast
 
 # Define matrix-vector multiplication function
 function A_mul!(y, x)
@@ -52,7 +52,7 @@ A_op = MatrixVecFunction{Float64}(A_mul!, (n, n), issymmetric=true)
 ### Standard Eigenvalue Problem (A*x = λ*x)
 
 ```julia
-using FEAST
+using Feast
 
 n = 10000
 
@@ -96,7 +96,7 @@ result = feast(A_op, B_op, (emin, emax), M0=10)
 
 ## Linear Solvers
 
-FEAST requires solving linear systems `(z*B - A)*Y = X` for various values of `z`. You have several options:
+Feast requires solving linear systems `(z*B - A)*Y = X` for various values of `z`. You have several options:
 
 ### Built-in Iterative Solvers
 
@@ -137,7 +137,7 @@ result = feast(A_op, B_op, interval, solver=my_custom_solver)
 
 ### Custom Contour Integration
 
-Use advanced contour integration methods from the original Fortran FEAST:
+Use advanced contour integration methods from the original Fortran Feast:
 
 ```julia
 # Gauss-Legendre integration (high accuracy)
@@ -186,7 +186,7 @@ result = feast_polynomial(coeffs, center, radius, M0=15)
 ### 2D Discrete Laplacian
 
 ```julia
-using FEAST
+using Feast
 
 # Parameters
 nx, ny = 200, 200
@@ -266,7 +266,7 @@ result = feast(A_op, (4.8, 5.2), M0=8, solver=:cg)
 Common issues and solutions:
 
 - **Linear solver convergence**: Increase `maxiter`, decrease `rtol`, or try different solver
-- **FEAST not converging**: Increase `maxiter` in FEAST parameters, adjust `tol` 
+- **Feast not converging**: Increase `maxiter` in Feast parameters, adjust `tol` 
 - **No eigenvalues found**: Check that search interval/region contains eigenvalues
 - **Memory issues**: Use iterative solvers, increase sparsity, consider domain decomposition
 
@@ -282,9 +282,9 @@ The matrix-free interface works well with:
 
 Example with LinearMaps.jl:
 ```julia
-using LinearMaps, FEAST
+using LinearMaps, Feast
 
-# Convert LinearMap to FEAST operator
+# Convert LinearMap to Feast operator
 lmap = LinearMap(your_function!, n)
 A_op = LinearOperator{Float64}((y,x) -> mul!(y, lmap, x), (n, n))
 

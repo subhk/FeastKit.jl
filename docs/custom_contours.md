@@ -1,6 +1,6 @@
 # Custom Contour Integration
 
-Advanced guide to customizing FEAST's contour integration for optimal performance and accuracy.
+Advanced guide to customizing Feast's contour integration for optimal performance and accuracy.
 
 ## Table of Contents
 
@@ -16,7 +16,7 @@ Advanced guide to customizing FEAST's contour integration for optimal performanc
 
 ### Mathematical Foundation
 
-FEAST uses contour integration to compute spectral projectors. For a matrix **A** with eigenvalues λᵢ and eigenvectors xᵢ, the spectral projector is:
+Feast uses contour integration to compute spectral projectors. For a matrix **A** with eigenvalues λᵢ and eigenvectors xᵢ, the spectral projector is:
 
 $$P = \frac{1}{2\pi i} \oint_\Gamma (z\mathbf{I} - \mathbf{A})^{-1} dz$$
 
@@ -24,7 +24,7 @@ Where Γ is a contour enclosing the eigenvalues of interest.
 
 ### Moment-Based Approach
 
-FEAST computes moments of the spectral projector:
+Feast computes moments of the spectral projector:
 
 $$\mathbf{S}_k = \frac{1}{2\pi i} \oint_\Gamma z^k (z\mathbf{B} - \mathbf{A})^{-1} \mathbf{Q} dz$$
 
@@ -47,7 +47,7 @@ $$\mathbf{S}_k \approx \sum_{e=1}^{n_e} w_e z_e^k (z_e\mathbf{B} - \mathbf{A})^{
 **Best for**: High accuracy with minimal points, smooth integrands
 
 ```julia
-using FEAST
+using Feast
 
 # High-accuracy Gauss-Legendre with 16 points
 contour = feast_contour_expert(-1.0, 1.0, 16, 0, 100)
@@ -117,7 +117,7 @@ println("Excellent for clustered eigenvalues")
 ### Designing Your Own Contour
 
 ```julia
-using FEAST, LinearAlgebra
+using Feast, LinearAlgebra
 
 function create_rectangular_contour(xmin, xmax, ymin, ymax, nx, ny)
     """
@@ -160,7 +160,7 @@ end
 nodes, weights = create_rectangular_contour(-1, 3, -2, 2, 20, 16)
 println("Created rectangular contour with $(length(nodes)) points")
 
-# Use with FEAST
+# Use with Feast
 contour = feast_contour_custom_weights!(nodes, weights)
 ```
 
@@ -245,7 +245,7 @@ For problems with eigenvalues at different scales:
 ```julia
 function multi_level_feast(A, eigenvalue_regions; M0_per_region=10)
     """
-    Apply FEAST to multiple regions with customized contours.
+    Apply Feast to multiple regions with customized contours.
     """
     
     all_eigenvalues = Float64[]
@@ -272,7 +272,7 @@ function multi_level_feast(A, eigenvalue_regions; M0_per_region=10)
         contour = feast_contour_expert(region_min, region_max, 
                                      n_points, method, 100)
         
-        # Apply FEAST to this region
+        # Apply Feast to this region
         fpm = zeros(Int, 64)
         feastinit!(fpm)
         fpm[2] = n_points
@@ -588,6 +588,6 @@ diagnostics = diagnose_contour_quality(contour, A, interval)
 ---
 
 <div align="center">
-  <p><strong>Master advanced contour integration techniques with FEAST.jl</strong></p>
+  <p><strong>Master advanced contour integration techniques with Feast.jl</strong></p>
   <p><a href="performance.html">← Performance</a> | <a href="api_reference.html">API Reference →</a></p>
 </div>

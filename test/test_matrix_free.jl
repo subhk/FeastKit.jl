@@ -1,11 +1,11 @@
-# Tests for Matrix-Free FEAST Interface
+# Tests for Matrix-Free Feast Interface
 
 using Test
-using FEAST
+using Feast
 using LinearAlgebra, SparseArrays
 using Random
 
-@testset "Matrix-Free FEAST Tests" begin
+@testset "Matrix-Free Feast Tests" begin
     
     @testset "MatrixFreeOperator Types" begin
         # Test MatrixVecFunction
@@ -84,7 +84,7 @@ using Random
         T = Float64
         N, M0 = 100, 10
         
-        ws = FEAST.allocate_matfree_workspace(T, N, M0)
+        ws = Feast.allocate_matfree_workspace(T, N, M0)
         
         @test size(ws.work) == (N, M0)
         @test size(ws.workc) == (N, M0)

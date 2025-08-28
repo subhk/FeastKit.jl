@@ -1,4 +1,4 @@
-# High-level MPI interfaces for FEAST
+# High-level MPI interfaces for Feast
 # Provides seamless integration between threaded, distributed, and MPI parallelism
 
 # Note: Main feast() interfaces are defined in feast_interfaces.jl
@@ -50,7 +50,7 @@ function feast_hybrid(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     randn!(workspace.work)
     MPI.Bcast!(workspace.work, 0, comm)
     
-    # FEAST parameters
+    # Feast parameters
     feastdefault!(fpm)
     eps_tolerance = feast_tolerance(fpm)
     max_loops = fpm[4]
@@ -88,7 +88,7 @@ function feast_hybrid(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             if M == 0
                 # No eigenvalues found
                 return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
-                                       Int(FEAST_ERROR_NO_CONVERGENCE), zero(T), loop)
+                                       Int(Feast_ERROR_NO_CONVERGENCE), zero(T), loop)
             end
             
             workspace.lambda[1:M] = lambda_red[valid_indices]
@@ -104,7 +104,7 @@ function feast_hybrid(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                 # Converged
                 feast_sort!(workspace.lambda, workspace.q, workspace.res, M)
                 return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M,
-                                       workspace.res[1:M], Int(FEAST_SUCCESS), epsout, loop)
+                                       workspace.res[1:M], Int(Feast_SUCCESS), epsout, loop)
             end
             
             # Prepare for next iteration
@@ -112,14 +112,14 @@ function feast_hybrid(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             
         catch e
             return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
-                                   Int(FEAST_ERROR_LAPACK), zero(T), loop)
+                                   Int(Feast_ERROR_LAPACK), zero(T), loop)
         end
     end
     
     # Did not converge
     M = count(i -> feast_inside_contour(workspace.lambda[i], interval[1], interval[2]), 1:M0)
     return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M,
-                           workspace.res[1:M], Int(FEAST_ERROR_NO_CONVERGENCE),
+                           workspace.res[1:M], Int(Feast_ERROR_NO_CONVERGENCE),
                            maximum(workspace.res[1:M]), max_loops)
 end
 
@@ -176,7 +176,7 @@ end
 function feast_parallel_comparison(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple, M0::Int)
     # Compare performance across all available parallel backends
     
-    println("FEAST Parallel Backend Comparison")
+    println("Feast Parallel Backend Comparison")
     println("="^50)
     println("Matrix size: $(size(A, 1))")
     println("Search interval: $interval")

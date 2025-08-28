@@ -5,7 +5,7 @@ nworkers() = Distributed.nworkers()
 
 # Check if MPI is available
 function mpi_available()
-    return isdefined(FEAST, :MPI_AVAILABLE) && FEAST.MPI_AVAILABLE[]
+    return isdefined(Feast, :MPI_AVAILABLE) && Feast.MPI_AVAILABLE[]
 end
 
 # Determine optimal parallel backend
@@ -44,7 +44,7 @@ function determine_parallel_backend(parallel::Symbol, comm=nothing)
     end
 end
 
-# Execute FEAST with the appropriate backend
+# Execute Feast with the appropriate backend
 function feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads)
     if backend == :mpi && mpi_available()
         return mpi_feast(A, B, interval, M0=M0, fpm=fpm, comm=comm)
@@ -56,7 +56,7 @@ function feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads)
     end
 end
 
-# Serial FEAST execution
+# Serial Feast execution
 function feast_serial(A::AbstractMatrix{T}, B::AbstractMatrix{T}, interval::Tuple{T,T}, M0::Int, fpm::Vector{Int}) where T<:Real
     Emin, Emax = interval
     
@@ -93,7 +93,7 @@ end
 
 # Print parallel backend information
 function feast_parallel_info()
-    println("FEAST Parallel Computing Capabilities")
+    println("Feast Parallel Computing Capabilities")
     println("="^40)
     
     # Threading info

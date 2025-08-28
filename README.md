@@ -1,13 +1,13 @@
 # Feast.jl
 
-[![CI](https://github.com/subhk/FEAST.jl/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/subhk/FEAST.jl/actions/workflows/ci.yml?query=branch%3Amain)
-[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://subhk.github.io/FEAST.jl/)
+[![CI](https://github.com/subhk/Feast.jl/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/subhk/Feast.jl/actions/workflows/ci.yml?query=branch%3Amain)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://subhk.github.io/Feast.jl/)
 
 A Julia implementation of the Feast eigenvalue solver for finding eigenvalues and eigenvectors of large-scale eigenvalue problems within a specified region.
 
 ## Overview
 
-Feast.jl is a pure Julia translation of the original FEAST library. FEAST is a numerical algorithm for solving both standard and generalized eigenvalue problems by computing eigenvalues located inside a given region in the complex plane.
+Feast.jl is a pure Julia translation of the original Feast library. Feast is a numerical algorithm for solving both standard and generalized eigenvalue problems by computing eigenvalues located inside a given region in the complex plane.
 
 ### Key Features
 
@@ -23,7 +23,7 @@ Feast.jl is a pure Julia translation of the original FEAST library. FEAST is a n
 
 ```julia
 using Pkg
-Pkg.add("FEAST")
+Pkg.add("Feast")
 ```
 
 ## Quick Start
@@ -31,7 +31,7 @@ Pkg.add("FEAST")
 ### Basic Usage
 
 ```julia
-using FEAST
+using Feast
 using LinearAlgebra
 
 # Create a test matrix
@@ -78,10 +78,10 @@ result = feast_general(A_complex, B_complex, center, radius, M0=15)
 
 ## Advanced Usage
 
-### Custom FEAST Parameters
+### Custom Feast Parameters
 
 ```julia
-# Initialize FEAST parameters
+# Initialize Feast parameters
 fpm = feastinit()
 
 # Customize parameters
@@ -127,7 +127,7 @@ result = feast_matvec(A_mul!, B_mul!, n, (0.5, 1.5), M0=10)
 
 ## Parallel Computing
 
-FEAST.jl supports parallel computation where each contour integration point is solved independently, leading to significant speedups for large problems.
+Feast.jl supports parallel computation where each contour integration point is solved independently, leading to significant speedups for large problems.
 
 ### Multi-threaded Execution
 
@@ -153,16 +153,16 @@ result = feast(A, (0.5, 1.5), M0=10, parallel=:distributed)
 
 ### MPI Support for HPC Clusters
 
-FEAST.jl provides full MPI support for high-performance computing clusters:
+Feast.jl provides full MPI support for high-performance computing clusters:
 
 ```julia
 using MPI
-using FEAST
+using Feast
 
 # Initialize MPI (if not already done)
 MPI.Init()
 
-# Basic MPI FEAST
+# Basic MPI Feast
 result = feast(A, B, (0.5, 1.5), M0=10, parallel=:mpi)
 
 # Explicit MPI interface with communicator
@@ -194,7 +194,7 @@ mpirun -np 32 julia --threads=4 feast_mpi_example.jl
 Julia script (`feast_mpi_example.jl`):
 ```julia
 using MPI
-using FEAST
+using Feast
 using LinearAlgebra
 
 MPI.Init()
@@ -205,7 +205,7 @@ rank = MPI.Comm_rank(comm)
 size = MPI.Comm_size(comm)
 
 if rank == 0
-    println("Running FEAST on $size MPI processes with $(Threads.nthreads()) threads each")
+    println("Running Feast on $size MPI processes with $(Threads.nthreads()) threads each")
 end
 
 # Large eigenvalue problem
@@ -230,7 +230,7 @@ MPI.Finalize()
 For advanced users, a parallel RCI interface is available:
 
 ```julia
-using FEAST
+using Feast
 
 # Create parallel state
 state = ParallelFeastState{Float64}(ne=8, M0=10, use_parallel=true, use_threads=true)
@@ -250,16 +250,16 @@ while true
     pfeast_srci!(state, N, work, workc, Aq, Sq, fpm, 
                 Emin, Emax, M0, lambda, q, res)
     
-    if state.ijob == FEAST_RCI_PARALLEL_SOLVE.value
+    if state.ijob == Feast_RCI_PARALLEL_SOLVE.value
         # Solve all contour points in parallel
         pfeast_compute_all_contour_points!(state, A, B, work, M0)
         
-    elseif state.ijob == FEAST_RCI_MULT_A.value
+    elseif state.ijob == Feast_RCI_MULT_A.value
         # Compute A*q for residual calculation
         M = state.mode
         work[:, 1:M] .= A * q[:, 1:M]
         
-    elseif state.ijob == FEAST_RCI_DONE.value
+    elseif state.ijob == Feast_RCI_DONE.value
         break
     end
 end
@@ -268,7 +268,7 @@ end
 ### Automatic Backend Selection
 
 ```julia
-# FEAST automatically selects the best available backend
+# Feast automatically selects the best available backend
 result = feast(A, B, (0.5, 1.5), M0=10, parallel=:auto)
 
 # Manual backend selection
@@ -279,7 +279,7 @@ result = feast(A, B, (0.5, 1.5), M0=10, parallel=:serial)   # Force serial
 
 ## Algorithm Overview
 
-FEAST uses contour integration in the complex plane to compute eigenvalues. The key steps are:
+Feast uses contour integration in the complex plane to compute eigenvalues. The key steps are:
 
 1. **Contour Definition**: Define an integration contour enclosing the desired eigenvalues
 2. **Moment Computation**: Compute spectral projector moments using numerical integration  
@@ -293,7 +293,7 @@ The algorithm is particularly effective for:
 
 ## Result Structure
 
-FEAST returns a `FeastResult` object containing:
+Feast returns a `FeastResult` object containing:
 
 ```julia
 struct FeastResult{T<:Real, VT}
@@ -326,11 +326,11 @@ end
 5. **Parallel execution**: Use `parallel=:auto` to automatically select the best backend
 6. **HPC clusters**: Use `parallel=:mpi` or `feast_hybrid()` for optimal cluster performance  
 7. **Hybrid parallelism**: Combine MPI processes with threading for maximum performance
-8. **Load balancing**: FEAST automatically distributes contour points for optimal load balancing
+8. **Load balancing**: Feast automatically distributes contour points for optimal load balancing
 
 ## Limitations
 
-This is a Julia translation of the original FEAST library. Some features from the original may not be fully implemented:
+This is a Julia translation of the original Feast library. Some features from the original may not be fully implemented:
 
 - Custom contour integration is partially implemented
 - Some advanced PFEAST (parallel) features are not included
@@ -339,7 +339,7 @@ This is a Julia translation of the original FEAST library. Some features from th
 ## References
 
 1. E. Polizzi, "Density-matrix-based algorithm for solving eigenvalue problems", Physical Review B 79, 115112 (2009)
-2. FEAST official website: http://www.feast-solver.org
+2. Feast official website: http://www.feast-solver.org
 
 ## Contributing
 
@@ -347,4 +347,4 @@ Contributions are welcome! Please feel free to submit issues, feature requests, 
 
 ## License
 
-This project is licensed under the same terms as the original FEAST library.
+This project is licensed under the same terms as the original Feast library.

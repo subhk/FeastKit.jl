@@ -1,9 +1,9 @@
-using FEAST
+using Feast
 using Test
 using LinearAlgebra
 using SparseArrays
 
-@testset "FEAST.jl" begin
+@testset "Feast.jl" begin
     
     @testset "Parameter initialization" begin
         # Test feastinit
@@ -112,7 +112,7 @@ using SparseArrays
     
     @testset "Utility functions" begin
         # Test feast_name function
-        code = 241500  # Example FEAST code
+        code = 241500  # Example Feast code
         name = feast_name(code)
         @test isa(name, String)
         @test length(name) > 0
@@ -136,9 +136,9 @@ using SparseArrays
     
     @testset "Error handling" begin
         # Test error enum values
-        @test FEAST_SUCCESS.value == 0
-        @test FEAST_ERROR_N.value == 1
-        @test FEAST_ERROR_M0.value == 2
+        @test Feast_SUCCESS.value == 0
+        @test Feast_ERROR_N.value == 1
+        @test Feast_ERROR_M0.value == 2
         
         # Test parameter validation with warnings
         fpm = zeros(Int, 64)
@@ -282,9 +282,9 @@ using SparseArrays
                 A = diagm(0 => 2*ones(n), 1 => -ones(n-1), -1 => -ones(n-1))
                 
                 # Test that MPI interface exists (may not run if MPI not initialized)
-                if isdefined(FEAST, :mpi_feast)
+                if isdefined(Feast, :mpi_feast)
                     # Interface should exist
-                    @test isa(FEAST.mpi_feast, Function)
+                    @test isa(Feast.mpi_feast, Function)
                     
                     # Test availability checker
                     available = mpi_available()

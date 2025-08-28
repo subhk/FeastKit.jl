@@ -4,7 +4,7 @@ using Documenter
 
 # Make the package available when building from the repository without installing
 push!(LOAD_PATH, joinpath(@__DIR__, ".."))
-using FEAST
+using Feast
 
 # Enable pretty URLs on CI (GitHub Actions) and plain URLs locally
 const PRETTY_URLS = get(ENV, "CI", "") == "true"
@@ -50,9 +50,9 @@ makedocs(
 # and add an SSH key secret (DOCUMENTER_KEY) to the repository.
 #
 # deploydocs(
-#     repo = "github.com/subhk/FEAST.jl.git",
+#     repo = "github.com/subhk/Feast.jl.git",
 #     devbranch = "main",
 #     target = "build", # build directory from makedocs
 # )
 
-println("\n FEAST.jl docs built at: ", joinpath(@__DIR__, "build", "index.html"))
+println("\n Feast.jl docs built at: ", joinpath(@__DIR__, "build", "index.html"))

@@ -1,4 +1,4 @@
-# Matrix-Free FEAST Interface
+# Matrix-Free Feast Interface
 # Provides callbacks for matrix-vector operations instead of explicit matrices
 
 using LinearAlgebra
@@ -133,7 +133,7 @@ end
 """
     feast_matfree_srci!(A_op, B_op, interval, M0; kwargs...)
 
-Matrix-free FEAST RCI for real symmetric eigenvalue problems.
+Matrix-free Feast RCI for real symmetric eigenvalue problems.
 
 # Arguments
 - `A_op`: Matrix-free operator for A
@@ -142,7 +142,7 @@ Matrix-free FEAST RCI for real symmetric eigenvalue problems.
 - `M0`: Maximum number of eigenvalues to find
 
 # Keyword Arguments
-- `fpm`: FEAST parameters vector
+- `fpm`: Feast parameters vector
 - `linear_solver`: Function `(y, z, X) -> Y` where `Y = (z*B - A)\\X`
 - `workspace`: Pre-allocated workspace matrices
 - `maxiter`: Maximum refinement iterations
@@ -168,7 +168,7 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
         throw(DimensionMismatch("A_op and B_op must be square and same size"))
     end
     
-    # Initialize FEAST parameters
+    # Initialize Feast parameters
     if fpm === nothing
         fpm = zeros(Int, 64)
         feastinit!(fpm)
@@ -199,30 +199,30 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
     
     # Matrix-free RCI loop
     while true
-        # Call FEAST RCI kernel
+        # Call Feast RCI kernel
         feast_srci!(ijob, N, Ze, work, workc, Aq, Sq, fpm,
                    epsout, loop, Emin, Emax, M0, lambda, q, mode, res, info)
         
-        if ijob[] == Int(FEAST_RCI_DONE)
+        if ijob[] == Int(Feast_RCI_DONE)
             break
-        elseif ijob[] == Int(FEAST_RCI_FACTORIZE)
+        elseif ijob[] == Int(Feast_RCI_FACTORIZE)
             # User should prepare linear solver for (Ze[]*B - A)
             if linear_solver === nothing
                 throw(ArgumentError("Linear solver callback required for matrix-free operation"))
             end
             continue
             
-        elseif ijob[] == Int(FEAST_RCI_SOLVE)
+        elseif ijob[] == Int(Feast_RCI_SOLVE)
             # Solve linear systems: (Ze[]*B - A) * X = work
             # Result should be stored in workc
             try
                 linear_solver(workc, Ze[], work)
             catch e
-                info[] = Int(FEAST_ERROR_LAPACK)
+                info[] = Int(Feast_ERROR_LAPACK)
                 break
             end
             
-        elseif ijob[] == Int(FEAST_RCI_MULT_A)
+        elseif ijob[] == Int(Feast_RCI_MULT_A)
             # Compute A * q, store result in work
             if mode[] == 1
                 # Compute A * q[:, 1:M] where M = mode[]
@@ -232,7 +232,7 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
                 end
             end
             
-        elseif ijob[] == Int(FEAST_RCI_MULT_B) 
+        elseif ijob[] == Int(Feast_RCI_MULT_B) 
             # Compute B * q, store result in work
             if mode[] >= 1
                 M = mode[]
@@ -243,7 +243,7 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
             
         else
             # Unknown RCI code
-            throw(ArgumentError("Unknown FEAST RCI code: $(ijob[])"))
+            throw(ArgumentError("Unknown Feast RCI code: $(ijob[])"))
         end
     end
     
@@ -263,7 +263,7 @@ end
 """
     feast_matfree_grci!(A_op, B_op, center, radius, M0; kwargs...)
 
-Matrix-free FEAST RCI for general (non-Hermitian) eigenvalue problems.
+Matrix-free Feast RCI for general (non-Hermitian) eigenvalue problems.
 """
 function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
                             B_op::MatrixFreeOperator{Complex{T}},
@@ -281,7 +281,7 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
         throw(DimensionMismatch("A_op and B_op must be square and same size"))
     end
     
-    # Initialize FEAST parameters
+    # Initialize Feast parameters
     if fpm === nothing
         fpm = zeros(Int, 64)
         feastinit!(fpm)
@@ -315,36 +315,36 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
         feast_grci!(ijob, N, Ze, work, workc, zAq, zSq, fpm,
                    epsout, loop, center, radius, M0, lambda, q, mode, res, info)
         
-        if ijob[] == Int(FEAST_RCI_DONE)
+        if ijob[] == Int(Feast_RCI_DONE)
             break
-        elseif ijob[] == Int(FEAST_RCI_FACTORIZE)
+        elseif ijob[] == Int(Feast_RCI_FACTORIZE)
             if linear_solver === nothing
                 throw(ArgumentError("Linear solver callback required"))
             end
             continue
             
-        elseif ijob[] == Int(FEAST_RCI_SOLVE)
+        elseif ijob[] == Int(Feast_RCI_SOLVE)
             try
                 linear_solver(workc, Ze[], work)
             catch e
-                info[] = Int(FEAST_ERROR_LAPACK)
+                info[] = Int(Feast_ERROR_LAPACK)
                 break  
             end
             
-        elseif ijob[] == Int(FEAST_RCI_MULT_A)
+        elseif ijob[] == Int(Feast_RCI_MULT_A)
             M = mode[]
             for j in 1:M
                 mul!(view(work, :, j), A_op, view(q, :, j))
             end
             
-        elseif ijob[] == Int(FEAST_RCI_MULT_B)
+        elseif ijob[] == Int(Feast_RCI_MULT_B)
             M = mode[]
             for j in 1:M
                 mul!(view(work, :, j), B_op, view(q, :, j))
             end
             
         else
-            throw(ArgumentError("Unknown FEAST RCI code: $(ijob[])"))
+            throw(ArgumentError("Unknown Feast RCI code: $(ijob[])"))
         end
     end
     
@@ -363,7 +363,7 @@ end
 """
     allocate_matfree_workspace(T, N, M0)
 
-Allocate workspace arrays for matrix-free FEAST operations.
+Allocate workspace arrays for matrix-free Feast operations.
 """
 function allocate_matfree_workspace(::Type{T}, N::Int, M0::Int) where T
     if T <: Real
@@ -390,12 +390,12 @@ function allocate_matfree_workspace(::Type{T}, N::Int, M0::Int) where T
     end
 end
 
-# High-level matrix-free FEAST interfaces
+# High-level matrix-free Feast interfaces
 
 """
     feast(A_op, B_op, interval; kwargs...)
 
-High-level matrix-free FEAST interface for symmetric/Hermitian problems.
+High-level matrix-free Feast interface for symmetric/Hermitian problems.
 
 # Arguments
 - `A_op`: Matrix-free operator for A
@@ -406,7 +406,7 @@ High-level matrix-free FEAST interface for symmetric/Hermitian problems.
 - `M0`: Maximum number of eigenvalues (default: 10)
 - `solver`: Linear solver (:gmres, :bicgstab, :cg, or custom function)
 - `solver_opts`: Options for iterative solver
-- `fpm`: FEAST parameters
+- `fpm`: Feast parameters
 - `tol`: Convergence tolerance
 - `maxiter`: Maximum refinement iterations
 
@@ -443,7 +443,7 @@ end
 """
     feast(A_op, interval; kwargs...)
 
-Matrix-free FEAST for standard eigenvalue problems (B = I).
+Matrix-free Feast for standard eigenvalue problems (B = I).
 """
 function feast(A_op::MatrixFreeOperator{T}, interval::Tuple{T,T}; kwargs...) where T<:Real
     # Create identity operator
@@ -457,7 +457,7 @@ end
 """
     feast_general(A_op, B_op, center, radius; kwargs...)
 
-Matrix-free FEAST for general (non-Hermitian) eigenvalue problems.
+Matrix-free Feast for general (non-Hermitian) eigenvalue problems.
 """
 function feast_general(A_op::MatrixFreeOperator{Complex{T}}, 
                       B_op::MatrixFreeOperator{Complex{T}},
@@ -485,7 +485,7 @@ end
 """
     feast_polynomial(coeffs_ops, center, radius; kwargs...)
 
-Matrix-free FEAST for polynomial eigenvalue problems.
+Matrix-free Feast for polynomial eigenvalue problems.
 P(λ) = coeffs_ops[1] + λ*coeffs_ops[2] + λ²*coeffs_ops[3] + ...
 """
 function feast_polynomial(coeffs_ops::Vector{<:MatrixFreeOperator{Complex{T}}},
@@ -565,7 +565,7 @@ end
 """
     create_iterative_solver(A_op, B_op, solver_type=:gmres; kwargs...)
 
-Create iterative linear solver for matrix-free FEAST.
+Create iterative linear solver for matrix-free Feast.
 
 # Arguments
 - `A_op`, `B_op`: Matrix-free operators

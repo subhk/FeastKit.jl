@@ -1,4 +1,4 @@
-# FEAST kernel routines - Reverse Communication Interface (RCI)
+# Feast kernel routines - Reverse Communication Interface (RCI)
 # Translated from dzfeast.f90
 
 function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}}, 
@@ -9,7 +9,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                      lambda::Vector{T}, q::Matrix{T}, mode::Ref{Int},
                      res::Vector{T}, info::Ref{Int}) where T<:Real
     
-    # FEAST RCI for real symmetric eigenvalue problems
+    # Feast RCI for real symmetric eigenvalue problems
     # Solves: A*q = lambda*B*q where A is symmetric, B is symmetric positive definite
     
     # Static variables (persistent across calls)
@@ -20,24 +20,24 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     state = _feast_srci_state
     
     if ijob[] == -1  # Initialization
-        # Initialize FEAST parameters
+        # Initialize Feast parameters
         feastdefault!(fpm)
         
         # Check input parameters
-        info[] = Int(FEAST_SUCCESS)
+        info[] = Int(Feast_SUCCESS)
         
         if N <= 0
-            info[] = Int(FEAST_ERROR_N)
+            info[] = Int(Feast_ERROR_N)
             return
         end
         
         if M0 <= 0 || M0 > N
-            info[] = Int(FEAST_ERROR_M0)
+            info[] = Int(Feast_ERROR_M0)
             return
         end
         
         if Emin >= Emax
-            info[] = Int(FEAST_ERROR_EMIN_EMAX)
+            info[] = Int(Feast_ERROR_EMIN_EMAX)
             return
         end
         
@@ -68,18 +68,18 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         # Set first integration point
         Ze[] = state[:Zne][1]
         
-        ijob[] = Int(FEAST_RCI_FACTORIZE)
+        ijob[] = Int(Feast_RCI_FACTORIZE)
         return
     end
     
-    # Main FEAST iteration loop
-    if ijob[] == Int(FEAST_RCI_FACTORIZE)
+    # Main Feast iteration loop
+    if ijob[] == Int(Feast_RCI_FACTORIZE)
         # User should factorize (Ze*B - A)
-        ijob[] = Int(FEAST_RCI_SOLVE)
+        ijob[] = Int(Feast_RCI_SOLVE)
         return
     end
     
-    if ijob[] == Int(FEAST_RCI_SOLVE)
+    if ijob[] == Int(Feast_RCI_SOLVE)
         # User has solved linear systems
         e = state[:e]
         ne = state[:ne]
@@ -102,7 +102,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         if e < ne
             # More integration points to process
             Ze[] = Zne[e+1]
-            ijob[] = Int(FEAST_RCI_FACTORIZE)
+            ijob[] = Int(Feast_RCI_FACTORIZE)
             return
         else
             # All integration points processed, solve reduced eigenvalue problem
@@ -129,25 +129,25 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 
                 # Check convergence
                 if M == 0
-                    info[] = Int(FEAST_ERROR_NO_CONVERGENCE)
-                    ijob[] = Int(FEAST_RCI_DONE)
+                    info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                    ijob[] = Int(Feast_RCI_DONE)
                     return
                 end
                 
                 # Compute residuals
-                ijob[] = Int(FEAST_RCI_MULT_A)
+                ijob[] = Int(Feast_RCI_MULT_A)
                 mode[] = 1  # Compute A*q
                 return
                 
             catch e
-                info[] = Int(FEAST_ERROR_LAPACK)
-                ijob[] = Int(FEAST_RCI_DONE)
+                info[] = Int(Feast_ERROR_LAPACK)
+                ijob[] = Int(Feast_RCI_DONE)
                 return
             end
         end
     end
     
-    if ijob[] == Int(FEAST_RCI_MULT_A)
+    if ijob[] == Int(Feast_RCI_MULT_A)
         # User has computed A*q, now compute residuals
         M = state[:M]
         
@@ -163,7 +163,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             # Converged or maximum iterations reached
             feast_sort!(lambda, q, res, M)
             mode[] = M
-            ijob[] = Int(FEAST_RCI_DONE)
+            ijob[] = Int(Feast_RCI_DONE)
         else
             # Start new refinement loop
             loop[] += 1
@@ -176,7 +176,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             work[:, 1:M] = q[:, 1:M]
             
             Ze[] = state[:Zne][1]
-            ijob[] = Int(FEAST_RCI_FACTORIZE)
+            ijob[] = Int(Feast_RCI_FACTORIZE)
         end
     end
 end
@@ -189,7 +189,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                      lambda::Vector{T}, q::Matrix{Complex{T}}, 
                      mode::Ref{Int}, res::Vector{T}, info::Ref{Int}) where T<:Real
     
-    # FEAST RCI for complex Hermitian eigenvalue problems
+    # Feast RCI for complex Hermitian eigenvalue problems
     # Similar structure to feast_srci! but for complex matrices
     
     @static if !@isdefined(_feast_hrci_state)
@@ -201,20 +201,20 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     if ijob[] == -1  # Initialization
         feastdefault!(fpm)
         
-        info[] = Int(FEAST_SUCCESS)
+        info[] = Int(Feast_SUCCESS)
         
         if N <= 0
-            info[] = Int(FEAST_ERROR_N)
+            info[] = Int(Feast_ERROR_N)
             return
         end
         
         if M0 <= 0 || M0 > N
-            info[] = Int(FEAST_ERROR_M0)
+            info[] = Int(Feast_ERROR_M0)
             return
         end
         
         if Emin >= Emax
-            info[] = Int(FEAST_ERROR_EMIN_EMAX)
+            info[] = Int(Feast_ERROR_EMIN_EMAX)
             return
         end
         
@@ -239,7 +239,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         fill!(res, zero(T))
         
         Ze[] = state[:Zne][1]
-        ijob[] = Int(FEAST_RCI_FACTORIZE)
+        ijob[] = Int(Feast_RCI_FACTORIZE)
         return
     end
     
@@ -259,7 +259,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                      lambda::Vector{Complex{T}}, q::Matrix{Complex{T}}, 
                      mode::Ref{Int}, res::Vector{T}, info::Ref{Int}) where T<:Real
     
-    # FEAST RCI for general (non-Hermitian) eigenvalue problems
+    # Feast RCI for general (non-Hermitian) eigenvalue problems
     # Uses circular contour in complex plane
     
     @static if !@isdefined(_feast_grci_state)
@@ -271,20 +271,20 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     if ijob[] == -1  # Initialization
         feastdefault!(fpm)
         
-        info[] = Int(FEAST_SUCCESS)
+        info[] = Int(Feast_SUCCESS)
         
         if N <= 0
-            info[] = Int(FEAST_ERROR_N)
+            info[] = Int(Feast_ERROR_N)
             return
         end
         
         if M0 <= 0 || M0 > N
-            info[] = Int(FEAST_ERROR_M0)
+            info[] = Int(Feast_ERROR_M0)
             return
         end
         
         if r <= 0
-            info[] = Int(FEAST_ERROR_EMID_R)
+            info[] = Int(Feast_ERROR_EMID_R)
             return
         end
         
@@ -309,7 +309,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         fill!(res, zero(T))
         
         Ze[] = state[:Zne][1]
-        ijob[] = Int(FEAST_RCI_FACTORIZE)
+        ijob[] = Int(Feast_RCI_FACTORIZE)
         return
     end
     

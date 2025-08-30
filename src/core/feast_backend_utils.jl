@@ -5,7 +5,7 @@ nworkers() = Distributed.nworkers()
 
 # Check if MPI is available
 function mpi_available()
-    return isdefined(Feast, :MPI_AVAILABLE) && Feast.MPI_AVAILABLE[]
+    return isdefined(FeastKit, :MPI_AVAILABLE) && FeastKit.MPI_AVAILABLE[]
 end
 
 # Determine optimal parallel backend

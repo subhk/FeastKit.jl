@@ -103,13 +103,13 @@ end
 function feast_info_symmetric(fpm::Vector{Int}, N::Int, M0::Int, M::Int,
                              Emin::T, Emax::T, loop::Int, epsout::T,
                              info::Int) where T<:Real
-    # Print Feast information for symmetric/Hermitian problems
+    # Print FeastKit information for symmetric/Hermitian problems
     
     if fpm[1] == 0  # No output
         return
     end
     
-    println("Feast Eigenvalue Solver - Symmetric/Hermitian")
+    println("FeastKit Eigenvalue Solver - Symmetric/Hermitian")
     println("="^50)
     println("Matrix size (N): ", N)
     println("Search subspace size (M0): ", M0)
@@ -121,7 +121,7 @@ function feast_info_symmetric(fpm::Vector{Int}, N::Int, M0::Int, M::Int,
     println("Exit code (info): ", info)
     
     if info == 0
-        println("✓ Feast converged successfully")
+        println("✓ FeastKit converged successfully")
     elseif info == 1
         println("⚠ Invalid matrix size")
     elseif info == 2
@@ -129,9 +129,9 @@ function feast_info_symmetric(fpm::Vector{Int}, N::Int, M0::Int, M::Int,
     elseif info == 3
         println("⚠ Invalid search interval")
     elseif info == 5
-        println("⚠ Feast did not converge")
+        println("⚠ FeastKit did not converge")
     else
-        println("⚠ Feast terminated with error code: ", info)
+        println("⚠ FeastKit terminated with error code: ", info)
     end
     
     println("="^50)
@@ -140,13 +140,13 @@ end
 function feast_info_general(fpm::Vector{Int}, N::Int, M0::Int, M::Int,
                            Emid::Complex{T}, r::T, loop::Int, epsout::T,
                            info::Int) where T<:Real
-    # Print Feast information for general problems
+    # Print FeastKit information for general problems
     
     if fpm[1] == 0  # No output
         return
     end
     
-    println("Feast Eigenvalue Solver - General")
+    println("FeastKit Eigenvalue Solver - General")
     println("="^50)
     println("Matrix size (N): ", N)
     println("Search subspace size (M0): ", M0)
@@ -159,9 +159,9 @@ function feast_info_general(fpm::Vector{Int}, N::Int, M0::Int, M::Int,
     println("Exit code (info): ", info)
     
     if info == 0
-        println("✓ Feast converged successfully")
+        println("✓ FeastKit converged successfully")
     else
-        println("⚠ Feast terminated with error code: ", info)
+        println("⚠ FeastKit terminated with error code: ", info)
     end
     
     println("="^50)
@@ -215,7 +215,7 @@ function feast_trace_eigenvalues(lambda::Vector{T}, q::Matrix{VT},
 end
 
 function feast_memory_estimate(N::Int, M0::Int, precision::Type{T}) where T<:Real
-    # Estimate memory requirements for Feast
+    # Estimate memory requirements for FeastKit
     
     # Main workspace arrays
     work_size = N * M0 * sizeof(T)
@@ -225,7 +225,7 @@ function feast_memory_estimate(N::Int, M0::Int, precision::Type{T}) where T<:Rea
     
     total_size = work_size + workc_size + reduced_size + eigen_size
     
-    println("Feast Memory Estimate:")
+    println("FeastKit Memory Estimate:")
     println("  Workspace (real): ", @sprintf("%.2f MB", work_size / 1024^2))
     println("  Workspace (complex): ", @sprintf("%.2f MB", workc_size / 1024^2))
     println("  Reduced matrices: ", @sprintf("%.2f MB", reduced_size / 1024^2))

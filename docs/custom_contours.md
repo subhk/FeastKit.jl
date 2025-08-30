@@ -3,7 +3,7 @@
 ```@id custom-contours
 ```
 
-Advanced guide to customizing Feast's contour integration for optimal performance and accuracy.
+Advanced guide to customizing FeastKit's contour integration for optimal performance and accuracy.
 
 ## Table of Contents
 
@@ -19,7 +19,7 @@ Advanced guide to customizing Feast's contour integration for optimal performanc
 
 ### Mathematical Foundation
 
-Feast uses contour integration to compute spectral projectors. For a matrix **A** with eigenvalues λᵢ and eigenvectors xᵢ, the spectral projector is:
+The FEAST algorithm uses contour integration to compute spectral projectors. For a matrix **A** with eigenvalues λᵢ and eigenvectors xᵢ, the spectral projector is:
 
 $$P = \frac{1}{2\pi i} \oint_\Gamma (z\mathbf{I} - \mathbf{A})^{-1} dz$$
 
@@ -27,7 +27,7 @@ Where Γ is a contour enclosing the eigenvalues of interest.
 
 ### Moment-Based Approach
 
-Feast computes moments of the spectral projector:
+FeastKit computes moments of the spectral projector:
 
 $$\mathbf{S}_k = \frac{1}{2\pi i} \oint_\Gamma z^k (z\mathbf{B} - \mathbf{A})^{-1} \mathbf{Q} dz$$
 
@@ -163,7 +163,7 @@ end
 nodes, weights = create_rectangular_contour(-1, 3, -2, 2, 20, 16)
 println("Created rectangular contour with $(length(nodes)) points")
 
-# Use with Feast
+# Use with FeastKit
 contour = feast_contour_custom_weights!(nodes, weights)
 ```
 
@@ -248,7 +248,7 @@ For problems with eigenvalues at different scales:
 ```julia
 function multi_level_feast(A, eigenvalue_regions; M0_per_region=10)
     """
-    Apply Feast to multiple regions with customized contours.
+    Apply FeastKit to multiple regions with customized contours.
     """
     
     all_eigenvalues = Float64[]
@@ -275,7 +275,7 @@ function multi_level_feast(A, eigenvalue_regions; M0_per_region=10)
         contour = feast_contour_expert(region_min, region_max, 
                                      n_points, method, 100)
         
-        # Apply Feast to this region
+        # Apply FeastKit to this region
         fpm = zeros(Int, 64)
         feastinit!(fpm)
         fpm[2] = n_points

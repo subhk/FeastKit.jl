@@ -99,7 +99,7 @@ result = feast(A_op, B_op, (emin, emax), M0=10)
 
 ## Linear Solvers
 
-Feast requires solving linear systems `(z*B - A)*Y = X` for various values of `z`. You have several options:
+FeastKit requires solving linear systems `(z*B - A)*Y = X` for various values of `z`. You have several options:
 
 ### Built-in Iterative Solvers
 

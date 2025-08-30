@@ -866,7 +866,7 @@ end
 
 ### Example 13: Parallel Performance
 
-**Problem**: Demonstrate parallel Feast capabilities.
+**Problem**: Demonstrate parallel FeastKit capabilities.
 
 ```julia
 using FeastKit, LinearAlgebra, Distributed
@@ -896,7 +896,7 @@ println("Max eigenvalues: $M0")
 println("\\n" * "="^50)
 println("Performance Comparison:")
 
-# Serial Feast
+# Serial FeastKit
 println("\\nSerial FeastKit:")
 GC.gc()  # Clean garbage before timing
 serial_time = @elapsed begin
@@ -907,7 +907,7 @@ println("  Time: $(serial_time) seconds")
 println("  Eigenvalues found: $(result_serial.M)")
 println("  Status: $(result_serial.info == 0 ? "Success" : "Failed")")
 
-# Parallel Feast with threading  
+# Parallel FeastKit with threading  
 if Threads.nthreads() > 1
     println("\\nThreaded FeastKit ($(Threads.nthreads()) threads):")
     GC.gc()
@@ -921,7 +921,7 @@ if Threads.nthreads() > 1
     println("  Status: $(result_threaded.info == 0 ? "Success" : "Failed")")
 end
 
-# Distributed parallel Feast
+# Distributed parallel FeastKit
 if nworkers() > 1
     println("\\nDistributed FeastKit ($(nworkers()) workers):")
     GC.gc()

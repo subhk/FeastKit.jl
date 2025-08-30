@@ -37,7 +37,7 @@ Edit `docs/_config.yml` and set:
 ## 📖 Documentation Features
 
 ### What you get
-- Clear landing page, getting-started guide, “Zero to Feast” walkthrough
+- Clear landing page, getting-started guide, “Zero to FeastKit” walkthrough
 - API overview and examples
 - Advanced topic stubs you can expand over time
 
@@ -55,7 +55,7 @@ Edit `docs/_config.yml` and set:
 
 ## ✨ Key Features Documented
 
-### Core Feast Algorithm
+### Core FEAST Algorithm
 - Standard and generalized eigenvalue problems
 - Real symmetric and complex Hermitian matrices
 - Non-Hermitian general eigenvalue problems

@@ -362,11 +362,11 @@ result = feast(A, interval, M0=10, fpm=fpm)
 
 Ready to dive deeper? Explore these advanced topics:
 
-- 🔧 [Matrix-Free Interface](matrix_free_interface.html) - For large-scale problems
-- ⚡ [Parallel Computing](parallel_computing.html) - MPI and threading  
-- 🎨 [Custom Contours](custom_contours.html) - Advanced integration methods
-- 📊 [Performance Optimization](performance.html) - Speed and memory tips
-- 🧪 [Advanced Examples](advanced_examples.html) - Real-world applications
+- 🔧 [Matrix-Free Interface](matrix_free_interface.md) - For large-scale problems
+- ⚡ [Parallel Computing](parallel_computing.md) - MPI and threading  
+- 🎨 [Custom Contours](custom_contours.md) - Advanced integration methods
+- 📊 [Performance Optimization](performance.md) - Speed and memory tips
+- 🧪 [Examples](examples.md) - Real-world applications
 
 ### Quick Navigation
 
@@ -374,10 +374,10 @@ Ready to dive deeper? Explore these advanced topics:
 |---------------|----------|
 | **Get started immediately** | [Quick Start](#quick-start) |
 | **See working examples** | [Examples Gallery](#examples) |
-| **Find function documentation** | [API Reference](api_reference.html) |
-| **Solve very large problems** | [Matrix-Free Guide](matrix_free_interface.html) |
-| **Use multiple processors** | [Parallel Computing](parallel_computing.html) |
-| **Optimize performance** | [Performance Guide](performance.html) |
+| **Find function documentation** | [API Reference](api_reference.md) |
+| **Solve very large problems** | [Matrix-Free Guide](matrix_free_interface.md) |
+| **Use multiple processors** | [Parallel Computing](parallel_computing.md) |
+| **Optimize performance** | [Performance Guide](performance.md) |
 
 ---
 

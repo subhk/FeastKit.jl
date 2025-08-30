@@ -369,20 +369,20 @@ println("Memory used: $(Base.summarysize(result) / 1e6) MB")
 Now that you understand the basics, explore these advanced topics:
 
 #### 🚀 **Performance Optimization**
-- [Matrix-Free Interface](matrix_free_interface.html) - Handle matrices too large for memory
-- [Parallel Computing](parallel_computing.html) - Use multiple cores and nodes
-- [Performance Tips](performance.html) - Speed and memory optimization
+- [Matrix-Free Interface](matrix_free_interface.md) - Handle matrices too large for memory
+- [Parallel Computing](parallel_computing.md) - Use multiple cores and nodes
+- [Performance Tips](performance.md) - Speed and memory optimization
 
 #### 🎯 **Advanced Features**  
-- [Custom Contour Integration](custom_contours.html) - Zolotarev, Gauss-Legendre methods
-- [Complex Eigenvalues](complex_eigenvalues.html) - Non-Hermitian problems
-- [Polynomial Eigenvalue Problems](polynomial.html) - Quadratic and higher-order
+- [Custom Contour Integration](custom_contours.md) - Zolotarev, Gauss-Legendre methods
+- [Complex Eigenvalues](complex_eigenvalues.md) - Non-Hermitian problems
+- [Polynomial Eigenvalue Problems](polynomial_problems.md) - Quadratic and higher-order
 
 #### 📚 **Real Applications**
-- [Structural Dynamics](examples/structural.html) - Vibration analysis
-- [Quantum Mechanics](examples/quantum.html) - Electronic structure
-- [Fluid Dynamics](examples/fluid.html) - Stability analysis
-- [Network Analysis](examples/networks.html) - Graph eigenvalues
+- [Structural Dynamics](examples.md) - Vibration analysis
+- [Quantum Mechanics](examples.md) - Electronic structure
+- [Fluid Dynamics](examples.md) - Stability analysis
+- [Network Analysis](examples.md) - Graph eigenvalues
 
 ### Quick Reference Card
 
@@ -411,7 +411,7 @@ end
 
 ### Getting Help
 
-- 📖 **Full API**: [API Reference](api_reference.html)
+- 📖 **Full API**: [API Reference](api_reference.md)
 - 🐛 **Issues**: [GitHub Issues](https://github.com/your-repo/FeastKit.jl/issues)  
 - 💬 **Community**: [GitHub Discussions](https://github.com/your-repo/FeastKit.jl/discussions)
 - 📧 **Contact**: your-email@domain.com

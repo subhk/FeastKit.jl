@@ -14,7 +14,7 @@ makedocs(
     modules = [FeastKit],
     authors = "FeastKit.jl Contributors",
     source = @__DIR__,
-    build = joinpath(@__DIR__, "build"),
+    build = joinpath(@__DIR__, "..", "docs-build"),
     clean = true,
     doctest = false,
     format = Documenter.HTML(
@@ -55,4 +55,4 @@ makedocs(
 #     target = "build", # build directory from makedocs
 # )
 
-println("\n FeastKit.jl docs built at: ", joinpath(@__DIR__, "build", "index.html"))
+println("\n FeastKit.jl docs built at: ", joinpath(@__DIR__, "..", "docs-build", "index.html"))

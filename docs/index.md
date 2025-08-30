@@ -1,7 +1,5 @@
-# FeastKit.jl Documentation
+# FeastKit.jl Documentation {#home}
 
-```@id home
-```
 
 <div align="center">
   <h1>FeastKit.jl</h1>

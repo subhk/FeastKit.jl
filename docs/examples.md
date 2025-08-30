@@ -1,4 +1,4 @@
-# Examples and Tutorials
+# Examples and Tutorials {#examples}
 
 ```@id examples
 ```

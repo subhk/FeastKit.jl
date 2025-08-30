@@ -1,7 +1,5 @@
-# API Reference
+# API Reference {#api-reference}
 
-```@id api-reference
-```
 
 Complete reference for all FeastKit.jl functions, types, and interfaces.
 

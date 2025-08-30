@@ -1,6 +1,6 @@
-# FeastKit.jl Documentation {#home}
+# FeastKit.jl Documentation {#home_page}
 
-```@id home
+```@id home_page
 ```
 
 

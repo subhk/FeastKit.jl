@@ -1,6 +1,6 @@
-# Matrix-Free FeastKit Interface {#matrix-free-interface}
+# Matrix-Free FeastKit Interface {#matrix_free_interface}
 
-```@id matrix-free-interface
+```@id matrix_free_interface
 ```
 
 

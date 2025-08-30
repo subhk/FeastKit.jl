@@ -1,6 +1,6 @@
-# Polynomial Eigenvalue Problems {#polynomial-problems}
+# Polynomial Eigenvalue Problems {#polynomial_problems}
 
-```@id polynomial-problems
+```@id polynomial_problems
 ```
 
 

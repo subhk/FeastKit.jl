@@ -1,6 +1,6 @@
-# Examples and Tutorials {#examples}
+# Examples and Tutorials {#examples_page}
 
-```@id examples
+```@id examples_page
 ```
 
 ```@id examples
@@ -1213,5 +1213,5 @@ end
 <div align="center">
   <p><strong>Complete Examples Collection for FeastKit.jl</strong></p>
   <p>From basic usage to advanced scientific applications</p>
-  ← [Getting Started](@ref "getting-started") | [API Reference](@ref "api-reference") →
+  ← [Getting Started](@ref "getting_started") | [API Reference](@ref "api_reference") →
 </div>

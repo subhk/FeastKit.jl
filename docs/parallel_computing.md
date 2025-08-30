@@ -1,6 +1,6 @@
-# Parallel Computing {#parallel-computing}
+# Parallel Computing {#parallel_computing}
 
-```@id parallel-computing
+```@id parallel_computing
 ```
 
 

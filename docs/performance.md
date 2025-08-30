@@ -1,6 +1,6 @@
-# Performance Guide {#performance-guide}
+# Performance Guide {#performance_guide}
 
-```@id performance-guide
+```@id performance_guide
 ```
 
 
@@ -561,5 +561,5 @@ end
 
 <div align="center">
   <p><strong>Optimize your FeastKit.jl calculations for maximum performance</strong></p>
-  ← [Examples](@ref "examples") | [API Reference](@ref "api-reference") →
+  ← [Examples](@ref "examples_page") | [API Reference](@ref "api_reference") →
 </div>

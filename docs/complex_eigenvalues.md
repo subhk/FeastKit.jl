@@ -1,6 +1,6 @@
-# Complex Eigenvalues (Non-Hermitian) {#complex-eigenvalues}
+# Complex Eigenvalues (Non-Hermitian) {#complex_eigenvalues}
 
-```@id complex-eigenvalues
+```@id complex_eigenvalues
 ```
 
 

@@ -1,6 +1,6 @@
-# Custom Contour Integration {#custom-contours}
+# Custom Contour Integration {#custom_contours}
 
-```@id custom-contours
+```@id custom_contours
 ```
 
 
@@ -593,5 +593,5 @@ diagnostics = diagnose_contour_quality(contour, A, interval)
 
 <div align="center">
   <p><strong>Master advanced contour integration techniques with FeastKit.jl</strong></p>
-  ← [Performance](@ref "performance-guide") | [API Reference](@ref "api-reference") →
+  ← [Performance](@ref "performance_guide") | [API Reference](@ref "api_reference") →
 </div>

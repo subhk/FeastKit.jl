@@ -1,5 +1,5 @@
-# Matrix-Free Feast Examples
-# Demonstrates how to use Feast without storing explicit matrices
+# Matrix-Free FeastKit Examples
+# Demonstrates how to use FeastKit without storing explicit matrices
 
 using FeastKit
 using LinearAlgebra, SparseArrays
@@ -48,8 +48,8 @@ function example_tridiagonal_matfree()
     println("Search interval: $interval")
     println("Expected eigenvalues in interval: approximately 6-8")
     
-    # Solve using matrix-free Feast
-    println("\\nSolving with matrix-free Feast...")
+    # Solve using matrix-free FeastKit
+    println("\\nSolving with matrix-free FeastKit...")
     result = feast(A_op, B_op, interval, M0=10, 
                   solver=:cg,  # CG works well for symmetric positive definite systems
                   solver_opts=(rtol=1e-8, maxiter=1000))

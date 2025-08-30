@@ -1,4 +1,4 @@
-# Parallel RCI (Reverse Communication Interface) for Feast
+# Parallel RCI (Reverse Communication Interface) for FeastKit
 # Maintains the RCI interface while enabling parallel contour point computation
 
 # Parallel RCI state management
@@ -43,7 +43,7 @@ mutable struct ParallelFeastState{T<:Real}
     end
 end
 
-# Parallel Feast RCI for real symmetric problems
+# Parallel FeastKit RCI for real symmetric problems
 function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
                       work::Matrix{T}, workc::Matrix{Complex{T}},
                       Aq::Matrix{T}, Sq::Matrix{T}, fpm::Vector{Int},
@@ -307,7 +307,7 @@ function feast_parallel(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                         fpm::Union{Vector{Int}, Nothing} = nothing,
                         use_threads::Bool = true,
                         auto_rci::Bool = true) where T<:Real
-    # Parallel Feast with automatic RCI management
+    # Parallel FeastKit with automatic RCI management
     
     Emin, Emax = interval
     N = size(A, 1)
@@ -383,7 +383,7 @@ function pfeast_rci_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tu
     
     # Parallel with threads
     if Threads.nthreads() > 1
-        println("\nParallel Feast (threaded):")
+        println("\nParallel FeastKit (threaded):")
         thread_time = @elapsed begin
             result_thread = feast_parallel(A, B, interval, M0=M0, use_threads=true)
         end
@@ -394,7 +394,7 @@ function pfeast_rci_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tu
     
     # Parallel with processes
     if nworkers() > 1
-        println("\nParallel Feast (distributed):")
+        println("\nParallel FeastKit (distributed):")
         dist_time = @elapsed begin
             result_dist = feast_parallel(A, B, interval, M0=M0, use_threads=false)
         end
@@ -405,7 +405,7 @@ function pfeast_rci_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tu
     
     # Serial comparison
     if compare_serial
-        println("\nSerial Feast:")
+        println("\nSerial FeastKit:")
         serial_time = @elapsed begin
             result_serial = feast(A, B, interval, M0=M0)
         end

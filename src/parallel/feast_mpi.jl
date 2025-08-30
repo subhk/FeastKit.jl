@@ -1,11 +1,11 @@
-# MPI-based parallel Feast implementation
+# MPI-based parallel FeastKit implementation
 # True MPI support for HPC clusters and distributed computing
 
 # Note: MPI should already be loaded when this file is included
 using LinearAlgebra
 using SparseArrays
 
-# MPI-specific Feast state
+# MPI-specific FeastKit state
 mutable struct MPIFeastState{T<:Real}
     # MPI communication info
     comm::MPI.Comm
@@ -53,7 +53,7 @@ mutable struct MPIFeastState{T<:Real}
     end
 end
 
-# Main MPI Feast interface
+# Main MPI FeastKit interface
 function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                          Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                          comm::MPI.Comm = MPI.COMM_WORLD,
@@ -254,7 +254,7 @@ function mpi_compute_residuals!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     MPI.Allreduce!(local_res, res, MPI.SUM, comm)
 end
 
-# MPI sparse Feast
+# MPI sparse FeastKit
 function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                           Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                           comm::MPI.Comm = MPI.COMM_WORLD,
@@ -435,7 +435,7 @@ function mpi_compute_sparse_residuals!(A::SparseMatrixCSC{T,Int}, B::SparseMatri
     MPI.Allreduce!(local_res, res, MPI.SUM, comm)
 end
 
-# High-level MPI Feast interface
+# High-level MPI FeastKit interface
 function mpi_feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                    interval::Tuple{T,T}; M0::Int = 10,
                    fpm::Union{Vector{Int}, Nothing} = nothing,
@@ -485,13 +485,13 @@ end
 # MPI performance benchmarking
 function mpi_feast_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple, M0::Int;
                             comm::MPI.Comm = MPI.COMM_WORLD)
-    # Benchmark MPI Feast performance
+    # Benchmark MPI FeastKit performance
     
     rank = MPI.Comm_rank(comm)
     size = MPI.Comm_size(comm)
     
     if rank == 0
-        println("MPI Feast Performance Benchmark")
+        println("MPI FeastKit Performance Benchmark")
         println("="^40)
         println("Matrix size: $(size(A, 1))")
         println("Search interval: $interval")
@@ -510,7 +510,7 @@ function mpi_feast_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tup
     elapsed_time = end_time - start_time
     
     if rank == 0
-        println("\nMPI Feast Results:")
+        println("\nMPI FeastKit Results:")
         println("Time: $(elapsed_time:.3f) seconds")
         println("Eigenvalues found: $(result.M)")
         println("Convergence loops: $(result.loop)")
@@ -540,7 +540,7 @@ function mpi_feast_available()
     end
 end
 
-# Utility: Initialize MPI for Feast if needed
+# Utility: Initialize MPI for FeastKit if needed
 function mpi_feast_init()
     if !MPI.Initialized()
         MPI.Init()
@@ -551,7 +551,7 @@ function mpi_feast_init()
     size = MPI.Comm_size(comm)
     
     if rank == 0
-        println("MPI Feast initialized with $size processes")
+        println("MPI FeastKit initialized with $size processes")
     end
     
     return comm, rank, size

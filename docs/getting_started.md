@@ -1,6 +1,6 @@
-# Getting Started with Feast.jl
+# Getting Started with FeastKit.jl
 
-This guide will get you up and running with Feast.jl in minutes. Whether you're new to eigenvalue problems or an experienced user, this tutorial covers everything you need to know.
+This guide will get you up and running with FeastKit.jl in minutes. Whether you're new to eigenvalue problems or an experienced user, this tutorial covers everything you need to know.
 
 ## Table of Contents
 
@@ -17,31 +17,31 @@ This guide will get you up and running with Feast.jl in minutes. Whether you're 
 
 ### Prerequisites
 
-Feast.jl requires Julia 1.6 or later. Install Julia from [julialang.org](https://julialang.org/downloads/).
+FeastKit.jl requires Julia 1.6 or later. Install Julia from [julialang.org](https://julialang.org/downloads/).
 
-### Installing Feast.jl
+### Installing FeastKit.jl
 
 ```julia
 # Start Julia and enter package mode with ]
 julia> ]
 
-# Install Feast.jl
-pkg> add Feast
+# Install FeastKit.jl
+pkg> add FeastKit
 
 # Or for the development version:
-pkg> add https://github.com/your-repo/Feast.jl.git
+pkg> add https://github.com/your-repo/FeastKit.jl.git
 
 # Return to Julia mode
 pkg> <backspace>
 
 # Load the package
-julia> using Feast
+julia> using FeastKit
 ```
 
 ### Verify Installation
 
 ```julia
-using Feast, LinearAlgebra
+using FeastKit, LinearAlgebra
 
 # Create a small test problem
 A = [2.0 -1.0; -1.0 2.0]
@@ -61,7 +61,7 @@ Expected output: `Installation successful! Found 2 eigenvalues.`
 Let's solve a classic eigenvalue problem step by step:
 
 ```julia
-using Feast, LinearAlgebra
+using FeastKit, LinearAlgebra
 
 # Step 1: Create a matrix
 # (This is a 1D discrete Laplacian - common in scientific computing)
@@ -117,7 +117,7 @@ end
 For problems of the form **A⋅x = λ⋅x**:
 
 ```julia
-using Feast
+using FeastKit
 
 # Your matrix (dense, sparse, whatever!)
 A = your_matrix()
@@ -132,7 +132,7 @@ eigenvectors = result.q[:, 1:result.M]
 
 **Real-world example:**
 ```julia
-using Feast, SparseArrays
+using FeastKit, SparseArrays
 
 # Large sparse matrix from discretized PDE
 n = 10000
@@ -158,7 +158,7 @@ result = feast(A, B, (Emin, Emax), M0=15)
 
 **Real-world example:**
 ```julia
-using Feast
+using FeastKit
 
 # Structural dynamics: K⋅u = ω²⋅M⋅u
 K = stiffness_matrix()  # Stiffness
@@ -202,7 +202,7 @@ result = feast(A_op, (Emin, Emax), M0=10, solver=:cg)
 For non-symmetric matrices with complex eigenvalues:
 
 ```julia
-using Feast
+using FeastKit
 
 # Non-symmetric matrix
 A = your_nonsymmetric_matrix()
@@ -224,7 +224,7 @@ complex_eigenvalues = result.lambda[1:result.M]
 
 ### The FeastResult Structure
 
-Every Feast calculation returns a `FeastResult` with these fields:
+Every FeastKit calculation returns a `FeastResult` with these fields:
 
 ```julia
 result = feast(A, (Emin, Emax), M0=10)
@@ -283,7 +283,7 @@ println("Orthogonality error: $orthogonality_error")
 **Problem**: You need the 10 eigenvalues closest to 5.0
 
 ```julia
-using Feast
+using FeastKit
 
 # Strategy: Search in a small interval around 5.0
 center = 5.0
@@ -303,7 +303,7 @@ end
 **Problem**: How many eigenvalues are in `[0, 1]`?
 
 ```julia
-# Use Feast to count eigenvalues
+# Use FeastKit to count eigenvalues
 result = feast(A, (0.0, 1.0), M0=100)  # Large M0 for counting
 
 println("Number of eigenvalues in [0,1]: $(result.M)")
@@ -315,14 +315,14 @@ rational_values = feast_rational(test_points, 0.0, 1.0, fpm)
 
 ### Workflow 3: Parameter Tuning
 
-**Problem**: Feast isn't converging well
+**Problem**: FeastKit isn't converging well
 
 ```julia
 # Step 1: Check if eigenvalues exist in your interval
 bounds = feast_validate_interval(A, (Emin, Emax))
 println("Estimated eigenvalue range: $bounds")
 
-# Step 2: Adjust Feast parameters
+# Step 2: Adjust FeastKit parameters
 fpm = zeros(Int, 64)
 feastinit!(fpm)
 fpm[1] = 1      # Print level (0=silent, 1=summary, 2=detailed)
@@ -412,13 +412,13 @@ end
 ### Getting Help
 
 - 📖 **Full API**: [API Reference](api_reference.html)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/your-repo/Feast.jl/issues)  
-- 💬 **Community**: [GitHub Discussions](https://github.com/your-repo/Feast.jl/discussions)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/your-repo/FeastKit.jl/issues)  
+- 💬 **Community**: [GitHub Discussions](https://github.com/your-repo/FeastKit.jl/discussions)
 - 📧 **Contact**: your-email@domain.com
 
 ---
 
 <div align="center">
-  <p><strong>Congratulations! You're now ready to use Feast.jl effectively.</strong></p>
+  <p><strong>Congratulations! You're now ready to use FeastKit.jl effectively.</strong></p>
   <p><a href="api_reference.html">Explore the API →</a> | <a href="examples.html">See More Examples →</a></p>
 </div>

@@ -1,7 +1,7 @@
 # Custom Contour Integration Examples
 # Demonstrates advanced contour integration features following the original Fortran implementation
 
-using Feast
+using FeastKit
 using LinearAlgebra, Plots
 
 """

@@ -1,7 +1,7 @@
 # Tests for Matrix-Free Feast Interface
 
 using Test
-using Feast
+using FeastKit
 using LinearAlgebra, SparseArrays
 using Random
 

@@ -1,6 +1,6 @@
-# Matrix-Free Feast Interface
+# Matrix-Free FeastKit Interface
 
-The matrix-free interface allows you to use Feast without explicitly storing matrices, making it ideal for large-scale problems where memory is limited or when matrices are too expensive to construct.
+The matrix-free interface allows you to use FeastKit without explicitly storing matrices, making it ideal for large-scale problems where memory is limited or when matrices are too expensive to construct.
 
 ## Overview
 
@@ -16,7 +16,7 @@ Instead of providing explicit matrices `A` and `B`, you provide functions that c
 The main interface for defining matrix-free operators:
 
 ```julia
-using Feast
+using FeastKit
 
 # Define matrix-vector multiplication function
 function A_mul!(y, x)
@@ -52,7 +52,7 @@ A_op = MatrixVecFunction{Float64}(A_mul!, (n, n), issymmetric=true)
 ### Standard Eigenvalue Problem (A*x = λ*x)
 
 ```julia
-using Feast
+using FeastKit
 
 n = 10000
 
@@ -186,7 +186,7 @@ result = feast_polynomial(coeffs, center, radius, M0=15)
 ### 2D Discrete Laplacian
 
 ```julia
-using Feast
+using FeastKit
 
 # Parameters
 nx, ny = 200, 200

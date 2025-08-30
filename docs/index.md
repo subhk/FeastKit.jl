@@ -1,7 +1,7 @@
-# Feast.jl Documentation
+# FeastKit.jl Documentation
 
 <div align="center">
-  <h1>🎯 Feast.jl</h1>
+  <h1>🎯 FeastKit.jl</h1>
   <p><em>Fast Eigenvalue Algorithm using Spectral Transformations in Julia</em></p>
   
   <p>
@@ -16,7 +16,7 @@
 
 ## What is Feast?
 
-Feast.jl is a Julia implementation of the **Feast eigenvalue algorithm**, a powerful numerical method for finding eigenvalues and eigenvectors of large sparse matrices within specified intervals or regions. Unlike traditional methods that compute all eigenvalues, Feast allows you to:
+FeastKit.jl is a Julia implementation of the **FEAST eigenvalue algorithm**, a powerful numerical method for finding eigenvalues and eigenvectors of large sparse matrices within specified intervals or regions. Unlike traditional methods that compute all eigenvalues, FeastKit allows you to:
 
 - 🎯 **Target specific eigenvalues** in intervals `[Emin, Emax]` or complex regions
 - 🚀 **Handle very large problems** (millions of unknowns) efficiently  
@@ -43,16 +43,16 @@ Feast.jl is a Julia implementation of the **Feast eigenvalue algorithm**, a powe
 
 ```julia
 using Pkg
-Pkg.add("Feast")  # When available from registry
+Pkg.add("FeastKit")  # When available from registry
 
 # Or for development:
-Pkg.add(url="https://github.com/your-repo/Feast.jl")
+Pkg.add(url="https://github.com/your-repo/FeastKit.jl")
 ```
 
-### Your First Feast Calculation
+### Your First FeastKit Calculation
 
 ```julia
-using Feast, LinearAlgebra
+using FeastKit, LinearAlgebra
 
 # Create a test matrix (1000x1000 tridiagonal)
 n = 1000
@@ -99,7 +99,7 @@ result = feast(A_op, (0.5, 1.5), M0=10)
 <summary><strong>📊 Dense Matrix Eigenvalues</strong></summary>
 
 ```julia
-using Feast, LinearAlgebra
+using FeastKit, LinearAlgebra
 
 # Create a random symmetric matrix
 n = 500
@@ -120,7 +120,7 @@ end
 <summary><strong>🕸️ Sparse Matrix Problems</strong></summary>
 
 ```julia
-using Feast, SparseArrays
+using FeastKit, SparseArrays
 
 # Large sparse symmetric matrix
 n = 10000
@@ -138,7 +138,7 @@ println("Largest eigenvalues: $(result.lambda[1:result.M])")
 <summary><strong>🔧 Generalized Eigenvalue Problem</strong></summary>
 
 ```julia
-using Feast
+using FeastKit
 
 # Create matrices A and B
 n = 1000
@@ -158,7 +158,7 @@ println("Generalized eigenvalues: $(result.lambda[1:result.M])")
 <summary><strong>🌐 2D Partial Differential Equation</strong></summary>
 
 ```julia
-using Feast
+using FeastKit
 
 # 2D Laplacian eigenvalue problem: -Δu = λu
 nx, ny = 100, 100
@@ -195,7 +195,7 @@ println("PDE eigenvalues: $(result.lambda[1:result.M])")
 <summary><strong>🔄 Complex Non-Hermitian Problems</strong></summary>
 
 ```julia
-using Feast
+using FeastKit
 
 # Non-symmetric matrix with complex eigenvalues
 n = 200
@@ -220,7 +220,7 @@ end
 
 ## Core Concepts
 
-### The Feast Algorithm
+### The FEAST Algorithm
 
 Feast uses **contour integration** in the complex plane to extract eigenvalues in specified regions. The key idea:
 
@@ -270,7 +270,7 @@ contour = feast_contour_expert(Emin, Emax, 16, 2, 100)  # Zolotarev integration
 
 ### Memory Usage
 
-| Problem Size | Standard Feast | Matrix-Free Feast |
+| Problem Size | Standard FeastKit | Matrix-Free FeastKit |
 |--------------|----------------|-------------------|
 | 1,000 × 1,000 | ~24 MB | ~1 MB |
 | 10,000 × 10,000 | ~2.4 GB | ~10 MB |
@@ -352,8 +352,8 @@ result = feast(A, interval, M0=10, fpm=fpm)
 ### Getting Help
 
 - 📖 **Documentation**: Check [API Reference](#api-reference)
-- 🐛 **Issues**: Report bugs on [GitHub Issues](https://github.com/your-repo/Feast.jl/issues)
-- 💬 **Discussions**: Ask questions on [GitHub Discussions](https://github.com/your-repo/Feast.jl/discussions)
+- 🐛 **Issues**: Report bugs on [GitHub Issues](https://github.com/your-repo/FeastKit.jl/issues)
+- 💬 **Discussions**: Ask questions on [GitHub Discussions](https://github.com/your-repo/FeastKit.jl/discussions)
 - 📧 **Email**: Contact developers at your-email@domain.com
 
 ---
@@ -382,12 +382,12 @@ Ready to dive deeper? Explore these advanced topics:
 ---
 
 <div align="center">
-  <p><strong>Ready to solve your eigenvalue problems with Feast.jl?</strong></p>
+  <p><strong>Ready to solve your eigenvalue problems with FeastKit.jl?</strong></p>
   <p><a href="#quick-start">Start Computing →</a></p>
 </div>
 
 ---
 
 <small>
-<em>Feast.jl</em> | <a href="https://github.com/your-repo/Feast.jl">GitHub</a> | <a href="https://github.com/your-repo/Feast.jl/releases">Releases</a> | <a href="LICENSE.html">License</a>
+<em>FeastKit.jl</em> | <a href="https://github.com/your-repo/FeastKit.jl">GitHub</a> | <a href="https://github.com/your-repo/FeastKit.jl/releases">Releases</a> | <a href="LICENSE.html">License</a>
 </small>

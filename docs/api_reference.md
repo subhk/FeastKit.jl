@@ -1,6 +1,6 @@
 # API Reference
 
-Complete reference for all Feast.jl functions, types, and interfaces.
+Complete reference for all FeastKit.jl functions, types, and interfaces.
 
 ## Table of Contents
 
@@ -539,6 +539,6 @@ result = feast(A, interval, M0=10, fpm=fpm)
 ---
 
 <div align="center">
-  <p><strong>Complete API documentation for Feast.jl</strong></p>
+  <p><strong>Complete API documentation for FeastKit.jl</strong></p>
   <p><a href="getting_started.html">← Getting Started</a> | <a href="examples.html">Examples →</a></p>
 </div>

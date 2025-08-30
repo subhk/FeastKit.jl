@@ -1,4 +1,4 @@
-module Feast
+module FeastKit
 
 export feastinit, feastinit!, feastdefault!
 export feast_srci!, feast_hrci!, feast_grci!
@@ -70,3 +70,4 @@ function __init__()
 end
 
 end
+

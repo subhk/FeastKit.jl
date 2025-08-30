@@ -1,6 +1,6 @@
-# Feast.jl Documentation
+# FeastKit.jl Documentation
 
-This directory contains the complete documentation for Feast.jl. It is configured to be served directly from the repository via GitHub Pages using the `docs/` folder on the `main` branch (no separate gh-pages branch).
+This directory contains the complete documentation for FeastKit.jl. It is configured to be served directly from the repository via GitHub Pages using the `docs/` folder on the `main` branch (no separate gh-pages branch).
 
 ## 📚 Documentation Structure
 
@@ -31,7 +31,7 @@ docs/
 
 Edit `docs/_config.yml` and set:
 - `url`: `https://<username>.github.io`
-- `baseurl`: `/<repo>` (e.g. `/Feast.jl`)
+- `baseurl`: `/<repo>` (e.g. `/FeastKit.jl`)
 - `repository`: `<username>/<repo>`
 
 ## 📖 Documentation Features
@@ -172,13 +172,13 @@ make stats
 
 ### Getting Help
 
-- **Documentation Issues**: [GitHub Issues](https://github.com/your-repo/Feast.jl/issues)
+- **Documentation Issues**: [GitHub Issues](https://github.com/your-repo/FeastKit.jl/issues)
 - **MkDocs Help**: [MkDocs Documentation](https://www.mkdocs.org/)
 - **Material Theme**: [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/)
 
 ---
 
 <div align="center">
-  <p><strong>Build beautiful, comprehensive documentation for Feast.jl</strong></p>
-  <p><a href="https://subhk.github.io/Feast.jl">View Live Documentation</a></p>
+  <p><strong>Build beautiful, comprehensive documentation for FeastKit.jl</strong></p>
+  <p><a href="https://subhk.github.io/FeastKit.jl">View Live Documentation</a></p>
 </div>

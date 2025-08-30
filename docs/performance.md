@@ -1,6 +1,6 @@
 # Performance Guide
 
-Optimize Feast.jl for maximum performance in your eigenvalue calculations.
+Optimize FeastKit.jl for maximum performance in your eigenvalue calculations.
 
 ## Table of Contents
 
@@ -15,9 +15,9 @@ Optimize Feast.jl for maximum performance in your eigenvalue calculations.
 
 ## Performance Overview
 
-### Feast Algorithm Complexity
+### FEAST Algorithm Complexity
 
-The Feast algorithm has the following computational complexity:
+The FEAST algorithm has the following computational complexity:
 
 | Operation | Complexity | Description |
 |-----------|------------|-------------|
@@ -40,7 +40,7 @@ Where T_solve is the cost of solving (zB - A)X = Y linear systems.
 ### Memory Usage Patterns
 
 ```julia
-using Feast, LinearAlgebra
+using FeastKit, LinearAlgebra
 
 # Problem sizes and memory requirements
 function memory_analysis(N, M0, ne=8)
@@ -59,7 +59,7 @@ function memory_analysis(N, M0, ne=8)
     println("Workspace vectors: $(workspace_mb) MB")
     println("Integration data: $(integration_mb) MB") 
     println("Reduced matrices: $(reduced_mb) MB")
-    println("Total Feast memory: $(workspace_mb + integration_mb + reduced_mb) MB")
+    println("Total FeastKit memory: $(workspace_mb + integration_mb + reduced_mb) MB")
     
     # Matrix storage (if not matrix-free)
     matrix_dense_gb = 8 * N^2 / 1e9
@@ -140,7 +140,7 @@ end
 Different integration methods have varying computational costs:
 
 ```julia
-using Feast, BenchmarkTools
+using FeastKit, BenchmarkTools
 
 function benchmark_integration_methods(A, interval)
     methods = [
@@ -236,7 +236,7 @@ end
 ### Shared Memory Parallelization
 
 ```julia
-using Feast, LinearAlgebra
+using FeastKit, LinearAlgebra
 BLAS.set_num_threads(8)  # Use 8 threads for BLAS operations
 
 # Enable threading in Feast
@@ -251,7 +251,7 @@ using Distributed, Feast
 # Add worker processes
 addprocs(4)
 
-@everywhere using Feast
+@everywhere using FeastKit
 
 # Distributed Feast
 result = feast(A, interval, M0=20, parallel=:mpi)
@@ -393,10 +393,10 @@ end
 ### Comprehensive Benchmarking Suite
 
 ```julia
-using Feast, BenchmarkTools, Profile
+using FeastKit, BenchmarkTools, Profile
 
 function feast_benchmark_suite()
-    println("Feast.jl Comprehensive Benchmark Suite")
+    println("FeastKit.jl Comprehensive Benchmark Suite")
     println("="^50)
     
     # Test problems of increasing size
@@ -474,15 +474,15 @@ end
 results = feast_benchmark_suite()
 ```
 
-### Profiling Feast Performance
+### Profiling FeastKit Performance
 
 ```julia
 using Profile, ProfileView
 
 function profile_feast(A, interval)
-    println("Profiling Feast Performance")
+    println("Profiling FeastKit Performance")
     
-    # Profile a typical Feast run
+    # Profile a typical FeastKit run
     @profile result = feast(A, interval, M0=20)
     
     # Show profile results
@@ -507,7 +507,7 @@ profile_feast(A, (0.1, 1.0))
 
 ```julia
 function memory_profile_feast(A, interval)
-    println("Memory Profiling Feast")
+    println("Memory Profiling FeastKit")
     
     # Track memory allocation
     GC.gc()  # Clean up before profiling
@@ -548,7 +548,7 @@ end
 
 !!! performance "Parallelization Checklist" 
     - [ ] **BLAS threads**: Set to number of physical cores
-    - [ ] **Feast parallel**: Use :threads for shared memory
+    - [ ] **FeastKit parallel**: Use :threads for shared memory
     - [ ] **MPI**: For distributed memory systems  
     - [ ] **Load balancing**: Ensure even work distribution
     - [ ] **Communication**: Minimize for distributed systems
@@ -556,6 +556,6 @@ end
 ---
 
 <div align="center">
-  <p><strong>Optimize your Feast.jl calculations for maximum performance</strong></p>
+  <p><strong>Optimize your FeastKit.jl calculations for maximum performance</strong></p>
   <p><a href="examples.html">← Examples</a> | <a href="api_reference.html">API Reference →</a></p>
 </div>

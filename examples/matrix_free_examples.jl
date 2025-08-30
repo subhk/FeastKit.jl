@@ -1,7 +1,7 @@
 # Matrix-Free Feast Examples
 # Demonstrates how to use Feast without storing explicit matrices
 
-using Feast
+using FeastKit
 using LinearAlgebra, SparseArrays
 using Random
 

@@ -1,9 +1,9 @@
-using Feast
+using FeastKit
 using Test
 using LinearAlgebra
 using SparseArrays
 
-@testset "Feast.jl" begin
+@testset "FeastKit.jl" begin
     
     @testset "Parameter initialization" begin
         # Test feastinit

@@ -1,6 +1,6 @@
 # Parallel Computing
 
-Feast supports multiple parallel backends:
+FeastKit supports multiple parallel backends:
 
 - Threads: `parallel = :threads`
 - Distributed workers: `parallel = :distributed`
@@ -9,11 +9,10 @@ Feast supports multiple parallel backends:
 Quick check and usage:
 
 ```julia
-using Feast
+using FeastKit
 cap = feast_parallel_capabilities()
 @info cap
 res = feast(A, (Emin, Emax), M0=20, parallel=:threads)
 ```
 
 Note: MPI requires MPI.jl and a working MPI installation.
-

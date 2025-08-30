@@ -222,7 +222,7 @@ end
 # Utility functions for result analysis
 function feast_summary(io::IO, result::FeastResult)
     # Print summary of Feast results to the provided IO
-    println(io, "Feast Eigenvalue Solution Summary")
+    println(io, "FeastKit Eigenvalue Solution Summary")
     println(io, "="^40)
     println(io, "Eigenvalues found: ", result.M)
     println(io, "Final residual: ", result.epsout)

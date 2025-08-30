@@ -1,11 +1,11 @@
-# Zero to Feast: A Practical Guide
+# Zero to FeastKit: A Practical Guide
 
-New to Feast or eigenvalue problems? This guide takes you from zero knowledge to running robust Feast computations — step by step.
+New to FeastKit or eigenvalue problems? This guide takes you from zero knowledge to running robust FeastKit computations — step by step.
 
 ## What You’ll Learn
 
-- What Feast does and when to use it
-- How to install and verify Feast
+- What FeastKit does and when to use it
+- How to install and verify FeastKit
 - How to solve standard and generalized eigenvalue problems
 - How to scale from dense to sparse to matrix-free
 - How to target complex eigenvalues and custom contours
@@ -13,14 +13,14 @@ New to Feast or eigenvalue problems? This guide takes you from zero knowledge to
 
 ---
 
-## 1) Mental Model: What is Feast?
+## 1) Mental Model: What is FeastKit?
 
-- Feast finds eigenvalues in a region you choose — not all eigenvalues at once.
+- FeastKit finds eigenvalues in a region you choose — not all eigenvalues at once.
 - You provide a search interval `[Emin, Emax]` (real) or a circle `(center, radius)` (complex).
-- Feast integrates resolvent operators along a contour to filter eigenvalues inside the region.
+- FeastKit integrates resolvent operators along a contour to filter eigenvalues inside the region.
 - It scales well for large problems and works with dense, sparse, and matrix-free operators.
 
-When to use Feast:
+When to use FeastKit:
 
 - You know where the eigenvalues of interest live (e.g., “smallest 10”, “near 0”, or “inside this circle”).
 - Your matrix is too large for full eigen-decomposition.
@@ -32,15 +32,15 @@ When to use Feast:
 
 ```julia
 # In Julia REPL (press ] to enter Pkg mode)
-pkg> add Feast
+pkg> add FeastKit
 
 # Back to Julia mode
-julia> using Feast, LinearAlgebra
+julia> using FeastKit, LinearAlgebra
 
 # Quick verification
 a = [2.0 -1.0; -1.0 2.0]
 res = feast(a, (0.1, 5.0), M0=4)
-@info "Feast OK" M=res.M info=res.info lambda=res.lambda[1:res.M]
+@info "FeastKit OK" M=res.M info=res.info lambda=res.lambda[1:res.M]
 ```
 
 Expected: `info == 0` and two eigenvalues found near 1 and 3.
@@ -52,7 +52,7 @@ Expected: `info == 0` and two eigenvalues found near 1 and 3.
 Simple tridiagonal Laplacian (dense or sparse):
 
 ```julia
-using Feast, LinearAlgebra, SparseArrays
+using FeastKit, LinearAlgebra, SparseArrays
 
 # 1D Laplacian on n points
 n = 200
@@ -78,7 +78,7 @@ Tips:
 Common in structural dynamics and PDEs:
 
 ```julia
-using Feast, LinearAlgebra, SparseArrays
+using FeastKit, LinearAlgebra, SparseArrays
 
 n = 1000
 K = spdiagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))  # stiffness
@@ -95,7 +95,7 @@ res = feast(K, M, (0.0, 0.5), M0=20)
 When storing A is infeasible, supply y = A*x as a function:
 
 ```julia
-using Feast
+using FeastKit
 
 function lap1d_matvec!(y, x)
     n = length(x)
@@ -124,7 +124,7 @@ Notes:
 Search in a circular region of the complex plane:
 
 ```julia
-using Feast
+using FeastKit
 
 A = [2.0  5.0; -3.0  1.0]  # non-symmetric
 I2 = Matrix{Float64}(I, 2, 2)
@@ -163,7 +163,7 @@ Expert controls (see docs for details):
 Check that the interval contains eigenvalues:
 
 ```julia
-using Feast, LinearAlgebra
+using FeastKit, LinearAlgebra
 
 A = diagm(0 => [1.0, 2.0, 3.0, 4.0])
 bounds = feast_validate_interval(A, (1.5, 3.5))
@@ -181,10 +181,10 @@ Common issues and fixes:
 
 ## 9) Parallel Backends
 
-Feast supports threads, distributed workers, and MPI (if available):
+FeastKit supports threads, distributed workers, and MPI (if available):
 
 ```julia
-using Feast
+using FeastKit
 cap = feast_parallel_capabilities()
 @info "Parallel capabilities" cap
 
@@ -201,7 +201,7 @@ MPI paths require MPI.jl and a proper MPI environment.
 
 ## 10) Quick Checklist
 
-- [ ] Install and verify Feast
+- [ ] Install and verify FeastKit
 - [ ] Choose search region and M0
 - [ ] Start dense/sparse; switch to matrix-free if needed
 - [ ] Tune parameters (fpm) for accuracy/performance
@@ -218,4 +218,3 @@ MPI paths require MPI.jl and a proper MPI environment.
 - Performance Guide: tuning and resource selection
 
 Happy computing!
-

@@ -1,13 +1,13 @@
 # FeastKit.jl
 
-[![CI](https://github.com/subhk/Feast.jl/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/subhk/Feast.jl/actions/workflows/ci.yml?query=branch%3Amain)
-[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://subhk.github.io/Feast.jl/)
+[![CI](https://github.com/subhk/FeastKit.jl/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/subhk/FeastKit.jl/actions/workflows/ci.yml?query=branch%3Amain)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://subhk.github.io/FeastKit.jl/)
 
-A Julia implementation of the Feast eigenvalue solver for finding eigenvalues and eigenvectors of large-scale eigenvalue problems within a specified region.
+A Julia implementation of the FeastKit eigenvalue solver for finding eigenvalues and eigenvectors of large-scale eigenvalue problems within a specified region.
 
 ## Overview
 
-Feast.jl is a pure Julia translation of the original Feast library. Feast is a numerical algorithm for solving both standard and generalized eigenvalue problems by computing eigenvalues located inside a given region in the complex plane.
+FeastKit.jl is a pure Julia translation of the original FEAST library. FEAST is a numerical algorithm for solving both standard and generalized eigenvalue problems by computing eigenvalues located inside a given region in the complex plane.
 
 ### Key Features
 
@@ -31,7 +31,7 @@ Pkg.add("FeastKit")
 ### Basic Usage
 
 ```julia
-using Feast
+using FeastKit
 using LinearAlgebra
 
 # Create a test matrix
@@ -78,7 +78,7 @@ result = feast_general(A_complex, B_complex, center, radius, M0=15)
 
 ## Advanced Usage
 
-### Custom Feast Parameters
+### Custom FeastKit Parameters
 
 ```julia
 # Initialize Feast parameters
@@ -127,7 +127,7 @@ result = feast_matvec(A_mul!, B_mul!, n, (0.5, 1.5), M0=10)
 
 ## Parallel Computing
 
-Feast.jl supports parallel computation where each contour integration point is solved independently, leading to significant speedups for large problems.
+FeastKit.jl supports parallel computation where each contour integration point is solved independently, leading to significant speedups for large problems.
 
 ### Multi-threaded Execution
 
@@ -153,16 +153,16 @@ result = feast(A, (0.5, 1.5), M0=10, parallel=:distributed)
 
 ### MPI Support for HPC Clusters
 
-Feast.jl provides full MPI support for high-performance computing clusters:
+FeastKit.jl provides full MPI support for high-performance computing clusters:
 
 ```julia
 using MPI
-using Feast
+using FeastKit
 
 # Initialize MPI (if not already done)
 MPI.Init()
 
-# Basic MPI Feast
+# Basic MPI FeastKit
 result = feast(A, B, (0.5, 1.5), M0=10, parallel=:mpi)
 
 # Explicit MPI interface with communicator
@@ -194,7 +194,7 @@ mpirun -np 32 julia --threads=4 feast_mpi_example.jl
 Julia script (`feast_mpi_example.jl`):
 ```julia
 using MPI
-using Feast
+using FeastKit
 using LinearAlgebra
 
 MPI.Init()
@@ -205,7 +205,7 @@ rank = MPI.Comm_rank(comm)
 size = MPI.Comm_size(comm)
 
 if rank == 0
-    println("Running Feast on $size MPI processes with $(Threads.nthreads()) threads each")
+    println("Running FeastKit on $size MPI processes with $(Threads.nthreads()) threads each")
 end
 
 # Large eigenvalue problem
@@ -230,7 +230,7 @@ MPI.Finalize()
 For advanced users, a parallel RCI interface is available:
 
 ```julia
-using Feast
+using FeastKit
 
 # Create parallel state
 state = ParallelFeastState{Float64}(ne=8, M0=10, use_parallel=true, use_threads=true)
@@ -268,7 +268,7 @@ end
 ### Automatic Backend Selection
 
 ```julia
-# Feast automatically selects the best available backend
+# FeastKit automatically selects the best available backend
 result = feast(A, B, (0.5, 1.5), M0=10, parallel=:auto)
 
 # Manual backend selection
@@ -279,7 +279,7 @@ result = feast(A, B, (0.5, 1.5), M0=10, parallel=:serial)   # Force serial
 
 ## Algorithm Overview
 
-Feast uses contour integration in the complex plane to compute eigenvalues. The key steps are:
+FeastKit uses contour integration in the complex plane to compute eigenvalues. The key steps are:
 
 1. **Contour Definition**: Define an integration contour enclosing the desired eigenvalues
 2. **Moment Computation**: Compute spectral projector moments using numerical integration  
@@ -293,7 +293,7 @@ The algorithm is particularly effective for:
 
 ## Result Structure
 
-Feast returns a `FeastResult` object containing:
+FeastKit returns a `FeastResult` object containing:
 
 ```julia
 struct FeastResult{T<:Real, VT}
@@ -326,11 +326,11 @@ end
 5. **Parallel execution**: Use `parallel=:auto` to automatically select the best backend
 6. **HPC clusters**: Use `parallel=:mpi` or `feast_hybrid()` for optimal cluster performance  
 7. **Hybrid parallelism**: Combine MPI processes with threading for maximum performance
-8. **Load balancing**: Feast automatically distributes contour points for optimal load balancing
+8. **Load balancing**: FeastKit automatically distributes contour points for optimal load balancing
 
 ## Limitations
 
-This is a Julia translation of the original Feast library. Some features from the original may not be fully implemented:
+This is a Julia translation of the original FEAST library. Some features from the original may not be fully implemented:
 
 - Custom contour integration is partially implemented
 - Some advanced PFEAST (parallel) features are not included

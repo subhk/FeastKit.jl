@@ -1,13 +1,13 @@
-# GitHub Pages configuration for Feast.jl documentation
+# GitHub Pages configuration for FeastKit.jl documentation
 
 # Site settings
-title: Feast.jl Documentation
+title: FeastKit.jl Documentation
 description: Fast Eigenvalue Algorithm using Spectral Transformations in Julia
-baseurl: "/Feast.jl" # the subpath of your site, e.g. /blog
+baseurl: "/FeastKit.jl" # the subpath of your site, e.g. /blog
 url: "https://subhk.github.io" # the base hostname & protocol for your site
 
 # Repository settings
-repository: subhk/Feast.jl
+repository: subhk/FeastKit.jl
 repository_tree: main
 
 # Build settings
@@ -75,12 +75,12 @@ include:
 # SEO settings
 lang: en_US
 author:
-  name: Feast.jl Contributors
+  name: FeastKit.jl Contributors
   email: feast-julia@example.com
 
 social:
   - platform: github
-    user_url: "https://github.com/subhk/Feast.jl"
+    user_url: "https://github.com/subhk/FeastKit.jl"
   - platform: julia
     user_url: "https://julialang.org"
 

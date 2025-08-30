@@ -1,6 +1,6 @@
 # Examples and Tutorials
 
-Comprehensive collection of Feast.jl examples from basic usage to advanced applications.
+Comprehensive collection of FeastKit.jl examples from basic usage to advanced applications.
 
 ## Table of Contents
 
@@ -20,7 +20,7 @@ Comprehensive collection of Feast.jl examples from basic usage to advanced appli
 **Problem**: Find eigenvalues of a simple symmetric matrix.
 
 ```julia
-using Feast, LinearAlgebra
+using FeastKit, LinearAlgebra
 
 # Create a 5×5 symmetric matrix
 A = [4.0  -1.0   0.0   0.0   0.0
@@ -64,7 +64,7 @@ Found 5 eigenvalues
 **Problem**: Find eigenvalues of a large sparse tridiagonal matrix.
 
 ```julia
-using Feast, SparseArrays, LinearAlgebra
+using FeastKit, SparseArrays, LinearAlgebra
 
 # Create large sparse tridiagonal matrix  
 n = 1000
@@ -97,7 +97,7 @@ end
 **Problem**: Solve A*x = λ*B*x with two different matrices.
 
 ```julia
-using Feast, LinearAlgebra
+using FeastKit, LinearAlgebra
 
 # Create matrices A (stiffness) and B (mass)
 n = 100
@@ -141,7 +141,7 @@ end
 **Problem**: Find natural frequencies of a vibrating string.
 
 ```julia
-using Feast, LinearAlgebra, Plots
+using FeastKit, LinearAlgebra, Plots
 
 # Physical parameters
 L = 1.0      # String length
@@ -197,7 +197,7 @@ end
 **Problem**: Find vibrational modes of a circular drum.
 
 ```julia
-using Feast, LinearAlgebra
+using FeastKit, LinearAlgebra
 
 # 2D Laplacian on square domain (approximating circular drum)
 nx, ny = 50, 50
@@ -274,7 +274,7 @@ end
 **Problem**: Find energy levels of quantum harmonic oscillator.
 
 ```julia
-using Feast, LinearAlgebra
+using FeastKit, LinearAlgebra
 
 # 1D Quantum Harmonic Oscillator: H = -½d²/dx² + ½x²
 # Discretized on [-L, L] with N points
@@ -349,7 +349,7 @@ end
 **Problem**: Structural eigenanalysis without storing global matrices.
 
 ```julia
-using Feast, SparseArrays
+using FeastKit, SparseArrays
 
 # Simulate large finite element problem  
 # In reality, this would come from FE assembly
@@ -429,7 +429,7 @@ println("Peak memory usage: ~$(8 * n_dofs * result.M / 1e6) MB")
 **Problem**: Compare different iterative solvers for matrix-free Feast.
 
 ```julia
-using Feast, LinearAlgebra, BenchmarkTools
+using FeastKit, LinearAlgebra, BenchmarkTools
 
 # Test problem: 2D Poisson equation
 nx, ny = 200, 200  
@@ -523,7 +523,7 @@ end
 **Problem**: Use advanced integration methods for challenging problems.
 
 ```julia
-using Feast, LinearAlgebra
+using FeastKit, LinearAlgebra
 
 # Create a challenging matrix (clustered eigenvalues)
 n = 200
@@ -585,7 +585,7 @@ end
 **Problem**: Find eigenvalues of non-Hermitian matrices in complex regions.
 
 ```julia
-using Feast, LinearAlgebra, Random
+using FeastKit, LinearAlgebra, Random
 
 Random.seed!(123)
 
@@ -684,7 +684,7 @@ end
 **Problem**: Solve quadratic eigenvalue problem (λ²M + λC + K)x = 0.
 
 ```julia
-using Feast, LinearAlgebra
+using FeastKit, LinearAlgebra
 
 # Quadratic eigenvalue problem: (λ²M + λC + K)x = 0
 # Example: Damped vibration problem
@@ -787,7 +787,7 @@ end
 **Problem**: Compare memory usage of different approaches.
 
 ```julia
-using Feast, LinearAlgebra, SparseArrays
+using FeastKit, LinearAlgebra, SparseArrays
 
 # Test different problem sizes and approaches
 problem_sizes = [1000, 5000, 10000, 20000]
@@ -866,14 +866,14 @@ end
 **Problem**: Demonstrate parallel Feast capabilities.
 
 ```julia
-using Feast, LinearAlgebra, Distributed
+using FeastKit, LinearAlgebra, Distributed
 
 # Add worker processes
 if nprocs() == 1
     addprocs(4)  # Add 4 worker processes
 end
 
-@everywhere using Feast, LinearAlgebra
+@everywhere using FeastKit, LinearAlgebra
 
 println("Parallel Feast Performance Test")
 println("Available processes: $(nprocs())")
@@ -965,7 +965,7 @@ println("Larger problems generally show better parallel scalability.")
 **Problem**: Find electronic band structure using tight-binding approximation.
 
 ```julia
-using Feast, LinearAlgebra
+using FeastKit, LinearAlgebra
 
 # 1D Tight-binding model for electrons in a periodic chain
 # H = -t∑(c†ᵢcᵢ₊₁ + c†ᵢ₊₁cᵢ) + ε∑c†ᵢcᵢ
@@ -1049,7 +1049,7 @@ end
 **Problem**: Linear stability analysis of fluid flow.
 
 ```julia
-using Feast, LinearAlgebra
+using FeastKit, LinearAlgebra
 
 # Linear stability analysis of 2D channel flow
 # Solve generalized eigenvalue problem: (A - λB)φ = 0
@@ -1205,7 +1205,7 @@ end
 ---
 
 <div align="center">
-  <p><strong>Complete Examples Collection for Feast.jl</strong></p>
+  <p><strong>Complete Examples Collection for FeastKit.jl</strong></p>
   <p>From basic usage to advanced scientific applications</p>
   <p><a href="getting_started.html">← Getting Started</a> | <a href="api_reference.html">API Reference →</a></p>
 </div>

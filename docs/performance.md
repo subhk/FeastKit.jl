@@ -246,7 +246,7 @@ result = feast(A, interval, M0=20, parallel=:threads)
 ### Distributed Memory Parallelization
 
 ```julia
-using Distributed, Feast
+using Distributed, FeastKit
 
 # Add worker processes
 addprocs(4)
@@ -310,7 +310,7 @@ end
 ### Sparse Matrix Optimizations
 
 ```julia
-using SparseArrays, Feast
+using SparseArrays, FeastKit
 
 function optimize_sparse_feast(A_sparse, interval)
     println("Sparse Matrix Optimization")

@@ -1,4 +1,4 @@
-# Custom Contour Integration Examples
+# FeastKit Custom Contour Integration Examples
 # Demonstrates advanced contour integration features following the original Fortran implementation
 
 using FeastKit
@@ -162,7 +162,7 @@ end
 Run all examples
 """
 function run_all_examples()
-    println("Feast Custom Contour Integration Examples")
+    println("FeastKit Custom Contour Integration Examples")
     println("========================================")
     
     try

@@ -138,13 +138,13 @@ function example_2d_laplacian_matfree()
     println("Search interval: $interval")
     
     # Solve with matrix-free Feast
-    println("\\nSolving with matrix-free Feast...")
+    println("\\nSolving with matrix-free FeastKit...")
     result = feast(A_op, B_op, interval, M0=15,
                   solver=:cg,
                   solver_opts=(rtol=1e-6, maxiter=500))
     
     println("Eigenvalues found: $(result.M)")
-    println("Feast status: $(result.info == 0 ? "Success" : "Error $(result.info)")")
+    println("FeastKit status: $(result.info == 0 ? "Success" : "Error $(result.info)")")
     
     if result.M > 0
         println("\\nSmallest eigenvalues:")
@@ -272,7 +272,7 @@ function example_general_matfree()
                           solver_opts=(restart=20, rtol=1e-8))
     
     println("Eigenvalues found: $(result.M)")
-    println("Feast status: $(result.info == 0 ? "Success" : "Error $(result.info)")")
+    println("FeastKit status: $(result.info == 0 ? "Success" : "Error $(result.info)")")
     
     if result.M > 0
         println("\\nEigenvalues in search region:")
@@ -334,13 +334,13 @@ function example_sparse_as_matfree()
     println("Search interval: $interval")
     
     # Solve with matrix-free Feast
-    println("\\nSolving with matrix-free Feast...")
+    println("\\nSolving with matrix-free FeastKit...")
     result = feast(A_op, B_op, interval, M0=8,
                   solver=:gmres,
                   solver_opts=(restart=50, rtol=1e-6, maxiter=200))
     
     println("Eigenvalues found: $(result.M)")
-    println("Feast status: $(result.info == 0 ? "Success" : "Error $(result.info)")")
+    println("FeastKit status: $(result.info == 0 ? "Success" : "Error $(result.info)")")
     
     if result.M > 0
         println("\\nLargest eigenvalues:")
@@ -356,7 +356,7 @@ end
 Run all matrix-free examples
 """
 function run_matfree_examples()
-    println("Feast Matrix-Free Interface Examples")
+    println("FeastKit Matrix-Free Interface Examples")
     println("=====================================")
     
     try

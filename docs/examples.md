@@ -492,7 +492,7 @@ for (solver_name, description) in solvers
     println("Solver: $description")
     println("  Time: $(time_taken) seconds")
     println("  Eigenvalues found: $(result.M)")
-    println("  Feast status: $(result.info == 0 ? "Success" : "Failed")")
+    println("  FeastKit status: $(result.info == 0 ? "Success" : "Failed")")
     println("  Convergence: $(result.epsout)")
     
     if result.M > 0

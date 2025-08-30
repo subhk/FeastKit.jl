@@ -563,5 +563,5 @@ result = feast(A, interval, M0=10, fpm=fpm)
 
 <div align="center">
   <p><strong>Complete API documentation for FeastKit.jl</strong></p>
-  <p><a href="@ref getting-started">← Getting Started</a> | <a href="@ref examples">Examples →</a></p>
+  ← [Getting Started](@ref "getting-started") | [Examples](@ref "examples")
 </div>

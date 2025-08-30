@@ -372,20 +372,20 @@ println("Memory used: $(Base.summarysize(result) / 1e6) MB")
 Now that you understand the basics, explore these advanced topics:
 
 #### Performance Optimization
-- [Matrix-Free Interface](@ref matrix-free-interface) - Handle matrices too large for memory
-- [Parallel Computing](@ref parallel-computing) - Use multiple cores and nodes
-- [Performance Tips](@ref performance-guide) - Speed and memory optimization
+- [Matrix-Free Interface](@ref "matrix-free-interface") - Handle matrices too large for memory
+- [Parallel Computing](@ref "parallel-computing") - Use multiple cores and nodes
+- [Performance Tips](@ref "performance-guide") - Speed and memory optimization
 
 #### Advanced Features  
-- [Custom Contour Integration](@ref custom-contours) - Zolotarev, Gauss-Legendre methods
-- [Complex Eigenvalues](@ref complex-eigenvalues) - Non-Hermitian problems
-- [Polynomial Eigenvalue Problems](@ref polynomial-problems) - Quadratic and higher-order
+- [Custom Contour Integration](@ref "custom-contours") - Zolotarev, Gauss-Legendre methods
+- [Complex Eigenvalues](@ref "complex-eigenvalues") - Non-Hermitian problems
+- [Polynomial Eigenvalue Problems](@ref "polynomial-problems") - Quadratic and higher-order
 
 #### Real Applications
-- [Structural Dynamics](@ref examples) - Vibration analysis
-- [Quantum Mechanics](@ref examples) - Electronic structure
-- [Fluid Dynamics](@ref examples) - Stability analysis
-- [Network Analysis](@ref examples) - Graph eigenvalues
+- [Structural Dynamics](@ref "examples") - Vibration analysis
+- [Quantum Mechanics](@ref "examples") - Electronic structure
+- [Fluid Dynamics](@ref "examples") - Stability analysis
+- [Network Analysis](@ref "examples") - Graph eigenvalues
 
 ### Quick Reference Card
 
@@ -414,7 +414,7 @@ end
 
 ### Getting Help
 
-- Full API: [API Reference](@ref api-reference)
+- Full API: [API Reference](@ref "api-reference")
 - Issues: [GitHub Issues](https://github.com/your-repo/FeastKit.jl/issues)  
 - Community: [GitHub Discussions](https://github.com/your-repo/FeastKit.jl/discussions)
 - Contact: your-email@domain.com
@@ -423,5 +423,5 @@ end
 
 <div align="center">
   <p><strong>Congratulations! You're now ready to use FeastKit.jl effectively.</strong></p>
-  <p><a href="api_reference.html">Explore the API →</a> | <a href="examples.html">See More Examples →</a></p>
+  Explore the [API Reference](@ref "api-reference") · See more [Examples](@ref "examples")
 </div>

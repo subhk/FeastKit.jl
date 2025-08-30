@@ -1210,5 +1210,5 @@ end
 <div align="center">
   <p><strong>Complete Examples Collection for FeastKit.jl</strong></p>
   <p>From basic usage to advanced scientific applications</p>
-  <p><a href="getting_started.html">← Getting Started</a> | <a href="api_reference.html">API Reference →</a></p>
+  ← [Getting Started](@ref "getting-started") | [API Reference](@ref "api-reference") →
 </div>

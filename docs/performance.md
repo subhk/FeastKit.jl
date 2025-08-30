@@ -560,5 +560,5 @@ end
 
 <div align="center">
   <p><strong>Optimize your FeastKit.jl calculations for maximum performance</strong></p>
-  <p><a href="examples.html">← Examples</a> | <a href="api_reference.html">API Reference →</a></p>
+  ← [Examples](@ref "examples") | [API Reference](@ref "api-reference") →
 </div>

@@ -1,15 +1,15 @@
-# Parallel Feast implementation
+# Parallel FeastKit implementation
 # Each contour point is solved independently using distributed computing
 
 using Distributed
 using SharedArrays
 using LinearAlgebra
 
-# Parallel Feast for real symmetric problems
+# Parallel FeastKit for real symmetric problems
 function pfeast_sygv!(A::Matrix{T}, B::Matrix{T}, 
                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                       use_threads::Bool = true) where T<:Real
-    # Parallel Feast for dense real symmetric generalized eigenvalue problem
+    # Parallel FeastKit for dense real symmetric generalized eigenvalue problem
     
     N = size(A, 1)
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
@@ -287,7 +287,7 @@ end
 function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                         Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                         use_threads::Bool = true) where T<:Real
-    # Parallel Feast for sparse matrices
+    # Parallel FeastKit for sparse matrices
     
     N = size(A, 1)
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
@@ -527,7 +527,7 @@ function pfeast_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple,
                          max_workers::Int = nworkers(), use_threads::Bool = true)
     # Benchmark parallel vs serial performance
     
-    println("Feast Parallel Performance Benchmark")
+    println("FeastKit Parallel Performance Benchmark")
     println("="^50)
     println("Matrix size: $(size(A, 1))")
     println("Search interval: $interval")

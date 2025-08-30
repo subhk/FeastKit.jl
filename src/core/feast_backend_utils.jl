@@ -93,7 +93,7 @@ end
 
 # Print parallel backend information
 function feast_parallel_info()
-    println("Feast Parallel Computing Capabilities")
+    println("FeastKit Parallel Computing Capabilities")
     println("="^40)
     
     # Threading info

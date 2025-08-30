@@ -1,4 +1,4 @@
-# High-level MPI interfaces for Feast
+# High-level MPI interfaces for FeastKit
 # Provides seamless integration between threaded, distributed, and MPI parallelism
 
 # Note: Main feast() interfaces are defined in feast_interfaces.jl
@@ -176,7 +176,7 @@ end
 function feast_parallel_comparison(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple, M0::Int)
     # Compare performance across all available parallel backends
     
-    println("Feast Parallel Backend Comparison")
+    println("FeastKit Parallel Backend Comparison")
     println("="^50)
     println("Matrix size: $(size(A, 1))")
     println("Search interval: $interval")

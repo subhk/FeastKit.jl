@@ -2,7 +2,7 @@
 
 This directory contains the complete documentation for FeastKit.jl. It is configured to be served directly from the repository via GitHub Pages using the `docs/` folder on the `main` branch (no separate gh-pages branch).
 
-## 📚 Documentation Structure
+## Documentation Structure
 
 ```
 docs/
@@ -17,7 +17,7 @@ docs/
 └── assets/                  # Optional images/static assets (add as needed)
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Publish on GitHub Pages (from main/docs)
 
@@ -25,7 +25,7 @@ docs/
 2) Source: Deploy from a branch → Branch: `main`, Folder: `/docs`  
 3) Save. The site will be available at `https://<username>.github.io/<repo>/`
 
-## 🔧 Build Options
+## Build Options
 
 ### Configure site metadata
 
@@ -34,14 +34,14 @@ Edit `docs/_config.yml` and set:
 - `baseurl`: `/<repo>` (e.g. `/FeastKit.jl`)
 - `repository`: `<username>/<repo>`
 
-## 📖 Documentation Features
+## Documentation Features
 
 ### What you get
 - Clear landing page, getting-started guide, “Zero to FeastKit” walkthrough
 - API overview and examples
 - Advanced topic stubs you can expand over time
 
-## 📝 Content Overview
+## Content Overview
 
 | Page | Purpose | Target Audience |
 |------|---------|----------------|
@@ -85,14 +85,14 @@ Edit `docs/_config.yml` and set:
 - Fluid dynamics stability analysis
 - PDE eigenvalue problems
 
-## 🛠️ Customization
+## Customization
 
 ### Configuration
 Update `_config.yml` to change:
 - Site metadata and repository links
 - Theme and plugin settings supported by GitHub Pages
 
-## 📦 Deployment Options
+## Deployment Options
 
 ### GitHub Pages (Automatic)
 1. Push documentation to `docs/` folder
@@ -103,7 +103,7 @@ Update `_config.yml` to change:
 ### Custom Hosting
 If you prefer to host elsewhere, any static-site host that supports Jekyll can serve `docs/` directly.
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Test all documentation
@@ -119,7 +119,7 @@ make spell
 make validate-config
 ```
 
-## 📊 Analytics and Metrics
+## Analytics and Metrics
 
 ### Built-in Analytics
 - **Google Analytics** integration (configure in `mkdocs.yml`)
@@ -138,7 +138,7 @@ make stats
 # Total characters: 142851
 ```
 
-## 🤝 Contributing to Documentation
+## Contributing to Documentation
 
 ### Content Guidelines
 1. **Clear structure** with logical headings
@@ -161,7 +161,7 @@ make stats
 4. Test locally with `make serve`
 5. Submit pull request
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 

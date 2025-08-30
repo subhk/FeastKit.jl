@@ -4,7 +4,7 @@
 ```
 
 <div align="center">
-  <h1>🎯 FeastKit.jl</h1>
+  <h1>FeastKit.jl</h1>
   <p><em>Fast Eigenvalue Algorithm using Spectral Transformations in Julia</em></p>
   
   <p>
@@ -21,11 +21,11 @@
 
 FeastKit.jl is a Julia implementation of the **FEAST eigenvalue algorithm**, a powerful numerical method for finding eigenvalues and eigenvectors of large sparse matrices within specified intervals or regions. Unlike traditional methods that compute all eigenvalues, FeastKit allows you to:
 
-- 🎯 **Target specific eigenvalues** in intervals `[Emin, Emax]` or complex regions
-- 🚀 **Handle very large problems** (millions of unknowns) efficiently  
-- 🔧 **Work matrix-free** without storing explicit matrices
-- ⚡ **Leverage parallelization** for high-performance computing
-- 🎨 **Use custom contour integration** for optimal convergence
+- Target specific eigenvalues in intervals `[Emin, Emax]` or complex regions
+- Handle very large problems (millions of unknowns) efficiently  
+- Work matrix-free without storing explicit matrices
+- Leverage parallelization for high-performance computing
+- Use custom contour integration for optimal convergence
 
 ### Key Features
 
@@ -99,7 +99,7 @@ result = feast(A_op, (0.5, 1.5), M0=10)
 ### Basic Examples
 
 <details>
-<summary><strong>📊 Dense Matrix Eigenvalues</strong></summary>
+<summary><strong>Dense Matrix Eigenvalues</strong></summary>
 
 ```julia
 using FeastKit, LinearAlgebra
@@ -120,7 +120,7 @@ end
 </details>
 
 <details>
-<summary><strong>🕸️ Sparse Matrix Problems</strong></summary>
+<summary><strong>Sparse Matrix Problems</strong></summary>
 
 ```julia
 using FeastKit, SparseArrays
@@ -138,7 +138,7 @@ println("Largest eigenvalues: $(result.lambda[1:result.M])")
 </details>
 
 <details>
-<summary><strong>🔧 Generalized Eigenvalue Problem</strong></summary>
+<summary><strong>Generalized Eigenvalue Problem</strong></summary>
 
 ```julia
 using FeastKit
@@ -158,7 +158,7 @@ println("Generalized eigenvalues: $(result.lambda[1:result.M])")
 ### Advanced Examples
 
 <details>
-<summary><strong>🌐 2D Partial Differential Equation</strong></summary>
+<summary><strong>2D Partial Differential Equation</strong></summary>
 
 ```julia
 using FeastKit
@@ -195,7 +195,7 @@ println("PDE eigenvalues: $(result.lambda[1:result.M])")
 </details>
 
 <details>
-<summary><strong>🔄 Complex Non-Hermitian Problems</strong></summary>
+<summary><strong>Complex Non-Hermitian Problems</strong></summary>
 
 ```julia
 using FeastKit
@@ -281,11 +281,11 @@ contour = feast_contour_expert(Emin, Emax, 16, 2, 100)  # Zolotarev integration
 
 ### Performance Tips
 
-✅ **Use matrix-free** for large problems  
-✅ **Choose appropriate solvers**: CG for SPD, GMRES for general  
-✅ **Tune integration points**: More points = better accuracy, slower  
-✅ **Enable parallelization** for very large problems  
-✅ **Use custom contours** for challenging geometries  
+Use matrix-free for large problems  
+Choose appropriate solvers: CG for SPD, GMRES for general  
+Tune integration points: More points = better accuracy, slower  
+Enable parallelization for very large problems  
+Use custom contours for challenging geometries  
 
 ---
 
@@ -294,7 +294,7 @@ contour = feast_contour_expert(Emin, Emax, 16, 2, 100)  # Zolotarev integration
 ### Common Issues
 
 <details>
-<summary><strong>❌ "No eigenvalues found"</strong></summary>
+<summary><strong>No eigenvalues found</strong></summary>
 
 **Cause**: Search interval doesn't contain eigenvalues
 
@@ -310,7 +310,7 @@ result = feast(A, (bounds[1], bounds[2]), M0=10)
 </details>
 
 <details>
-<summary><strong>❌ "Linear solver not converging"</strong></summary>
+<summary><strong>Linear solver not converging</strong></summary>
 
 **Cause**: Iterative solver issues in matrix-free mode
 
@@ -332,7 +332,7 @@ result = feast(A_op, interval,
 </details>
 
 <details>
-<summary><strong>❌ "Memory allocation failed"</strong></summary>
+<summary><strong>Memory allocation failed</strong></summary>
 
 **Cause**: Problem too large for available memory
 
@@ -354,10 +354,10 @@ result = feast(A, interval, M0=10, fpm=fpm)
 
 ### Getting Help
 
-- 📖 **Documentation**: Check [API Reference](#api-reference)
-- 🐛 **Issues**: Report bugs on [GitHub Issues](https://github.com/your-repo/FeastKit.jl/issues)
-- 💬 **Discussions**: Ask questions on [GitHub Discussions](https://github.com/your-repo/FeastKit.jl/discussions)
-- 📧 **Email**: Contact developers at your-email@domain.com
+- Documentation: Check [API Reference](#api-reference)
+- Issues: Report bugs on [GitHub Issues](https://github.com/your-repo/FeastKit.jl/issues)
+- Discussions: Ask questions on [GitHub Discussions](https://github.com/your-repo/FeastKit.jl/discussions)
+- Email: Contact developers at your-email@domain.com
 
 ---
 
@@ -365,11 +365,11 @@ result = feast(A, interval, M0=10, fpm=fpm)
 
 Ready to dive deeper? Explore these advanced topics:
 
-- 🔧 [Matrix-Free Interface](matrix_free_interface.md) - For large-scale problems
-- ⚡ [Parallel Computing](parallel_computing.md) - MPI and threading  
-- 🎨 [Custom Contours](custom_contours.md) - Advanced integration methods
-- 📊 [Performance Optimization](performance.md) - Speed and memory tips
-- 🧪 [Examples](examples.md) - Real-world applications
+- [Matrix-Free Interface](matrix_free_interface.md) - For large-scale problems
+- [Parallel Computing](parallel_computing.md) - MPI and threading  
+- [Custom Contours](custom_contours.md) - Advanced integration methods
+- [Performance Optimization](performance.md) - Speed and memory tips
+- [Examples](examples.md) - Real-world applications
 
 ### Quick Navigation
 

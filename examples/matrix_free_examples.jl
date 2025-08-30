@@ -369,14 +369,14 @@ function run_matfree_examples()
         
         println("\\n" * "="^50)
         println("All matrix-free examples completed successfully!")
-        println("✅ Tridiagonal matrix: $(result1.M) eigenvalues found")
-        println("✅ 2D Laplacian: $(result2.M) eigenvalues found") 
-        println("✅ Custom solver: $(result3.M) eigenvalues found")
-        println("✅ General problem: $(result4.M) eigenvalues found")
-        println("✅ Sparse matrix: $(result5.M) eigenvalues found")
+        println("Tridiagonal matrix: $(result1.M) eigenvalues found")
+        println("2D Laplacian: $(result2.M) eigenvalues found") 
+        println("Custom solver: $(result3.M) eigenvalues found")
+        println("General problem: $(result4.M) eigenvalues found")
+        println("Sparse matrix: $(result5.M) eigenvalues found")
         
     catch e
-        println("❌ Error running matrix-free examples: $e")
+        println("Error running matrix-free examples: $e")
         rethrow(e)
     end
 end

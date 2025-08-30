@@ -172,10 +172,10 @@ function run_all_examples()
         example_rational_function()
         example_eigenvalue_problem()
         
-        println("\\n✅ All examples completed successfully!")
+        println("\\nAll examples completed successfully!")
         
     catch e
-        println("❌ Error running examples: $e")
+        println("Error running examples: $e")
         rethrow(e)
     end
 end

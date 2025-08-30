@@ -106,10 +106,10 @@ end
 
 ### Understanding What Happened
 
-🎯 **FeastKit searched only in `[0.5, 1.5]`** - it didn't compute all eigenvalues  
-⚡ **Found eigenvalues efficiently** - using contour integration  
-✅ **Verified convergence** - `result.info == 0` means success  
-📊 **Provided eigenvectors too** - stored in `result.q`
+FeastKit searched only in `[0.5, 1.5]` — it didn't compute all eigenvalues  
+Found eigenvalues efficiently using contour integration  
+Verified convergence — `result.info == 0` means success  
+Provided eigenvectors too — stored in `result.q`
 
 ---
 
@@ -248,15 +248,15 @@ result.res       # Individual residuals
 
 ```julia
 if result.info == 0
-    println("✅ Success! Found $(result.M) eigenvalues")
+    println("Success! Found $(result.M) eigenvalues")
 elseif result.info == 1
-    println("❌ Error: Invalid matrix size")
+    println("Error: Invalid matrix size")
 elseif result.info == 2  
-    println("❌ Error: Invalid M0 parameter")
+    println("Error: Invalid M0 parameter")
 elseif result.info == 3
-    println("❌ Error: Invalid search interval")
+    println("Error: Invalid search interval")
 else
-    println("❌ Error: Code $(result.info)")
+    println("Error: Code $(result.info)")
 end
 ```
 
@@ -371,17 +371,17 @@ println("Memory used: $(Base.summarysize(result) / 1e6) MB")
 
 Now that you understand the basics, explore these advanced topics:
 
-#### 🚀 **Performance Optimization**
+#### Performance Optimization
 - [Matrix-Free Interface](@ref matrix-free-interface) - Handle matrices too large for memory
 - [Parallel Computing](@ref parallel-computing) - Use multiple cores and nodes
 - [Performance Tips](@ref performance-guide) - Speed and memory optimization
 
-#### 🎯 **Advanced Features**  
+#### Advanced Features  
 - [Custom Contour Integration](@ref custom-contours) - Zolotarev, Gauss-Legendre methods
 - [Complex Eigenvalues](@ref complex-eigenvalues) - Non-Hermitian problems
 - [Polynomial Eigenvalue Problems](@ref polynomial-problems) - Quadratic and higher-order
 
-#### 📚 **Real Applications**
+#### Real Applications
 - [Structural Dynamics](@ref examples) - Vibration analysis
 - [Quantum Mechanics](@ref examples) - Electronic structure
 - [Fluid Dynamics](@ref examples) - Stability analysis
@@ -414,10 +414,10 @@ end
 
 ### Getting Help
 
-- 📖 **Full API**: [API Reference](@ref api-reference)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/your-repo/FeastKit.jl/issues)  
-- 💬 **Community**: [GitHub Discussions](https://github.com/your-repo/FeastKit.jl/discussions)
-- 📧 **Contact**: your-email@domain.com
+- Full API: [API Reference](@ref api-reference)
+- Issues: [GitHub Issues](https://github.com/your-repo/FeastKit.jl/issues)  
+- Community: [GitHub Discussions](https://github.com/your-repo/FeastKit.jl/discussions)
+- Contact: your-email@domain.com
 
 ---
 

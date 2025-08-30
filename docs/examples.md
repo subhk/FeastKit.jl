@@ -1186,7 +1186,7 @@ if length(all_eigenvalues) > 0
     
     if length(unstable_modes) > 0
         max_growth = maximum(real.(unstable_modes))
-        println("\\n⚠️  FLOW IS UNSTABLE!")
+        println("\\nFLOW IS UNSTABLE!")
         println("Maximum growth rate: $max_growth")
         
         # Find most unstable mode
@@ -1196,7 +1196,7 @@ if length(all_eigenvalues) > 0
         println("Doubling time: $(log(2)/real(λ_most_unstable))")
         
     else
-        println("\\n✅ FLOW APPEARS STABLE")
+        println("\\nFLOW APPEARS STABLE")
         println("All found modes have negative or zero growth rates")
     end
 else

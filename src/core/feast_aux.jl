@@ -121,17 +121,17 @@ function feast_info_symmetric(fpm::Vector{Int}, N::Int, M0::Int, M::Int,
     println("Exit code (info): ", info)
     
     if info == 0
-        println("✓ FeastKit converged successfully")
+        println("FeastKit converged successfully")
     elseif info == 1
-        println("⚠ Invalid matrix size")
+        println("Warning: Invalid matrix size")
     elseif info == 2
-        println("⚠ Invalid subspace size")
+        println("Warning: Invalid subspace size")
     elseif info == 3
-        println("⚠ Invalid search interval")
+        println("Warning: Invalid search interval")
     elseif info == 5
-        println("⚠ FeastKit did not converge")
+        println("Warning: FeastKit did not converge")
     else
-        println("⚠ FeastKit terminated with error code: ", info)
+        println("Warning: FeastKit terminated with error code: ", info)
     end
     
     println("="^50)
@@ -159,9 +159,9 @@ function feast_info_general(fpm::Vector{Int}, N::Int, M0::Int, M::Int,
     println("Exit code (info): ", info)
     
     if info == 0
-        println("✓ FeastKit converged successfully")
+        println("FeastKit converged successfully")
     else
-        println("⚠ FeastKit terminated with error code: ", info)
+        println("Warning: FeastKit terminated with error code: ", info)
     end
     
     println("="^50)

@@ -1,4 +1,4 @@
-# Feast.jl
+# FeastKit.jl
 
 [![CI](https://github.com/subhk/Feast.jl/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/subhk/Feast.jl/actions/workflows/ci.yml?query=branch%3Amain)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://subhk.github.io/Feast.jl/)
@@ -23,7 +23,7 @@ Feast.jl is a pure Julia translation of the original Feast library. Feast is a n
 
 ```julia
 using Pkg
-Pkg.add("Feast")
+Pkg.add("FeastKit")
 ```
 
 ## Quick Start

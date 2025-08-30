@@ -593,5 +593,5 @@ diagnostics = diagnose_contour_quality(contour, A, interval)
 
 <div align="center">
   <p><strong>Master advanced contour integration techniques with FeastKit.jl</strong></p>
-  ← [Performance](@ref "performance_guide") | [API Reference](@ref "api_reference") →
+  ← [Performance](performance.md) | [API Reference](api_reference.md) →
 </div>

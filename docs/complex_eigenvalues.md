@@ -1,5 +1,8 @@
 # Complex Eigenvalues (Non-Hermitian) {#complex-eigenvalues}
 
+```@id complex-eigenvalues
+```
+
 
 For non-Hermitian problems, search in a circular region of the complex plane:
 

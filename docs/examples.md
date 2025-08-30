@@ -3,6 +3,9 @@
 ```@id examples
 ```
 
+```@id examples
+```
+
 Comprehensive collection of FeastKit.jl examples from basic usage to advanced applications.
 
 ## Table of Contents

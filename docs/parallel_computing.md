@@ -1,5 +1,8 @@
 # Parallel Computing {#parallel-computing}
 
+```@id parallel-computing
+```
+
 
 FeastKit supports multiple parallel backends:
 

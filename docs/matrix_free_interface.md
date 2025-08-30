@@ -1,5 +1,8 @@
 # Matrix-Free FeastKit Interface {#matrix-free-interface}
 
+```@id matrix-free-interface
+```
+
 
 The matrix-free interface allows you to use FeastKit without explicitly storing matrices, making it ideal for large-scale problems where memory is limited or when matrices are too expensive to construct.
 

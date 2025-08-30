@@ -84,11 +84,11 @@ println("Searching for eigenvalues in [$Emin, $Emax]")
 ```
 
 ```julia
-# Step 3: Run Feast
+# Step 3: Run FeastKit
 # M0 = maximum number of eigenvalues to find
 result = feast(A, (Emin, Emax), M0=10)
 
-println("Feast completed:")
+println("FeastKit completed:")
 println("  Status: $(result.info == 0 ? "Success" : "Error")")
 println("  Found: $(result.M) eigenvalues")
 println("  Iterations: $(result.loop)")
@@ -106,7 +106,7 @@ end
 
 ### Understanding What Happened
 
-🎯 **Feast searched only in `[0.5, 1.5]`** - it didn't compute all eigenvalues  
+🎯 **FeastKit searched only in `[0.5, 1.5]`** - it didn't compute all eigenvalues  
 ⚡ **Found eigenvalues efficiently** - using contour integration  
 ✅ **Verified convergence** - `result.info == 0` means success  
 📊 **Provided eigenvectors too** - stored in `result.q`

@@ -140,7 +140,7 @@ result = feast(A_op, B_op, interval, solver=my_custom_solver)
 
 ### Custom Contour Integration
 
-Use advanced contour integration methods from the original Fortran Feast:
+Use advanced contour integration methods from the original Fortran FEAST:
 
 ```julia
 # Gauss-Legendre integration (high accuracy)
@@ -269,7 +269,7 @@ result = feast(A_op, (4.8, 5.2), M0=8, solver=:cg)
 Common issues and solutions:
 
 - **Linear solver convergence**: Increase `maxiter`, decrease `rtol`, or try different solver
-- **Feast not converging**: Increase `maxiter` in Feast parameters, adjust `tol` 
+- **FeastKit not converging**: Increase `maxiter` in FeastKit parameters, adjust `tol` 
 - **No eigenvalues found**: Check that search interval/region contains eigenvalues
 - **Memory issues**: Use iterative solvers, increase sparsity, consider domain decomposition
 
@@ -285,9 +285,9 @@ The matrix-free interface works well with:
 
 Example with LinearMaps.jl:
 ```julia
-using LinearMaps, Feast
+using LinearMaps, FeastKit
 
-# Convert LinearMap to Feast operator
+# Convert LinearMap to FeastKit operator
 lmap = LinearMap(your_function!, n)
 A_op = LinearOperator{Float64}((y,x) -> mul!(y, lmap, x), (n, n))
 

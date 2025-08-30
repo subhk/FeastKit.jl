@@ -1,5 +1,8 @@
 # FeastKit.jl Documentation
 
+```@id home
+```
+
 <div align="center">
   <h1>🎯 FeastKit.jl</h1>
   <p><em>Fast Eigenvalue Algorithm using Spectral Transformations in Julia</em></p>
@@ -14,7 +17,7 @@
 
 ---
 
-## What is Feast?
+## What is FEAST?
 
 FeastKit.jl is a Julia implementation of the **FEAST eigenvalue algorithm**, a powerful numerical method for finding eigenvalues and eigenvectors of large sparse matrices within specified intervals or regions. Unlike traditional methods that compute all eigenvalues, FeastKit allows you to:
 
@@ -65,7 +68,7 @@ println("Found $(result.M) eigenvalues:")
 println(result.lambda[1:result.M])
 ```
 
-**That's it!** Feast found the eigenvalues in your target interval.
+**That's it!** FeastKit found the eigenvalues in your target interval.
 
 ### Matrix-Free Example
 
@@ -222,7 +225,7 @@ end
 
 ### The FEAST Algorithm
 
-Feast uses **contour integration** in the complex plane to extract eigenvalues in specified regions. The key idea:
+The FEAST algorithm uses **contour integration** in the complex plane to extract eigenvalues in specified regions. The key idea:
 
 1. **Define a contour** around your region of interest
 2. **Integrate along the contour** using spectral projectors  

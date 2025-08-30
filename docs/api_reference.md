@@ -1,5 +1,8 @@
 # API Reference
 
+```@id api-reference
+```
+
 Complete reference for all FeastKit.jl functions, types, and interfaces.
 
 ## Table of Contents
@@ -18,7 +21,7 @@ Complete reference for all FeastKit.jl functions, types, and interfaces.
 
 ### feast
 
-Main Feast interface for symmetric/Hermitian eigenvalue problems.
+Main FeastKit interface for symmetric/Hermitian eigenvalue problems.
 
 ```julia
 feast(A, interval; M0=10, fpm=nothing, kwargs...)
@@ -32,7 +35,7 @@ feast(A, B, interval; M0=10, fpm=nothing, kwargs...)
 
 **Keyword Arguments:**
 - `M0::Int=10`: Maximum number of eigenvalues to find
-- `fpm::Vector{Int}`: Feast parameter array (auto-initialized if `nothing`)
+- `fpm::Vector{Int}`: FeastKit parameter array (auto-initialized if `nothing`)
 - `parallel::Union{Bool,Symbol}=false`: Parallelization mode
 - `use_threads::Bool=true`: Enable threading
 - `comm`: MPI communicator (if using MPI)
@@ -56,7 +59,7 @@ result = feast(A, (0, 1), M0=20, fpm=fpm)
 
 ### feast_general
 
-Feast interface for general (non-Hermitian) eigenvalue problems using circular contours.
+FeastKit interface for general (non-Hermitian) eigenvalue problems using circular contours.
 
 ```julia
 feast_general(A, B, center, radius; M0=10, fpm=nothing)
@@ -78,7 +81,7 @@ result = feast_general(A, B, 1.0+0.5im, 2.0, M0=10)
 
 ### feast_banded
 
-Feast interface for banded matrices.
+FeastKit interface for banded matrices.
 
 ```julia  
 feast_banded(A, kla, interval; B=nothing, klb=0, M0=10, fpm=nothing)
@@ -130,7 +133,7 @@ end
 # Create operator
 A_op = LinearOperator{Float64}(A_mul!, (n, n), issymmetric=true)
 
-# Use with Feast
+# Use with FeastKit
 result = feast(A_op, (0.5, 1.5), M0=10, solver=:cg)
 ```
 
@@ -162,7 +165,7 @@ MatrixVecFunction{T}(mul!, size; kwargs...)
 
 ### feast (Matrix-Free)
 
-Matrix-free Feast interfaces.
+Matrix-free FeastKit interfaces.
 
 ```julia
 # Symmetric/Hermitian problems
@@ -187,7 +190,7 @@ feast_general(A_op::MatrixFreeOperator{Complex}, B_op, center, radius; kwargs...
 
 ### create_iterative_solver
 
-Create iterative linear solver for matrix-free Feast.
+Create iterative linear solver for matrix-free FeastKit.
 
 ```julia
 create_iterative_solver(A_op, B_op, solver_type=:gmres; kwargs...)
@@ -288,7 +291,7 @@ feast_rational_expert(Zne, Wne, lambda)
 
 ### feast (Parallel)
 
-Parallel Feast interfaces.
+Parallel FeastKit interfaces.
 
 ```julia
 feast(A, interval; parallel=:mpi, comm=MPI.COMM_WORLD, kwargs...)
@@ -310,7 +313,7 @@ mpi_feast(A, B, interval, comm; kwargs...)
 
 ### ParallelFeastState
 
-State structure for parallel Feast calculations.
+State structure for parallel FeastKit calculations.
 
 ```julia
 state = ParallelFeastState(comm, A, B, interval, M0)
@@ -323,7 +326,7 @@ result = feast_parallel!(state)
 
 ### FeastResult
 
-Result structure returned by Feast calculations.
+Result structure returned by FeastKit calculations.
 
 ```julia
 struct FeastResult{T<:Real, VT}
@@ -359,7 +362,7 @@ end
 
 ### FeastParameters
 
-Feast parameter structure.
+FeastKit parameter structure.
 
 ```julia
 struct FeastParameters
@@ -385,17 +388,17 @@ abstract type MatrixFreeOperator{T} end
 
 ### feastinit!
 
-Initialize Feast parameter array.
+Initialize FeastKit parameter array.
 
 ```julia
 feastinit!(fpm::Vector{Int})
 ```
 
-Sets default values for all Feast parameters.
+Sets default values for all FeastKit parameters.
 
 ### feastdefault!
 
-Reset Feast parameters to defaults.
+Reset FeastKit parameters to defaults.
 
 ```julia
 feastdefault!(fpm::Vector{Int})
@@ -403,7 +406,7 @@ feastdefault!(fpm::Vector{Int})
 
 ### feast_set_defaults!
 
-Set common Feast parameters with user-friendly names.
+Set common FeastKit parameters with user-friendly names.
 
 ```julia
 feast_set_defaults!(fpm; print_level=1, integration_points=8, 
@@ -423,7 +426,7 @@ feast_validate_interval(A, interval)
 
 ### feast_summary
 
-Print summary of Feast results.
+Print summary of FeastKit results.
 
 ```julia
 feast_summary(result::FeastResult)
@@ -431,7 +434,7 @@ feast_summary(result::FeastResult)
 
 ### eigvals_feast
 
-Extract only eigenvalues from Feast calculation.
+Extract only eigenvalues from FeastKit calculation.
 
 ```julia
 eigvals_feast(A, interval; kwargs...)
@@ -442,7 +445,7 @@ eigvals_feast(A, interval; kwargs...)
 
 ### eigen_feast  
 
-Return Eigen object from Feast calculation.
+Return Eigen object from FeastKit calculation.
 
 ```julia
 eigen_feast(A, interval; kwargs...)
@@ -468,7 +471,7 @@ allocate_matfree_workspace(T, N, M0)
 
 ## Error Codes
 
-Feast functions return status codes in `result.info`:
+FeastKit functions return status codes in `result.info`:
 
 | Code | Name | Description |
 |------|------|-------------|
@@ -481,7 +484,7 @@ Feast functions return status codes in `result.info`:
 | 6 | `Feast_ERROR_MEMORY` | Memory allocation failed |
 | 7 | `Feast_ERROR_INTERNAL` | Internal error |
 | 8 | `Feast_ERROR_LAPACK` | Linear algebra error |
-| 9 | `Feast_ERROR_FPM` | Invalid Feast parameters |
+| 9 | `Feast_ERROR_FPM` | Invalid FeastKit parameters |
 
 **Error handling:**
 ```julia
@@ -493,7 +496,7 @@ if result.info != 0
                   "Feast_ERROR_NO_CONVERGENCE", "Feast_ERROR_MEMORY",
                   "Feast_ERROR_INTERNAL", "Feast_ERROR_LAPACK", 
                   "Feast_ERROR_FPM"][result.info + 1]
-    @warn "Feast failed with $error_name"
+    @warn "FeastKit failed with $error_name"
 end
 ```
 
@@ -501,7 +504,7 @@ end
 
 ## Parameter Reference
 
-The `fpm` parameter array controls Feast behavior:
+The `fpm` parameter array controls FeastKit behavior:
 
 | Index | Parameter | Default | Description |
 |-------|-----------|---------|-------------|
@@ -560,5 +563,5 @@ result = feast(A, interval, M0=10, fpm=fpm)
 
 <div align="center">
   <p><strong>Complete API documentation for FeastKit.jl</strong></p>
-  <p><a href="getting_started.html">← Getting Started</a> | <a href="examples.html">Examples →</a></p>
+  <p><a href="@ref getting-started">← Getting Started</a> | <a href="@ref examples">Examples →</a></p>
 </div>

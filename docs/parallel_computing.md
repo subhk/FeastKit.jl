@@ -1,5 +1,8 @@
 # Parallel Computing
 
+```@id parallel-computing
+```
+
 FeastKit supports multiple parallel backends:
 
 - Threads: `parallel = :threads`

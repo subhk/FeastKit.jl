@@ -1,5 +1,8 @@
 # Custom Contour Integration
 
+```@id custom-contours
+```
+
 Advanced guide to customizing Feast's contour integration for optimal performance and accuracy.
 
 ## Table of Contents

@@ -1,5 +1,8 @@
 # Examples and Tutorials
 
+```@id examples
+```
+
 Comprehensive collection of FeastKit.jl examples from basic usage to advanced applications.
 
 ## Table of Contents
@@ -15,7 +18,7 @@ Comprehensive collection of FeastKit.jl examples from basic usage to advanced ap
 
 ## Basic Examples
 
-### Example 1: Your First Feast Calculation
+### Example 1: Your First FeastKit Calculation
 
 **Problem**: Find eigenvalues of a simple symmetric matrix.
 
@@ -80,7 +83,7 @@ println("Sparse matrix: $(n)×$(n) with $(nnz(A)) nonzeros")
 println("Expected λ₁ ≈ $λ_min")
 println("Expected λ₁₀ ≈ $λ_10")
 
-# Feast search
+# FeastKit search
 result = feast(A, (λ_min * 0.9, λ_10 * 1.1), M0=12)
 
 println("\\nFEAST found $(result.M) eigenvalues:")
@@ -426,7 +429,7 @@ println("Peak memory usage: ~$(8 * n_dofs * result.M / 1e6) MB")
 
 ### Example 8: Iterative Solver Comparison
 
-**Problem**: Compare different iterative solvers for matrix-free Feast.
+**Problem**: Compare different iterative solvers for matrix-free FeastKit.
 
 ```julia
 using FeastKit, LinearAlgebra, BenchmarkTools
@@ -658,7 +661,7 @@ try
     p = scatter(real.(true_eigenvalues), imag.(true_eigenvalues), 
                label="All eigenvalues", alpha=0.6, ms=4)
     scatter!(p, real.(all_found_eigenvalues), imag.(all_found_eigenvalues),
-            label="Feast found", color=:red, ms=6, alpha=0.8)
+            label="FeastKit found", color=:red, ms=6, alpha=0.8)
     
     # Draw search circles
     θ = 0:0.1:2π
@@ -700,7 +703,7 @@ println("Quadratic Eigenvalue Problem: (λ²M + λC + K)x = 0")
 println("Damped vibration system")
 println("System size: $(n)×$(n)")
 
-# Convert to matrix-free operators for polynomial Feast
+# Convert to matrix-free operators for polynomial FeastKit
 K_op = LinearOperator{ComplexF64}((y, x) -> mul!(y, K, real.(x)), (n, n))
 C_op = LinearOperator{ComplexF64}((y, x) -> mul!(y, C, real.(x)), (n, n))  
 M_op = LinearOperator{ComplexF64}((y, x) -> mul!(y, M, real.(x)), (n, n))
@@ -805,7 +808,7 @@ for n in problem_sizes
     nnz_sparse = round(Int, 0.001 * n^2)
     sparse_memory = (8 * nnz_sparse + 4 * (nnz_sparse + n + 1)) / 1e6  # data + indices
     
-    # Matrix-free memory (just vectors for Feast)
+    # Matrix-free memory (just vectors for FeastKit)
     M0 = 10
     matfree_memory = 8 * n * M0 / 1e6  # Workspace vectors
     
@@ -875,7 +878,7 @@ end
 
 @everywhere using FeastKit, LinearAlgebra
 
-println("Parallel Feast Performance Test")
+println("Parallel FeastKit Performance Test")
 println("Available processes: $(nprocs())")
 println("Worker processes: $(nworkers())")
 
@@ -894,7 +897,7 @@ println("\\n" * "="^50)
 println("Performance Comparison:")
 
 # Serial Feast
-println("\\nSerial Feast:")
+println("\\nSerial FeastKit:")
 GC.gc()  # Clean garbage before timing
 serial_time = @elapsed begin
     result_serial = feast(A, interval, M0=M0, parallel=false)
@@ -906,7 +909,7 @@ println("  Status: $(result_serial.info == 0 ? "Success" : "Failed")")
 
 # Parallel Feast with threading  
 if Threads.nthreads() > 1
-    println("\\nThreaded Feast ($(Threads.nthreads()) threads):")
+    println("\\nThreaded FeastKit ($(Threads.nthreads()) threads):")
     GC.gc()
     threaded_time = @elapsed begin
         result_threaded = feast(A, interval, M0=M0, parallel=:threads)
@@ -920,7 +923,7 @@ end
 
 # Distributed parallel Feast
 if nworkers() > 1
-    println("\\nDistributed Feast ($(nworkers()) workers):")
+    println("\\nDistributed FeastKit ($(nworkers()) workers):")
     GC.gc()
     distributed_time = @elapsed begin
         result_distributed = feast(A, interval, M0=M0, parallel=:distributed)

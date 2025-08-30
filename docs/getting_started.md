@@ -1,5 +1,8 @@
 # Getting Started with FeastKit.jl
 
+```@id getting-started
+```
+
 This guide will get you up and running with FeastKit.jl in minutes. Whether you're new to eigenvalue problems or an experienced user, this tutorial covers everything you need to know.
 
 ## Table of Contents
@@ -369,20 +372,20 @@ println("Memory used: $(Base.summarysize(result) / 1e6) MB")
 Now that you understand the basics, explore these advanced topics:
 
 #### 🚀 **Performance Optimization**
-- [Matrix-Free Interface](matrix_free_interface.md) - Handle matrices too large for memory
-- [Parallel Computing](parallel_computing.md) - Use multiple cores and nodes
-- [Performance Tips](performance.md) - Speed and memory optimization
+- [Matrix-Free Interface](@ref matrix-free-interface) - Handle matrices too large for memory
+- [Parallel Computing](@ref parallel-computing) - Use multiple cores and nodes
+- [Performance Tips](@ref performance-guide) - Speed and memory optimization
 
 #### 🎯 **Advanced Features**  
-- [Custom Contour Integration](custom_contours.md) - Zolotarev, Gauss-Legendre methods
-- [Complex Eigenvalues](complex_eigenvalues.md) - Non-Hermitian problems
-- [Polynomial Eigenvalue Problems](polynomial_problems.md) - Quadratic and higher-order
+- [Custom Contour Integration](@ref custom-contours) - Zolotarev, Gauss-Legendre methods
+- [Complex Eigenvalues](@ref complex-eigenvalues) - Non-Hermitian problems
+- [Polynomial Eigenvalue Problems](@ref polynomial-problems) - Quadratic and higher-order
 
 #### 📚 **Real Applications**
-- [Structural Dynamics](examples.md) - Vibration analysis
-- [Quantum Mechanics](examples.md) - Electronic structure
-- [Fluid Dynamics](examples.md) - Stability analysis
-- [Network Analysis](examples.md) - Graph eigenvalues
+- [Structural Dynamics](@ref examples) - Vibration analysis
+- [Quantum Mechanics](@ref examples) - Electronic structure
+- [Fluid Dynamics](@ref examples) - Stability analysis
+- [Network Analysis](@ref examples) - Graph eigenvalues
 
 ### Quick Reference Card
 
@@ -411,7 +414,7 @@ end
 
 ### Getting Help
 
-- 📖 **Full API**: [API Reference](api_reference.md)
+- 📖 **Full API**: [API Reference](@ref api-reference)
 - 🐛 **Issues**: [GitHub Issues](https://github.com/your-repo/FeastKit.jl/issues)  
 - 💬 **Community**: [GitHub Discussions](https://github.com/your-repo/FeastKit.jl/discussions)
 - 📧 **Contact**: your-email@domain.com

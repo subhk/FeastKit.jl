@@ -1,5 +1,8 @@
 # Performance Guide
 
+```@id performance-guide
+```
+
 Optimize FeastKit.jl for maximum performance in your eigenvalue calculations.
 
 ## Table of Contents
@@ -239,7 +242,7 @@ end
 using FeastKit, LinearAlgebra
 BLAS.set_num_threads(8)  # Use 8 threads for BLAS operations
 
-# Enable threading in Feast
+# Enable threading in FeastKit
 result = feast(A, interval, M0=20, parallel=:threads)
 ```
 
@@ -253,7 +256,7 @@ addprocs(4)
 
 @everywhere using FeastKit
 
-# Distributed Feast
+# Distributed FeastKit
 result = feast(A, interval, M0=20, parallel=:mpi)
 ```
 

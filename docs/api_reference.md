@@ -134,6 +134,20 @@ A_op = LinearOperator{Float64}(A_mul!, (n, n), issymmetric=true)
 result = feast(A_op, (0.5, 1.5), M0=10, solver=:cg)
 ```
 
+```@docs
+FeastKit.LinearOperator
+FeastKit.MatrixVecFunction
+FeastKit.MatrixFreeOperator
+FeastKit.feast
+FeastKit.feast_general
+FeastKit.feast_polynomial
+FeastKit.feast_matfree_srci!
+FeastKit.feast_matfree_grci!
+FeastKit.allocate_matfree_workspace
+FeastKit.create_iterative_solver
+FeastKit.create_direct_solver
+```
+
 ### MatrixVecFunction
 
 Alternative matrix-free operator with data storage.
@@ -224,6 +238,12 @@ contour = feast_contour_expert(0.0, 2.0, 12, 2, 100)
 
 # Flat ellipse (aspect ratio 0.5)
 contour = feast_contour_expert(-1.0, 1.0, 10, 0, 50)
+```
+
+```@docs
+FeastKit.feast_contour_expert
+FeastKit.feast_contour_custom_weights!
+FeastKit.feast_rational_expert
 ```
 
 ### feast_gcontour

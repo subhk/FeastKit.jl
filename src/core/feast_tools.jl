@@ -3,45 +3,9 @@
 
 # Helper functions for integration nodes
 function gauss_legendre_point(n::Int, k::Int)
-    # Compute k-th Gauss-Legendre point and weight for n-point quadrature
-    # This is a simplified implementation - for production use, consider using
-    # a specialized library like FastGaussQuadrature.jl
-    
-    # Approximate roots using Chebyshev approximation
-    x = cos(π * (k - 0.25) / (n + 0.5))
-    
-    # Newton-Raphson refinement
-    # Initialize outside the loop so they are defined for weight calculation
-    p1 = 1.0
-    p2 = 0.0
-    for _ in 1:10
-        p1 = 1.0
-        p2 = 0.0
-        
-        # Compute Legendre polynomial P_n(x) using recurrence
-        for j in 1:n
-            p3 = p2
-            p2 = p1
-            p1 = ((2*j - 1) * x * p2 - (j - 1) * p3) / j
-        end
-        
-        # Compute derivative
-        pp = n * (x * p1 - p2) / (x * x - 1)
-        
-        # Newton step
-        x1 = x
-        x = x1 - p1 / pp
-        
-        if abs(x - x1) < 1e-14
-            break
-        end
-    end
-    
-    # Compute weight using last-updated Legendre values
-    pp = n * (x * p1 - p2) / (x * x - 1)
-    w = 2 / ((1 - x * x) * pp * pp)
-    
-    return x, w
+    # Gauss–Legendre nodes/weights are provided via the FastGaussQuadrature
+    # package extension. Install FastGaussQuadrature to enable this.
+    throw(ArgumentError("FastGaussQuadrature.jl is required for Gauss–Legendre nodes. Add it to your environment to enable this feature."))
 end
 
 function zolotarev_point(n::Int, k::Int)

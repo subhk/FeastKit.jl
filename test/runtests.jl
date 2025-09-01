@@ -1,12 +1,4 @@
 using FeastKit
-# Load optional FastGaussQuadrature to activate the package extension used for
-# Gauss–Legendre nodes/weights in contour generation.
-try
-    using FastGaussQuadrature
-catch
-    # In local runs without the extra dep, tests that rely on Gauss–Legendre
-    # will error; CI includes this extra via Project.toml test targets.
-end
 using Test
 using LinearAlgebra
 using SparseArrays

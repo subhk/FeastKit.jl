@@ -32,6 +32,7 @@ export feast_polynomial, create_iterative_solver, allocate_matfree_workspace
 using LinearAlgebra
 using SparseArrays
 using Distributed
+using FastGaussQuadrature
 
 include("core/feast_types.jl")
 include("core/feast_parameters.jl")
@@ -70,4 +71,3 @@ function __init__()
 end
 
 end
-

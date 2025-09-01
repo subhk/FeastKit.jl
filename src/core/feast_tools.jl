@@ -4,8 +4,7 @@
 # Helper functions for integration nodes
 function gauss_legendre_point(n::Int, k::Int)
     # Use FastGaussQuadrature directly for robust Gauss–Legendre nodes/weights
-    import FastGaussQuadrature: gausslegendre
-    x, w = gausslegendre(n)
+    x, w = FastGaussQuadrature.gausslegendre(n)
     return x[k], w[k]
 end
 

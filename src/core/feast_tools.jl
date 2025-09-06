@@ -41,18 +41,29 @@ function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:Real
     Zne = Vector{Complex{T}}(undef, ne)
     Wne = Vector{Complex{T}}(undef, ne)
     
+    # Precompute Gauss–Legendre nodes/weights if needed
+    x_gl = nothing
+    w_gl = nothing
+    if fpm16 == 0
+        x_gl, w_gl = FastGaussQuadrature.gausslegendre(ne)
+    end
+
     for e in 1:ne
-        if fpm16 == 0  # Gauss-Legendre integration
-            xe, we = gauss_legendre_point(ne, e)
-            theta = -π/2 * xe + π/2  # Map [-1,1] to [-π/2, π/2]
-            
-            # Elliptical contour point
+        if fpm16 == 0  # Gauss-Legendre integration on θ ∈ [0, π]
+            xe = x_gl[e]
+            we = w_gl[e]
+            # Map x ∈ [-1, 1] to θ ∈ [0, π]
+            theta = (π/2) * (xe + 1)
+
+            # Elliptical contour point: z(θ) = Emid + r cosθ + i r a sinθ
             Zne[e] = Emid + r * cos(theta) + im * r * aspect_ratio * sin(theta)
-            
-            # Jacobian and weight
-            jac = r * im * sin(theta) + r * aspect_ratio * cos(theta)
-            Wne[e] = 0.25 * we * jac
-            
+
+            # Jacobian dz/dθ = -r sinθ + i r a cosθ
+            jac = -r * sin(theta) + im * r * aspect_ratio * cos(theta)
+
+            # Include dθ/dx = π/2 for the change of variables
+            Wne[e] = (π/2) * we * jac
+
         elseif fpm16 == 2  # Zolotarev integration (optimal for ellipses)
             zxe, zwe = zolotarev_point(ne, e)
             Zne[e] = zxe * r + Emid

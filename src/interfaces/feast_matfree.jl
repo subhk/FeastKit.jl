@@ -486,7 +486,23 @@ end
     feast_polynomial(coeffs_ops, center, radius; kwargs...)
 
 Matrix-free Feast for polynomial eigenvalue problems.
-P(λ) = coeffs_ops[1] + λ*coeffs_ops[2] + λ²*coeffs_ops[3] + ...
+
+Solves the polynomial eigenvalue problem P(λ)x = 0 where:
+P(λ) = coeffs_ops[1] + λ*coeffs_ops[2] + λ²*coeffs_ops[3] + ... + λᵈ*coeffs_ops[d+1]
+
+The polynomial is linearized using companion matrices to form a generalized 
+eigenvalue problem (A - λB)y = 0 of size (d*N × d*N), where y = [x; λx; λ²x; ...; λᵈ⁻¹x].
+
+# Arguments
+- `coeffs_ops`: Vector of matrix operators [C₀, C₁, C₂, ..., Cᵈ] where P(λ) = Σᵢ λⁱCᵢ
+- `center`: Center of circular search region in complex plane
+- `radius`: Radius of circular search region
+- `M0`: Maximum number of eigenvalues to find
+- `solver`: Linear solver type or custom function
+- `kwargs`: Additional options passed to feast_general
+
+# Returns
+- `FeastResult` with eigenvalues λ and corresponding eigenvectors x (first N components of full eigenvector)
 """
 function feast_polynomial(coeffs_ops::Vector{<:MatrixFreeOperator{Complex{T}}},
                          center::Complex{T}, radius::T;
@@ -497,42 +513,67 @@ function feast_polynomial(coeffs_ops::Vector{<:MatrixFreeOperator{Complex{T}}},
     d = length(coeffs_ops) - 1  # Polynomial degree
     N = size(coeffs_ops[1], 1)
     
+    # Validate input
+    if d < 1
+        throw(ArgumentError("Need at least 2 coefficient operators (degree ≥ 1)"))
+    end
+    
+    for i in 1:length(coeffs_ops)
+        if size(coeffs_ops[i]) != (N, N)
+            throw(DimensionMismatch("All coefficient operators must have size ($N, $N)"))
+        end
+    end
+    
     # Linearize polynomial eigenvalue problem
     # Convert P(λ)x = 0 to generalized eigenvalue problem (A - λB)y = 0
     
     # Create companion matrix operators
-    function A_companion_mul!(y, x)
-        # Implementation of companion matrix multiplication
-        # This is a simplified version - full implementation would be more complex
+    # For polynomial P(λ) = C_0 + λC_1 + λ²C_2 + ... + λᵈC_d
+    # The companion matrix is of size (d*N × d*N) and has the structure:
+    #   A = [   0    I    0  ...   0  ]
+    #       [   0    0    I  ...   0  ]
+    #       [   :    :    :  ⋱    :  ]
+    #       [   0    0    0  ...   I  ]
+    #       [-C_0  -C_1  -C_2 ... -C_{d-1}]
+    
+    function A_companion_mul!(y::AbstractVector, x::AbstractVector)
         n = N
+        fill!(y, 0)
         
-        # First block row: -coeffs[1] * x[1:n] + coeffs[end] * x[(d-1)*n+1:d*n]
-        mul!(view(y, 1:n), coeffs_ops[1], view(x, 1:n))
-        y[1:n] .*= -1
-        if d > 0
-            temp = similar(view(y, 1:n))
-            mul!(temp, coeffs_ops[end], view(x, (d-1)*n+1:d*n))
-            y[1:n] .+= temp
+        # Identity blocks in super-diagonal: x[i*n+1:(i+1)*n] -> y[(i-1)*n+1:i*n]
+        for i in 1:d-1
+            # Block (i-1, i): I_n
+            y[(i-1)*n+1:i*n] .= view(x, i*n+1:(i+1)*n)
         end
         
-        # Identity blocks for other rows
-        for i in 1:d-1
-            y[i*n+1:(i+1)*n] .= view(x, (i-1)*n+1:i*n)
+        # Last block row: -C_0*x[1:n] - C_1*x[n+1:2n] - ... - C_{d-1}*x[(d-1)*n+1:d*n]
+        temp_vec = zeros(eltype(x), n)
+        for i in 0:d-1
+            mul!(temp_vec, coeffs_ops[i+1], view(x, i*n+1:(i+1)*n))
+            y[(d-1)*n+1:d*n] .-= temp_vec
         end
     end
     
-    function B_companion_mul!(y, x)
-        # B matrix for companion form
+    function B_companion_mul!(y::AbstractVector, x::AbstractVector)
+        # B matrix for companion linearization has the structure:
+        #   B = [ I   0   0  ...  0  ]
+        #       [ 0   I   0  ...  0  ]
+        #       [ :   :   :  ⋱   :  ]
+        #       [ 0   0   0  ...  I  ]
+        #       [ 0   0   0  ... C_d ]
+        
+        n = N
         fill!(y, 0)
         
-        # Last coefficient block in first row
-        if d > 1
-            mul!(view(y, 1:N), coeffs_ops[end], view(x, (d-1)*N+1:d*N))
+        # Identity blocks on diagonal for first d-1 block rows
+        for i in 0:d-2
+            # Block (i, i): I_n
+            y[i*n+1:(i+1)*n] .= view(x, i*n+1:(i+1)*n)
         end
         
-        # Identity blocks
-        for i in 1:d-1
-            mul!(view(y, i*N+1:(i+1)*N), coeffs_ops[i+1], view(x, (i-1)*N+1:i*N))
+        # Last block row, last block: C_d * x[(d-1)*n+1:d*n]
+        if d >= 1
+            mul!(view(y, (d-1)*n+1:d*n), coeffs_ops[end], view(x, (d-1)*n+1:d*n))
         end
     end
     

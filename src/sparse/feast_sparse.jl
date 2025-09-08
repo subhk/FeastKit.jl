@@ -2,6 +2,7 @@
 # Translated from dzfeast_sparse.f90 and related files
 
 using SparseArrays
+using Krylov
 
 function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                        Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
@@ -263,11 +264,15 @@ function feast_scsrgv_iterative!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T
     return result
 end
 
-# Matrix-free interface for sparse problems
+# Matrix-free interface for sparse problems with GMRES solver
 function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                              N::Int, Emin::T, Emax::T, M0::Int, 
-                             fpm::Vector{Int}) where T<:Real
-    # Feast with matrix-free operations
+                             fpm::Vector{Int}; 
+                             gmres_rtol::T = T(1e-6),
+                             gmres_atol::T = T(1e-12),
+                             gmres_restart::Int = 20,
+                             gmres_maxiter::Int = 200) where T<:Real
+    # Feast with matrix-free operations using GMRES for linear system solves
     # A_matvec!(y, x) computes y = A*x
     # B_matvec!(y, x) computes y = B*x
     
@@ -285,8 +290,8 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
     mode = Ref(0)
     info = Ref(0)
     
-    # For matrix-free, we need an iterative solver
-    # This is a simplified version - in practice, you'd use GMRES, BiCGSTAB, etc.
+    # Storage for current shift value
+    current_shift = Ref(zero(Complex{T}))
     
     while true
         # Call Feast RCI kernel
@@ -296,35 +301,79 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                    mode, workspace.res, info)
         
         if ijob[] == Int(Feast_RCI_FACTORIZE)
-            # For matrix-free, we don't factorize but prepare for iterative solve
-            # Store the shift for the iterative solver
-            # In practice, you'd set up preconditioners here
+            # Store the current shift for GMRES
+            current_shift[] = Ze[]
             
         elseif ijob[] == Int(Feast_RCI_SOLVE)
-            # Solve (Ze*B - A) * X = B * workspace.work using iterative method
-            z = Ze[]
+            # Solve (Ze*B - A) * X = B * workspace.work using GMRES
+            z = current_shift[]
             
-            # Right-hand side
+            # Right-hand side: B * workspace.work
             rhs = zeros(T, N, M0)
             for j in 1:M0
                 B_matvec!(view(rhs, :, j), view(workspace.work, :, j))
             end
             
-            # Solve each system iteratively (simplified - use proper iterative solver)
-            for j in 1:M0
-                x = zeros(Complex{T}, N)
-                r = complex.(rhs[:, j])
+            # Define linear operator for (Ze*B - A)
+            # For complex shift z, we need to handle real and imaginary parts separately
+            function shifted_matvec!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
+                # Split complex vectors into real and imaginary parts
+                x_real = real.(x)
+                x_imag = imag.(x)
                 
-                # Simple fixed-point iteration (replace with proper solver)
-                for iter in 1:10
-                    # Compute residual and update
-                    temp = zeros(T, N)
-                    A_matvec!(temp, real.(x))
-                    r_new = complex.(rhs[:, j]) .- temp .+ z .* r
-                    x .= r_new ./ (z + 1.0)  # Simplified update
+                # Temporary storage
+                temp_real = zeros(T, N)
+                temp_imag = zeros(T, N)
+                
+                # Compute A*x_real and A*x_imag
+                A_matvec!(temp_real, x_real)
+                A_matvec!(temp_imag, x_imag)
+                y_A_real = temp_real
+                y_A_imag = temp_imag
+                
+                # Compute B*x_real and B*x_imag  
+                B_matvec!(temp_real, x_real)
+                B_matvec!(temp_imag, x_imag)
+                y_B_real = temp_real
+                y_B_imag = temp_imag
+                
+                # y = z*B*x - A*x = (z_real + i*z_imag)*(B*x) - A*x
+                z_real = real(z)
+                z_imag = imag(z)
+                
+                y_real = z_real * y_B_real - z_imag * y_B_imag - y_A_real
+                y_imag = z_real * y_B_imag + z_imag * y_B_real - y_A_imag
+                
+                y .= complex.(y_real, y_imag)
+            end
+            
+            # Create linear operator
+            op = LinearOperator{Complex{T}}(N, N, false, false, shifted_matvec!)
+            
+            # Solve each system using GMRES
+            for j in 1:M0
+                # Convert RHS to complex
+                b = complex.(rhs[:, j])
+                
+                # Initial guess (zero)
+                x0 = zeros(Complex{T}, N)
+                
+                # Solve using GMRES
+                sol, stats = gmres(op, b; 
+                                 x=x0,
+                                 rtol=gmres_rtol,
+                                 atol=gmres_atol, 
+                                 restart=gmres_restart,
+                                 itmax=gmres_maxiter)
+                
+                # Check convergence
+                if !stats.solved
+                    @warn "GMRES did not converge for system $j, residual = $(stats.residuals[end])"
+                    # Set error flag but continue
+                    info[] = Int(Feast_ERROR_LAPACK)
                 end
                 
-                workspace.workc[:, j] .= x
+                workspace.workc[:, j] .= sol
             end
             
         elseif ijob[] == Int(Feast_RCI_MULT_A)
@@ -346,6 +395,31 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
     res = workspace.res[1:M]
     
     return FeastResult{T, T}(lambda, q, M, res, info[], epsout[], loop[])
+end
+
+# Convenience wrapper for sparse matrices using GMRES
+function feast_sparse_matvec!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
+                             Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                             gmres_rtol::T = T(1e-6),
+                             gmres_atol::T = T(1e-12), 
+                             gmres_restart::Int = 20,
+                             gmres_maxiter::Int = 200) where T<:Real
+    # Wrapper that creates matvec functions from sparse matrices
+    N = size(A, 1)
+    
+    # Define matrix-vector multiplication functions
+    function A_matvec!(y::AbstractVector{T}, x::AbstractVector{T})
+        mul!(y, A, x)
+    end
+    
+    function B_matvec!(y::AbstractVector{T}, x::AbstractVector{T})
+        mul!(y, B, x)
+    end
+    
+    # Call the matrix-free version
+    return feast_sparse_matvec!(A_matvec!, B_matvec!, N, Emin, Emax, M0, fpm;
+                               gmres_rtol=gmres_rtol, gmres_atol=gmres_atol,
+                               gmres_restart=gmres_restart, gmres_maxiter=gmres_maxiter)
 end
 
 # Utility functions for sparse matrix operations

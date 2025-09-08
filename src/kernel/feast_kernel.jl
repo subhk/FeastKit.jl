@@ -1,6 +1,8 @@
 # Feast kernel routines - Reverse Communication Interface (RCI)
 # Translated from dzfeast.f90
 
+using Random
+
 function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}}, 
                      work::Matrix{T}, workc::Matrix{Complex{T}},
                      Aq::Matrix{T}, Sq::Matrix{T}, fpm::Vector{Int},
@@ -413,13 +415,42 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         loop[] = 0
         state[:M] = 0
         
-        fill!(work, zero(T))
-        fill!(workc, zero(Complex{T}))
+        # Initialize workspace arrays
         fill!(Aq, zero(Complex{T}))
         fill!(Sq, zero(Complex{T}))
         fill!(lambda, zero(Complex{T}))
         fill!(q, zero(Complex{T}))
         fill!(res, zero(T))
+        
+        # Initialize workc with initial subspace
+        # Check if user provides initial guess (fpm[5] = 1) or use random vectors
+        if fpm[5] == 1
+            # User should have provided initial guess in workc
+            # Normalize the columns to ensure numerical stability
+            for j in 1:M0
+                if norm(workc[:, j]) > 0
+                    workc[:, j] ./= norm(workc[:, j])
+                else
+                    # If zero vector provided, use random
+                    for i in 1:N
+                        workc[i, j] = Complex{T}(randn(T), randn(T))
+                    end
+                    workc[:, j] ./= norm(workc[:, j])
+                end
+            end
+        else
+            # Generate random initial subspace
+            for j in 1:M0
+                for i in 1:N
+                    workc[i, j] = Complex{T}(randn(T), randn(T))
+                end
+                # Normalize each column
+                workc[:, j] ./= norm(workc[:, j])
+            end
+        end
+        
+        # work is used for real intermediate results
+        fill!(work, zero(T))
         
         Ze[] = state[:Zne][1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
@@ -474,12 +505,17 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                     if feast_inside_gcontour(lambda_red[i], Emid, r)
                         M += 1
                         lambda[M] = lambda_red[i]
-                        # Compute eigenvectors: q = workc * v_red (complex)
+                        # Compute eigenvectors: q = workc * v_red (complex matrix-vector product)
                         for k in 1:N
                             q[k, M] = zero(Complex{T})
                             for j in 1:M0
                                 q[k, M] += workc[k, j] * v_red[j, i]
                             end
+                        end
+                        # Normalize the computed eigenvector
+                        q_norm = norm(q[:, M])
+                        if q_norm > 0
+                            q[:, M] ./= q_norm
                         end
                     end
                 end
@@ -511,11 +547,12 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         M = state[:M]
         
         for j in 1:M
-            # Residual: r = A*q - lambda*B*q (for general case, B often = I)
-            # workc contains A*q (complex), assuming B = I for simplicity
+            # Residual: r = A*q - lambda*B*q 
+            # For general eigenvalue problems, we assume B = I for simplicity
+            # workc contains A*q (complex result from user computation)
             residual = zeros(Complex{T}, N)
             for i in 1:N
-                # workc contains the result of A*q
+                # workc[i,j] contains (A*q)[i] for j-th eigenvector
                 residual[i] = workc[i, j] - lambda[j] * q[i, j]
             end
             res[j] = norm(residual)

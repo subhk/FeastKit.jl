@@ -547,10 +547,13 @@ function feast_polynomial(coeffs_ops::Vector{<:MatrixFreeOperator{Complex{T}}},
         end
         
         # Last block row: -C_0*x[1:n] - C_1*x[n+1:2n] - ... - C_{d-1}*x[(d-1)*n+1:d*n]
-        temp_vec = zeros(eltype(x), n)
+        # Accumulate directly into output to avoid temporary allocations
         for i in 0:d-1
-            mul!(temp_vec, coeffs_ops[i+1], view(x, i*n+1:(i+1)*n))
-            y[(d-1)*n+1:d*n] .-= temp_vec
+            # Create a temporary view for the matrix-vector product
+            temp_view = view(y, (d-1)*n+1:d*n)
+            temp_storage = similar(temp_view)
+            mul!(temp_storage, coeffs_ops[i+1], view(x, i*n+1:(i+1)*n))
+            temp_view .-= temp_storage
         end
     end
     
@@ -661,6 +664,61 @@ function create_iterative_solver(A_op::MatrixFreeOperator{T},
     end
     
     return linear_solver
+end
+
+"""
+    validate_companion_matrices(A_companion_mul!, B_companion_mul!, coeffs_ops, test_lambda, test_x)
+
+Validate that the companion matrices correctly linearize the polynomial eigenvalue problem.
+
+Tests that if P(λ)x = 0, then (A - λB)y = 0 where y = [x; λx; λ²x; ...; λᵈ⁻¹x].
+"""
+function validate_companion_matrices(A_companion_mul!::Function, 
+                                   B_companion_mul!::Function,
+                                   coeffs_ops::Vector{<:MatrixFreeOperator{Complex{T}}},
+                                   test_lambda::Complex{T}, 
+                                   test_x::AbstractVector{Complex{T}}) where T<:Real
+    
+    d = length(coeffs_ops) - 1
+    N = length(test_x)
+    
+    # Construct companion eigenvector: y = [x; λx; λ²x; ...; λᵈ⁻¹x]
+    y = zeros(Complex{T}, d * N)
+    lambda_power = one(Complex{T})
+    for i in 0:d-1
+        y[i*N+1:(i+1)*N] .= lambda_power .* test_x
+        lambda_power *= test_lambda
+    end
+    
+    # Test (A - λB)y = 0
+    Ay = similar(y)
+    By = similar(y)
+    
+    A_companion_mul!(Ay, y)
+    B_companion_mul!(By, y)
+    
+    residual = Ay - test_lambda * By
+    residual_norm = norm(residual)
+    
+    # Also verify that P(λ)x = 0
+    Px = zeros(Complex{T}, N)
+    temp = similar(test_x)
+    lambda_power = one(Complex{T})
+    
+    for i in 0:d
+        mul!(temp, coeffs_ops[i+1], test_x)
+        Px .+= lambda_power .* temp
+        lambda_power *= test_lambda
+    end
+    
+    polynomial_residual = norm(Px)
+    
+    return (
+        companion_residual = residual_norm,
+        polynomial_residual = polynomial_residual,
+        companion_valid = residual_norm < 1e-12,
+        polynomial_valid = polynomial_residual < 1e-12
+    )
 end
 
 """

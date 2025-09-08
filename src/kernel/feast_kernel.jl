@@ -376,7 +376,6 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     
     # Feast RCI for general (non-Hermitian) eigenvalue problems
     # Uses circular contour in complex plane
-    
     @static if !@isdefined(_feast_grci_state)
         global _feast_grci_state = Dict{Symbol, Any}()
     end
@@ -418,7 +417,9 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         # Initialize workspace arrays
         fill!(Aq, zero(Complex{T}))
         fill!(Sq, zero(Complex{T}))
+
         fill!(lambda, zero(Complex{T}))
+
         fill!(q, zero(Complex{T}))
         fill!(res, zero(T))
         

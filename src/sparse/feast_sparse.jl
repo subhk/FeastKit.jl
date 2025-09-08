@@ -2,7 +2,52 @@
 # Translated from dzfeast_sparse.f90 and related files
 
 using SparseArrays
-using Krylov
+using LinearAlgebra
+
+# Try to import Krylov, but provide fallback if not available
+const KRYLOV_AVAILABLE = try
+    using Krylov
+    true
+catch
+    false
+end
+
+# Simple GMRES fallback implementation (for demonstration)
+function simple_gmres(A_op!::Function, b::Vector{Complex{T}}, x0::Vector{Complex{T}};
+                     rtol::T = T(1e-6), atol::T = T(1e-12), 
+                     restart::Int = 20, maxiter::Int = 200) where T<:Real
+    
+    n = length(b)
+    x = copy(x0)
+    
+    # Simple BiCGSTAB-like iteration as fallback
+    r = copy(b)
+    A_op!(similar(r), x)
+    r .-= similar(r)
+    
+    rho = norm(r)
+    initial_residual = rho
+    
+    for iter in 1:maxiter
+        if rho <= atol || rho <= rtol * initial_residual
+            return x, (solved=true, residuals=[rho])
+        end
+        
+        # Very simplified iterative step
+        # In a real implementation, this would be proper GMRES/BiCGSTAB
+        z = r / (norm(r) + 1e-14)
+        A_op!(r, z)
+        alpha = dot(r, z) / (dot(r, r) + 1e-14)
+        x .+= alpha * z
+        
+        # Update residual
+        A_op!(r, x)
+        r .= b .- r
+        rho = norm(r)
+    end
+    
+    return x, (solved=false, residuals=[rho])
+end
 
 function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                        Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
@@ -347,9 +392,6 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                 y .= complex.(y_real, y_imag)
             end
             
-            # Create linear operator
-            op = LinearOperator{Complex{T}}(N, N, false, false, shifted_matvec!)
-            
             # Solve each system using GMRES
             for j in 1:M0
                 # Convert RHS to complex
@@ -358,22 +400,45 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                 # Initial guess (zero)
                 x0 = zeros(Complex{T}, N)
                 
-                # Solve using GMRES
-                sol, stats = gmres(op, b; 
-                                 x=x0,
-                                 rtol=gmres_rtol,
-                                 atol=gmres_atol, 
-                                 restart=gmres_restart,
-                                 itmax=gmres_maxiter)
-                
-                # Check convergence
-                if !stats.solved
-                    @warn "GMRES did not converge for system $j, residual = $(stats.residuals[end])"
-                    # Set error flag but continue
-                    info[] = Int(Feast_ERROR_LAPACK)
+                # Solve using GMRES (Krylov.jl if available, otherwise fallback)
+                if KRYLOV_AVAILABLE
+                    # Create linear operator for Krylov.jl
+                    op = LinearOperator{Complex{T}}(N, N, false, false, shifted_matvec!)
+                    
+                    sol, stats = gmres(op, b; 
+                                     x=x0,
+                                     rtol=gmres_rtol,
+                                     atol=gmres_atol, 
+                                     restart=gmres_restart,
+                                     itmax=gmres_maxiter)
+                    
+                    # Check convergence
+                    if !stats.solved
+                        @warn "GMRES did not converge for system $j, residual = $(stats.residuals[end])"
+                        info[] = Int(Feast_ERROR_LAPACK)
+                    end
+                    
+                    workspace.workc[:, j] .= sol
+                else
+                    # Use fallback solver
+                    @warn "Krylov.jl not available, using simplified iterative solver"
+                    
+                    # Create function wrapper for simple solver
+                    function A_op_wrapper!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
+                        shifted_matvec!(y, x)
+                    end
+                    
+                    sol, stats = simple_gmres(A_op_wrapper!, b, x0;
+                                            rtol=gmres_rtol, atol=gmres_atol,
+                                            restart=gmres_restart, maxiter=gmres_maxiter)
+                    
+                    if !stats.solved
+                        @warn "Simple iterative solver did not converge for system $j"
+                        info[] = Int(Feast_ERROR_LAPACK)
+                    end
+                    
+                    workspace.workc[:, j] .= sol
                 end
-                
-                workspace.workc[:, j] .= sol
             end
             
         elseif ijob[] == Int(Feast_RCI_MULT_A)

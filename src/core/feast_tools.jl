@@ -281,6 +281,17 @@ function feast_sort!(lambda::Vector{T}, q::Matrix{VT},
     return nothing
 end
 
+# Sort function for complex eigenvalues (general case)
+function feast_sort_general!(lambda::Vector{Complex{T}}, q::Matrix{Complex{T}}, 
+                           res::Vector{T}, M::Int) where T<:Real
+    # Sort by eigenvalue magnitude |lambda|
+    perm = sortperm(abs.(lambda[1:M]))
+    lambda[1:M] = lambda[perm]
+    q[:, 1:M] = q[:, perm]
+    res[1:M] = res[perm]
+    return nothing
+end
+
 # Compute residual norms
 function feast_residual!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                         lambda::Vector{T}, q::Matrix{T}, res::Vector{T}, 

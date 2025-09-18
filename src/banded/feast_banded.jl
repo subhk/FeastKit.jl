@@ -1,24 +1,25 @@
 # Feast banded matrix routines
 # Translated from dzfeast_banded.f90
 
+
 function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
                      Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
     # Feast for banded real symmetric generalized eigenvalue problem
     # Solves: A*q = lambda*B*q where A and B are symmetric banded matrices
     # kla, klb are the number of super-diagonals of A and B respectively
-    
+
     N = size(A, 2)  # For banded storage, second dimension is the matrix size
-    
+
     # Check inputs
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
-    
+
     # Validate banded matrix dimensions
     size(A, 1) >= kla + 1 || throw(ArgumentError("A matrix storage insufficient for kla"))
     size(B, 1) >= klb + 1 || throw(ArgumentError("B matrix storage insufficient for klb"))
-    
+
     # Initialize workspace
     workspace = FeastWorkspaceReal{T}(N, M0)
-    
+
     # Initialize variables for RCI
     ijob = Ref(-1)
     Ze = Ref(zero(Complex{T}))
@@ -26,78 +27,120 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
     loop = Ref(0)
     mode = Ref(0)
     info = Ref(0)
-    
+
     # Banded linear solver workspace
-    banded_factors = nothing
-    ipiv = Vector{Int}(undef, N)
-    
+    kl = max(kla, klb)
+    ku = kl
+    ldab = 2 * kl + ku + 1
+    banded_factors = Matrix{Complex{T}}(undef, ldab, N)
+    banded_ipiv = Vector{LinearAlgebra.BlasInt}(undef, 0)
+    factorized = false
+
     while true
         # Call Feast RCI kernel
         feast_srci!(ijob, N, Ze, workspace.work, workspace.workc,
-                   workspace.Aq, workspace.Sq, fpm, epsout, loop,
-                   Emin, Emax, M0, workspace.lambda, workspace.q, 
-                   mode, workspace.res, info)
-        
+                    workspace.Aq, workspace.Sq, fpm, epsout, loop,
+                    Emin, Emax, M0, workspace.lambda, workspace.q,
+                    mode, workspace.res, info)
+
         if ijob[] == Int(Feast_RCI_FACTORIZE)
-            # Factorize Ze*B - A for banded matrices
+            factorized = false
             z = Ze[]
-            
-            # Create banded matrix: z*B - A
-            # For banded storage, we need to handle the specific format
-            kl = max(kla, klb)  # Combined bandwidth
-            ku = kl
-            ldab = 2*kl + ku + 1
-            
-            banded_matrix = zeros(Complex{T}, ldab, N)
-            
-            # Fill the banded matrix in LAPACK format
-            # This is a simplified version - full implementation would handle
-            # the exact banded storage format conversion
-            
-            # Convert to full matrix for simplicity (not optimal for large problems)
-            A_full = banded_to_full(A, kla, N)
-            B_full = banded_to_full(B, klb, N)
-            full_matrix = z .* B_full .- A_full
-            
-            # LU factorization
-            try
-                banded_factors = lu(full_matrix)
-            catch e
+            fill_shifted_banded!(banded_factors, A, B, kla, klb, kl, z)
+            _, banded_ipiv_tmp, info_lapack = LinearAlgebra.LAPACK.gbtrf!(kl, ku, N, banded_factors)
+            if info_lapack != 0
                 info[] = Int(Feast_ERROR_LAPACK)
                 break
             end
-            
+            banded_ipiv = banded_ipiv_tmp
+            factorized = true
+
         elseif ijob[] == Int(Feast_RCI_SOLVE)
-            # Solve linear systems: (Ze*B - A) * X = B * workspace.work
-            B_full = banded_to_full(B, klb, N)
-            rhs = B_full * workspace.work[:, 1:M0]
-            
-            try
-                # Solve with banded factors
-                workspace.workc[:, 1:M0] .= banded_factors \ rhs
-            catch e
+            if !factorized
+                info[] = Int(Feast_ERROR_INTERNAL)
+                break
+            end
+
+            for col in 1:M0
+                symmetric_banded_matvec!(view(workspace.workc, :, col), B, klb, view(workspace.work, :, col))
+            end
+
+            info_lapack = LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, banded_factors, banded_ipiv, view(workspace.workc, :, 1:M0))
+            if info_lapack != 0
                 info[] = Int(Feast_ERROR_LAPACK)
                 break
             end
-            
+
         elseif ijob[] == Int(Feast_RCI_MULT_A)
-            # Compute A * q for residual calculation using banded multiplication
             M = mode[]
-            A_full = banded_to_full(A, kla, N)
-            workspace.work[:, 1:M] .= A_full * workspace.q[:, 1:M]
-            
+            for col in 1:M
+                symmetric_banded_matvec!(view(workspace.work, :, col), A, kla, view(workspace.q, :, col))
+            end
+
         elseif ijob[] == Int(Feast_RCI_DONE)
             break
         end
     end
-    
+
     # Extract results
     M = mode[]
     lambda = workspace.lambda[1:M]
     q = workspace.q[:, 1:M]
     res = workspace.res[1:M]
-    
+
     return FeastResult{T, T}(lambda, q, M, res, info[], epsout[], loop[])
+end
+
+@inline function symmetric_banded_get(A::Matrix{T}, k::Int, i::Int, j::Int) where T
+    abs(i - j) > k && return zero(T)
+    if i <= j
+        row = k + 1 + i - j
+        return A[row, j]
+    else
+        row = k + 1 + j - i
+        return A[row, i]
+    end
+end
+
+function fill_shifted_banded!(dest::Matrix{Complex{T}}, A::Matrix{T}, B::Matrix{T},
+                              kla::Int, klb::Int, kl::Int, z::Complex{T}) where T<:Real
+    fill!(dest, zero(Complex{T}))
+    N = size(dest, 2)
+    ku = kl
+    offset = ku + 1
+    zero_T = zero(T)
+
+    for j in 1:N
+        imin = max(1, j - kl)
+        imax = min(N, j + ku)
+        for i in imin:imax
+            a_val = (abs(i - j) <= kla) ? symmetric_banded_get(A, kla, i, j) : zero_T
+            b_val = (abs(i - j) <= klb) ? symmetric_banded_get(B, klb, i, j) : zero_T
+            dest[offset + i - j, j] = z * b_val - a_val
+        end
+    end
+
+    return dest
+end
+
+function symmetric_banded_matvec!(y::AbstractVector{S}, A::Matrix{T}, k::Int, x::AbstractVector{T}) where {S,T}
+    fill!(y, zero(S))
+    N = length(x)
+
+    for j in 1:N
+        xj = x[j]
+        imin = max(1, j - k)
+        for i in imin:j
+            row = k + 1 + i - j
+            val = A[row, j]
+            y[i] += convert(S, val * xj)
+            if i != j
+                y[j] += convert(S, val * x[i])
+            end
+        end
+    end
+
+    return y
 end
 
 function feast_hbev!(A::Matrix{Complex{T}}, ka::Int,

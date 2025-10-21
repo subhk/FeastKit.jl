@@ -2,6 +2,7 @@
 # Translated from dzfeast.f90
 
 using Random
+using Base: IdDict
 
 function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}}, 
                      work::Matrix{T}, workc::Matrix{Complex{T}},
@@ -16,30 +17,39 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     
     # Static variables (persistent across calls)
     @static if !@isdefined(_feast_srci_state)
-        global _feast_srci_state = Dict{Symbol, Any}()
+        global _feast_srci_state = IdDict{Any, Dict{Symbol, Any}}()
     end
     
-    state = _feast_srci_state
+    state = get!(() -> Dict{Symbol, Any}(), _feast_srci_state, work)
+    cleanup_state! = () -> begin
+        if haskey(_feast_srci_state, work)
+            delete!(_feast_srci_state, work)
+        end
+    end
     
     if ijob[] == -1  # Initialization
         # Initialize Feast parameters
         feastdefault!(fpm)
+        empty!(state)
         
         # Check input parameters
         info[] = Int(Feast_SUCCESS)
         
         if N <= 0
             info[] = Int(Feast_ERROR_N)
+            cleanup_state!()
             return
         end
         
         if M0 <= 0 || M0 > N
             info[] = Int(Feast_ERROR_M0)
+            cleanup_state!()
             return
         end
         
         if Emin >= Emax
             info[] = Int(Feast_ERROR_EMIN_EMAX)
+            cleanup_state!()
             return
         end
         
@@ -133,6 +143,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 if M == 0
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     ijob[] = Int(Feast_RCI_DONE)
+                    cleanup_state!()
                     return
                 end
                 
@@ -144,6 +155,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             catch e
                 info[] = Int(Feast_ERROR_LAPACK)
                 ijob[] = Int(Feast_RCI_DONE)
+                cleanup_state!()
                 return
             end
         end
@@ -166,6 +178,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             feast_sort!(lambda, q, res, M)
             mode[] = M
             ijob[] = Int(Feast_RCI_DONE)
+            cleanup_state!()
         else
             # Start new refinement loop
             loop[] += 1
@@ -195,28 +208,37 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     # Similar structure to feast_srci! but for complex matrices
     
     @static if !@isdefined(_feast_hrci_state)
-        global _feast_hrci_state = Dict{Symbol, Any}()
+        global _feast_hrci_state = IdDict{Any, Dict{Symbol, Any}}()
     end
     
-    state = _feast_hrci_state
+    state = get!(() -> Dict{Symbol, Any}(), _feast_hrci_state, work)
+    cleanup_state! = () -> begin
+        if haskey(_feast_hrci_state, work)
+            delete!(_feast_hrci_state, work)
+        end
+    end
     
     if ijob[] == -1  # Initialization
         feastdefault!(fpm)
+        empty!(state)
         
         info[] = Int(Feast_SUCCESS)
         
         if N <= 0
             info[] = Int(Feast_ERROR_N)
+            cleanup_state!()
             return
         end
         
         if M0 <= 0 || M0 > N
             info[] = Int(Feast_ERROR_M0)
+            cleanup_state!()
             return
         end
         
         if Emin >= Emax
             info[] = Int(Feast_ERROR_EMIN_EMAX)
+            cleanup_state!()
             return
         end
         
@@ -309,6 +331,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 if M == 0
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     ijob[] = Int(Feast_RCI_DONE)
+                    cleanup_state!()
                     return
                 end
                 
@@ -320,6 +343,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             catch e
                 info[] = Int(Feast_ERROR_LAPACK)
                 ijob[] = Int(Feast_RCI_DONE)
+                cleanup_state!()
                 return
             end
         end
@@ -349,6 +373,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             feast_sort!(lambda, q, res, M)
             mode[] = M
             ijob[] = Int(Feast_RCI_DONE)
+            cleanup_state!()
         else
             # Start new refinement loop
             loop[] += 1
@@ -377,28 +402,37 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     # Feast RCI for general (non-Hermitian) eigenvalue problems
     # Uses circular contour in complex plane
     @static if !@isdefined(_feast_grci_state)
-        global _feast_grci_state = Dict{Symbol, Any}()
+        global _feast_grci_state = IdDict{Any, Dict{Symbol, Any}}()
     end
     
-    state = _feast_grci_state
+    state = get!(() -> Dict{Symbol, Any}(), _feast_grci_state, work)
+    cleanup_state! = () -> begin
+        if haskey(_feast_grci_state, work)
+            delete!(_feast_grci_state, work)
+        end
+    end
     
     if ijob[] == -1  # Initialization
         feastdefault!(fpm)
+        empty!(state)
         
         info[] = Int(Feast_SUCCESS)
         
         if N <= 0
             info[] = Int(Feast_ERROR_N)
+            cleanup_state!()
             return
         end
         
         if M0 <= 0 || M0 > N
             info[] = Int(Feast_ERROR_M0)
+            cleanup_state!()
             return
         end
         
         if r <= 0
             info[] = Int(Feast_ERROR_EMID_R)
+            cleanup_state!()
             return
         end
         
@@ -527,6 +561,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 if M == 0
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     ijob[] = Int(Feast_RCI_DONE)
+                    cleanup_state!()
                     return
                 end
                 
@@ -538,6 +573,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             catch e
                 info[] = Int(Feast_ERROR_LAPACK)
                 ijob[] = Int(Feast_RCI_DONE)
+                cleanup_state!()
                 return
             end
         end
@@ -568,6 +604,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             feast_sort_general!(lambda, q, res, M)
             mode[] = M
             ijob[] = Int(Feast_RCI_DONE)
+            cleanup_state!()
         else
             # Start new refinement loop
             loop[] += 1

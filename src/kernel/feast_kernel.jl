@@ -67,6 +67,9 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         state[:e] = 1  # Current integration point
         loop[] = 0
         state[:M] = 0  # Number of eigenvalues found
+        state[:Emin] = Emin
+        state[:Emax] = Emax
+        state[:M0] = M0
         
         # Initialize workspace
         fill!(work, zero(T))
@@ -82,6 +85,20 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         
         ijob[] = Int(Feast_RCI_FACTORIZE)
         return
+    end
+
+    # Ensure required state entries exist when resuming iterations
+    if ijob[] != -1
+        if !haskey(state, :Zne) || !haskey(state, :Wne)
+            contour = feast_contour(get(state, :Emin, Emin), get(state, :Emax, Emax), fpm)
+            state[:Zne] = contour.Zne
+            state[:Wne] = contour.Wne
+        end
+        state[:ne] = get(state, :ne, length(state[:Zne]))
+        state[:e] = get(state, :e, 1)
+        state[:eps] = get(state, :eps, feast_tolerance(fpm))
+        state[:maxloop] = get(state, :maxloop, fpm[4])
+        state[:M] = get(state, :M, 0)
     end
     
     # Main Feast iteration loop
@@ -253,6 +270,12 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         state[:e] = 1
         loop[] = 0
         state[:M] = 0
+        state[:Emid] = Emid
+        state[:radius] = r
+        state[:M0] = M0
+        state[:Emin] = Emin
+        state[:Emax] = Emax
+        state[:M0] = M0
         
         fill!(work, zero(T))
         fill!(workc, zero(Complex{T}))
@@ -265,6 +288,32 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         Ze[] = state[:Zne][1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
         return
+    end
+
+    if ijob[] != -1
+        if !haskey(state, :Zne) || !haskey(state, :Wne)
+            contour = feast_gcontour(get(state, :Emid, Emid), get(state, :radius, r), fpm)
+            state[:Zne] = contour.Zne
+            state[:Wne] = contour.Wne
+        end
+        state[:ne] = get(state, :ne, length(state[:Zne]))
+        state[:e] = get(state, :e, 1)
+        state[:eps] = get(state, :eps, feast_tolerance(fpm))
+        state[:maxloop] = get(state, :maxloop, fpm[4])
+        state[:M] = get(state, :M, 0)
+    end
+
+    if ijob[] != -1
+        if !haskey(state, :Zne) || !haskey(state, :Wne)
+            contour = feast_contour(get(state, :Emin, Emin), get(state, :Emax, Emax), fpm)
+            state[:Zne] = contour.Zne
+            state[:Wne] = contour.Wne
+        end
+        state[:ne] = get(state, :ne, length(state[:Zne]))
+        state[:e] = get(state, :e, 1)
+        state[:eps] = get(state, :eps, feast_tolerance(fpm))
+        state[:maxloop] = get(state, :maxloop, fpm[4])
+        state[:M] = get(state, :M, 0)
     end
     
     # Main Feast iteration loop for complex Hermitian matrices

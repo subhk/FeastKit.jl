@@ -249,67 +249,63 @@ using SparseArrays
     
     @testset "MPI support" begin
         # Test MPI availability and interfaces
-        
-        # Test MPI availability check
-        mpi_available = try
-            @eval using MPI
-            true
-        catch
-            false
-        end
-        
-        if mpi_available
-            # Test MPI state creation
-            try
-                @eval using MPI
-                if MPI.Initialized()
-                    comm = MPI.COMM_WORLD
+        # Skip MPI initialization tests on CI to avoid hanging
+        # MPI requires proper runtime setup (mpirun) which may not be available
+
+        if get(ENV, "CI", "false") == "true"
+            @info "Running on CI, skipping MPI initialization tests"
+        else
+            # Test MPI availability check (only run locally with proper MPI setup)
+            mpi_available = isdefined(Main, :MPI)
+
+            if mpi_available && isdefined(Main.MPI, :Initialized) && Main.MPI.Initialized()
+                # Test MPI state creation
+                try
+                    comm = Main.MPI.COMM_WORLD
                     state = MPIFeastState{Float64}(comm, 10, 8, 16)
                     @test state.N == 10
                     @test state.M0 == 8
                     @test state.ne == 16
                     @test length(state.local_points) > 0
-                else
-                    @info "MPI not initialized, skipping MPI state tests"
+                catch e
+                    @test isa(e, UndefVarError) || isa(e, ErrorException)
                 end
-            catch e
-                @test isa(e, UndefVarError) || isa(e, ErrorException)
-            end
-            
-            # Test MPI interface existence
-            try
-                n = 10
-                A = diagm(0 => 2*ones(n), 1 => -ones(n-1), -1 => -ones(n-1))
-                
-                # Test that MPI interface exists (may not run if MPI not initialized)
-                if isdefined(Feast, :mpi_feast)
-                    # Interface should exist
-                    @test isa(Feast.mpi_feast, Function)
-                    
-                    # Test availability checker
-                    available = mpi_available()
-                    @test isa(available, Bool)
+
+                # Test MPI interface existence
+                try
+                    n = 10
+                    A = diagm(0 => 2*ones(n), 1 => -ones(n-1), -1 => -ones(n-1))
+
+                    # Test that MPI interface exists (may not run if MPI not initialized)
+                    if isdefined(FeastKit, :mpi_feast)
+                        # Interface should exist
+                        @test isa(FeastKit.mpi_feast, Function)
+
+                        # Test availability checker
+                        available = mpi_available()
+                        @test isa(available, Bool)
+                    end
+
+                catch e
+                    # MPI interfaces may not be loaded
+                    @test isa(e, UndefVarError) || isa(e, ErrorException)
                 end
-                
-            catch e
-                # MPI interfaces may not be loaded
-                @test isa(e, UndefVarError) || isa(e, ErrorException)
+            else
+                @info "MPI not initialized, skipping MPI state tests"
             end
-        else
-            @info "MPI.jl not available, skipping MPI tests"
         end
-        
+
         # Test automatic backend selection
         try
             backend = determine_parallel_backend(:auto, nothing)
             @test backend in [:serial, :threads, :distributed, :mpi]
-            
+
             backend_threads = determine_parallel_backend(:threads, nothing)
             @test backend_threads in [:threads, :serial]
-            
+
             backend_serial = determine_parallel_backend(:serial, nothing)
             @test backend_serial == :serial
-            
+
         catch e
             # Backend selection function may not be available
             @test isa(e, UndefVarError) || isa(e, ErrorException)

@@ -2,6 +2,7 @@ using FeastKit
 using Test
 using LinearAlgebra
 using SparseArrays
+using Distributed
 
 @testset "FeastKit.jl" begin
     

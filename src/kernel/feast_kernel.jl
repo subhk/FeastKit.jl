@@ -94,11 +94,11 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             state[:Zne] = contour.Zne
             state[:Wne] = contour.Wne
         end
-        state[:ne] = get(state, :ne, length(state[:Zne]))
-        state[:e] = get(state, :e, 1)
-        state[:eps] = get(state, :eps, feast_tolerance(fpm))
-        state[:maxloop] = get(state, :maxloop, fpm[4])
-        state[:M] = get(state, :M, 0)
+        get!(state, :ne, length(state[:Zne]))
+        get!(state, :e, 1)
+        get!(state, :eps, feast_tolerance(fpm))
+        get!(state, :maxloop, fpm[4])
+        get!(state, :M, 0)
     end
     
     # Main Feast iteration loop
@@ -110,8 +110,8 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     
     if ijob[] == Int(Feast_RCI_SOLVE)
         # User has solved linear systems
-        e = state[:e]
-        ne = state[:ne]
+        e = get!(state, :e, 1)
+        ne = get!(state, :ne, length(state[:Zne]))
         
         # Accumulate moment matrices
         Zne = state[:Zne]
@@ -180,7 +180,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     
     if ijob[] == Int(Feast_RCI_MULT_A)
         # User has computed A*q, now compute residuals
-        M = state[:M]
+        M = get!(state, :M, 0)
         
         for j in 1:M
             # Residual: r = A*q - lambda*q (assuming B = I)

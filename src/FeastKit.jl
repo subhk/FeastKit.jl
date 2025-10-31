@@ -61,6 +61,14 @@ function __init__()
         return
     end
 
+    # Only attempt MPI loading if explicitly enabled via environment variable
+    # This prevents hanging when MPI is not properly configured
+    if get(ENV, "FEASTKIT_ENABLE_MPI", "false") != "true"
+        @debug "MPI not explicitly enabled (set FEASTKIT_ENABLE_MPI=true to enable), MPI features disabled"
+        MPI_AVAILABLE[] = false
+        return
+    end
+
     try
         # Try to load MPI components
         @eval using MPI

@@ -2,6 +2,7 @@
 # Translated from dzfeast.f90
 
 using Random
+using LinearAlgebra
 using Base: IdDict
 
 function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}}, 
@@ -339,30 +340,18 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         return
     end
 
-    if ijob[] != -1
-        if !haskey(state, :Zne) || !haskey(state, :Wne)
-            contour = feast_gcontour(get(state, :Emid, Emid), get(state, :radius, r), fpm)
-            state[:Zne] = contour.Zne
-            state[:Wne] = contour.Wne
-        end
-        state[:ne] = get(state, :ne, length(state[:Zne]))
-        state[:e] = get(state, :e, 1)
-        state[:eps] = get(state, :eps, feast_tolerance(fpm))
-        state[:maxloop] = get(state, :maxloop, fpm[4])
-        state[:M] = get(state, :M, 0)
-    end
-
+    # Ensure required state entries exist when resuming iterations
     if ijob[] != -1
         if !haskey(state, :Zne) || !haskey(state, :Wne)
             contour = feast_contour(get(state, :Emin, Emin), get(state, :Emax, Emax), fpm)
             state[:Zne] = contour.Zne
             state[:Wne] = contour.Wne
         end
-        state[:ne] = get(state, :ne, length(state[:Zne]))
-        state[:e] = get(state, :e, 1)
-        state[:eps] = get(state, :eps, feast_tolerance(fpm))
-        state[:maxloop] = get(state, :maxloop, fpm[4])
-        state[:M] = get(state, :M, 0)
+        get!(state, :ne, length(state[:Zne]))
+        get!(state, :e, 1)
+        get!(state, :eps, feast_tolerance(fpm))
+        get!(state, :maxloop, fpm[4])
+        get!(state, :M, 0)
     end
     
     # Main Feast iteration loop for complex Hermitian matrices

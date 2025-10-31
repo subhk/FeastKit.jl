@@ -145,12 +145,11 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         Wne = state[:Wne]
         
         # Update reduced matrices Aq and Sq
-        for j in 1:M0
-            for i in 1:M0
-                Aq[i,j] += real(Wne[e] * workc[i,j])
-                Sq[i,j] += real(Wne[e] * workc[i,j] * Zne[e])
-            end
-        end
+        # Compute: Aq += w_e * work^H * workc, Sq += w_e * z_e * work^H * workc
+        # where work is the current subspace (N x M0) and workc is the solution (N x M0)
+        temp = work[:, 1:M0]' * workc[:, 1:M0]  # M0 x M0 matrix
+        Aq .+= real(Wne[e] * temp)
+        Sq .+= real(Wne[e] * Zne[e] * temp)
         
         # Move to next integration point
         state[:e] = e + 1
@@ -371,12 +370,10 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         Wne = state[:Wne]
         
         # Update reduced matrices zAq and zSq (complex accumulation)
-        for j in 1:M0
-            for i in 1:M0
-                zAq[i,j] += Wne[e] * workc[i,j]
-                zSq[i,j] += Wne[e] * workc[i,j] * Zne[e]
-            end
-        end
+        # Compute: zAq += w_e * workc^H * workc, zSq += w_e * z_e * workc^H * workc
+        temp = workc[:, 1:M0]' * workc[:, 1:M0]  # M0 x M0 matrix
+        zAq .+= Wne[e] * temp
+        zSq .+= Wne[e] * Zne[e] * temp
         
         # Move to next integration point
         state[:e] = e + 1
@@ -596,12 +593,10 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         Wne = state[:Wne]
         
         # Update reduced matrices Aq and Sq (complex accumulation)
-        for j in 1:M0
-            for i in 1:M0
-                Aq[i,j] += Wne[e] * workc[i,j]
-                Sq[i,j] += Wne[e] * workc[i,j] * Zne[e]
-            end
-        end
+        # Compute: Aq += w_e * workc^H * workc, Sq += w_e * z_e * workc^H * workc
+        temp = workc[:, 1:M0]' * workc[:, 1:M0]  # M0 x M0 matrix
+        Aq .+= Wne[e] * temp
+        Sq .+= Wne[e] * Zne[e] * temp
         
         # Move to next integration point
         state[:e] = e + 1

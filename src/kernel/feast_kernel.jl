@@ -72,14 +72,40 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         state[:M0] = M0
         
         # Initialize workspace
-        fill!(work, zero(T))
-        fill!(workc, zero(Complex{T}))
         fill!(Aq, zero(T))
         fill!(Sq, zero(T))
         fill!(lambda, zero(T))
         fill!(q, zero(T))
         fill!(res, zero(T))
-        
+        fill!(workc, zero(Complex{T}))
+
+        # Initialize random subspace for work (initial guess)
+        # Check if user provides initial guess (fpm[5] = 1) or use random vectors
+        if fpm[5] == 1
+            # User should have provided initial guess in work
+            # Normalize the columns to ensure numerical stability
+            for j in 1:M0
+                if norm(work[:, j]) > 0
+                    work[:, j] ./= norm(work[:, j])
+                else
+                    # If zero vector provided, use random
+                    for i in 1:N
+                        work[i, j] = randn(T)
+                    end
+                    work[:, j] ./= norm(work[:, j])
+                end
+            end
+        else
+            # Generate random initial subspace
+            for j in 1:M0
+                for i in 1:N
+                    work[i, j] = randn(T)
+                end
+                # Normalize each column
+                work[:, j] ./= norm(work[:, j])
+            end
+        end
+
         # Set first integration point
         Ze[] = state[:Zne][1]
         
@@ -270,21 +296,44 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         state[:e] = 1
         loop[] = 0
         state[:M] = 0
-        state[:Emid] = Emid
-        state[:radius] = r
         state[:M0] = M0
         state[:Emin] = Emin
         state[:Emax] = Emax
-        state[:M0] = M0
-        
-        fill!(work, zero(T))
-        fill!(workc, zero(Complex{T}))
+
         fill!(zAq, zero(Complex{T}))
         fill!(zSq, zero(Complex{T}))
         fill!(lambda, zero(T))
         fill!(q, zero(Complex{T}))
         fill!(res, zero(T))
-        
+        fill!(work, zero(T))
+
+        # Initialize random subspace for workc (initial guess for Hermitian case)
+        # Check if user provides initial guess (fpm[5] = 1) or use random vectors
+        if fpm[5] == 1
+            # User should have provided initial guess in workc
+            # Normalize the columns to ensure numerical stability
+            for j in 1:M0
+                if norm(workc[:, j]) > 0
+                    workc[:, j] ./= norm(workc[:, j])
+                else
+                    # If zero vector provided, use random
+                    for i in 1:N
+                        workc[i, j] = Complex{T}(randn(T), randn(T))
+                    end
+                    workc[:, j] ./= norm(workc[:, j])
+                end
+            end
+        else
+            # Generate random initial subspace
+            for j in 1:M0
+                for i in 1:N
+                    workc[i, j] = Complex{T}(randn(T), randn(T))
+                end
+                # Normalize each column
+                workc[:, j] ./= norm(workc[:, j])
+            end
+        end
+
         Ze[] = state[:Zne][1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
         return

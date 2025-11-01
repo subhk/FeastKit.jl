@@ -25,37 +25,36 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
     info = Ref(0)
     
     # LU factorization workspace
-    LU_factors = Matrix{Complex{T}}(undef, N, N)
-    ipiv = Vector{Int}(undef, N)
-    
+    LU_factorization = nothing
+    temp_matrix = Matrix{Complex{T}}(undef, N, N)
+
     while true
         # Call Feast RCI kernel
         feast_srci!(ijob, N, Ze, workspace.work, workspace.workc,
                    workspace.Aq, workspace.Sq, fpm, epsout, loop,
-                   Emin, Emax, M0, workspace.lambda, workspace.q, 
+                   Emin, Emax, M0, workspace.lambda, workspace.q,
                    mode, workspace.res, info)
-        
+
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             # Factorize Ze*B - A
             z = Ze[]
-            LU_factors .= z .* B .- A
-            
+            temp_matrix .= z .* B .- A
+
             # LU factorization
             try
-                F = lu!(LU_factors)
-                ipiv .= F.p
+                LU_factorization = lu!(temp_matrix)
             catch e
                 info[] = Int(Feast_ERROR_LAPACK)
                 break
             end
-            
+
         elseif ijob[] == Int(Feast_RCI_SOLVE)
             # Solve linear systems: (Ze*B - A) * X = B * workspace.work
             rhs = B * workspace.work[:, 1:M0]
-            
+
             try
                 # Solve with LU factors
-                workspace.workc[:, 1:M0] .= LU_factors \ rhs
+                workspace.workc[:, 1:M0] .= LU_factorization \ rhs
             catch e
                 info[] = Int(Feast_ERROR_LAPACK)
                 break
@@ -103,32 +102,33 @@ function feast_heev!(A::Matrix{Complex{T}},
     info = Ref(0)
     
     # LU factorization workspace
-    LU_factors = Matrix{Complex{T}}(undef, N, N)
-    
+    LU_factorization = nothing
+    temp_matrix = Matrix{Complex{T}}(undef, N, N)
+
     while true
         # Call Feast RCI kernel
         feast_hrci!(ijob, N, Ze, workspace.work, workspace.workc,
                    workspace.zAq, workspace.zSq, fpm, epsout, loop,
-                   Emin, Emax, M0, workspace.lambda, workspace.q, 
+                   Emin, Emax, M0, workspace.lambda, workspace.q,
                    mode, workspace.res, info)
-        
+
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             # Factorize Ze*I - A
             z = Ze[]
-            LU_factors .= z .* I .- A
-            
+            temp_matrix .= z .* I .- A
+
             # LU factorization
             try
-                lu!(LU_factors)
+                LU_factorization = lu!(temp_matrix)
             catch e
                 info[] = Int(Feast_ERROR_LAPACK)
                 break
             end
-            
+
         elseif ijob[] == Int(Feast_RCI_SOLVE)
             # Solve linear systems: (Ze*I - A) * X = workspace.workc
             try
-                workspace.workc[:, 1:M0] .= LU_factors \ workspace.workc[:, 1:M0]
+                workspace.workc[:, 1:M0] .= LU_factorization \ workspace.workc[:, 1:M0]
             catch e
                 info[] = Int(Feast_ERROR_LAPACK)
                 break
@@ -181,34 +181,35 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
     q_complex = Matrix{Complex{T}}(undef, N, M0)
     
     # LU factorization workspace
-    LU_factors = Matrix{Complex{T}}(undef, N, N)
-    
+    LU_factorization = nothing
+    temp_matrix = Matrix{Complex{T}}(undef, N, N)
+
     while true
         # Call Feast RCI kernel for general problems
         feast_grci!(ijob, N, Ze, workspace.work, workspace.workc,
                    workspace.zAq, workspace.zSq, fpm, epsout, loop,
-                   Emid, r, M0, lambda_complex, q_complex, 
+                   Emid, r, M0, lambda_complex, q_complex,
                    mode, workspace.res, info)
-        
+
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             # Factorize Ze*B - A
             z = Ze[]
-            LU_factors .= z .* B .- A
-            
+            temp_matrix .= z .* B .- A
+
             # LU factorization
             try
-                lu!(LU_factors)
+                LU_factorization = lu!(temp_matrix)
             catch e
                 info[] = Int(Feast_ERROR_LAPACK)
                 break
             end
-            
+
         elseif ijob[] == Int(Feast_RCI_SOLVE)
             # Solve linear systems: (Ze*B - A) * X = B * workspace.workc
             rhs = B * workspace.workc[:, 1:M0]
-            
+
             try
-                workspace.workc[:, 1:M0] .= LU_factors \ rhs
+                workspace.workc[:, 1:M0] .= LU_factorization \ rhs
             catch e
                 info[] = Int(Feast_ERROR_LAPACK)
                 break

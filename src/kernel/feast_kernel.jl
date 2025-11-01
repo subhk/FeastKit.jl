@@ -207,21 +207,22 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     if ijob[] == Int(Feast_RCI_MULT_A)
         # User has computed A*q, now compute residuals
         M = get!(state, :M, 0)
-        
+
         for j in 1:M
             # Residual: r = A*q - lambda*q (assuming B = I)
             res[j] = norm(work[:, j] - lambda[j] * q[:, j])
         end
-        
+
         # Check convergence
         epsout[] = maximum(res[1:M])
-        
+
         if epsout[] <= state[:eps] || loop[] >= state[:maxloop]
             # Converged or maximum iterations reached
             feast_sort!(lambda, q, res, M)
             mode[] = M
             ijob[] = Int(Feast_RCI_DONE)
             cleanup_state!()
+            return
         else
             # Start new refinement loop
             loop[] += 1
@@ -459,6 +460,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             mode[] = M
             ijob[] = Int(Feast_RCI_DONE)
             cleanup_state!()
+            return
         else
             # Start new refinement loop
             loop[] += 1

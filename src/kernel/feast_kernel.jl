@@ -225,16 +225,17 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         else
             # Start new refinement loop
             loop[] += 1
-            
+
             # Reset for next iteration
             fill!(Aq, zero(T))
             fill!(Sq, zero(T))
-            
+
             # Use current eigenvectors as initial guess
             work[:, 1:M] = q[:, 1:M]
-            
+
             Ze[] = state[:Zne][1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
+            return
         end
     end
 end
@@ -461,16 +462,17 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         else
             # Start new refinement loop
             loop[] += 1
-            
+
             # Reset for next iteration
             fill!(zAq, zero(Complex{T}))
             fill!(zSq, zero(Complex{T}))
-            
+
             # Use current eigenvectors as initial guess
             workc[:, 1:M] = q[:, 1:M]
-            
+
             Ze[] = state[:Zne][1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
+            return
         end
     end
 end
@@ -690,16 +692,17 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         else
             # Start new refinement loop
             loop[] += 1
-            
+
             # Reset for next iteration
             fill!(Aq, zero(Complex{T}))
             fill!(Sq, zero(Complex{T}))
-            
+
             # Use current eigenvectors as initial guess
             workc[:, 1:M] = q[:, 1:M]
-            
+
             Ze[] = state[:Zne][1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
+            return
         end
     end
 end

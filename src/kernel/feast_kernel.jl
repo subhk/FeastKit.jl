@@ -691,6 +691,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             mode[] = M
             ijob[] = Int(Feast_RCI_DONE)
             cleanup_state!()
+            return
         else
             # Start new refinement loop
             loop[] += 1

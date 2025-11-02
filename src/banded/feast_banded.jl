@@ -79,6 +79,11 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
 
         elseif ijob[] == Int(Feast_RCI_DONE)
             break
+        else
+            # Unexpected ijob value - error out to prevent infinite loop
+            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
+                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
+                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
         end
     end
 
@@ -207,9 +212,14 @@ function feast_hbev!(A::Matrix{Complex{T}}, ka::Int,
             M = mode[]
             A_full = banded_to_full_hermitian(A, ka, N)
             workspace.work[:, 1:M] .= real.(A_full * workspace.q[:, 1:M])
-            
+
         elseif ijob[] == Int(Feast_RCI_DONE)
             break
+        else
+            # Unexpected ijob value - error out to prevent infinite loop
+            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
+                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
+                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
         end
     end
     

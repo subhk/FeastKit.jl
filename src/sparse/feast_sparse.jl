@@ -111,9 +111,14 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             # Compute A * q for residual calculation
             M = mode[]
             workspace.work[:, 1:M] .= A * workspace.q[:, 1:M]
-            
+
         elseif ijob[] == Int(Feast_RCI_DONE)
             break
+        else
+            # Unexpected ijob value - error out to prevent infinite loop
+            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
+                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
+                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
         end
     end
     
@@ -185,18 +190,23 @@ function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
             # Compute A * q for residual calculation
             M = mode[]
             workspace.work[:, 1:M] .= real.(A * workspace.q[:, 1:M])
-            
+
         elseif ijob[] == Int(Feast_RCI_DONE)
             break
+        else
+            # Unexpected ijob value - error out to prevent infinite loop
+            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
+                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
+                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
         end
     end
-    
+
     # Extract results
     M = mode[]
     lambda = workspace.lambda[1:M]
     q = workspace.q[:, 1:M]
     res = workspace.res[1:M]
-    
+
     return FeastResult{T, Complex{T}}(lambda, q, M, res, info[], epsout[], loop[])
 end
 
@@ -265,18 +275,23 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
             # Compute A * q for residual calculation
             M = mode[]
             workspace.workc[:, 1:M] .= A * q_complex[:, 1:M]
-            
+
         elseif ijob[] == Int(Feast_RCI_DONE)
             break
+        else
+            # Unexpected ijob value - error out to prevent infinite loop
+            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
+                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
+                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
         end
     end
-    
+
     # Extract results
     M = mode[]
     lambda = lambda_complex[1:M]
     q = q_complex[:, 1:M]
     res = workspace.res[1:M]
-    
+
     return FeastResult{T, Complex{T}}(real.(lambda), q, M, res, info[], epsout[], loop[])
 end
 
@@ -447,9 +462,14 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
             for j in 1:M
                 A_matvec!(view(workspace.work, :, j), view(workspace.q, :, j))
             end
-            
+
         elseif ijob[] == Int(Feast_RCI_DONE)
             break
+        else
+            # Unexpected ijob value - error out to prevent infinite loop
+            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
+                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
+                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
         end
     end
     

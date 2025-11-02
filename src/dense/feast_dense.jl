@@ -59,14 +59,19 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
                 info[] = Int(Feast_ERROR_LAPACK)
                 break
             end
-            
+
         elseif ijob[] == Int(Feast_RCI_MULT_A)
             # Compute A * q for residual calculation
             M = mode[]
             workspace.work[:, 1:M] .= A * workspace.q[:, 1:M]
-            
+
         elseif ijob[] == Int(Feast_RCI_DONE)
             break
+        else
+            # Unexpected ijob value - error out to prevent infinite loop
+            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
+                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
+                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
         end
     end
     
@@ -133,14 +138,19 @@ function feast_heev!(A::Matrix{Complex{T}},
                 info[] = Int(Feast_ERROR_LAPACK)
                 break
             end
-            
+
         elseif ijob[] == Int(Feast_RCI_MULT_A)
             # Compute A * q for residual calculation
             M = mode[]
             workspace.work[:, 1:M] .= real.(A * workspace.q[:, 1:M])
-            
+
         elseif ijob[] == Int(Feast_RCI_DONE)
             break
+        else
+            # Unexpected ijob value - error out to prevent infinite loop
+            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
+                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
+                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
         end
     end
     
@@ -219,9 +229,14 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
             # Compute A * q for residual calculation
             M = mode[]
             workspace.workc[:, 1:M] .= A * q_complex[:, 1:M]
-            
+
         elseif ijob[] == Int(Feast_RCI_DONE)
             break
+        else
+            # Unexpected ijob value - error out to prevent infinite loop
+            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
+                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
+                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
         end
     end
     

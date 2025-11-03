@@ -499,7 +499,7 @@ end
 
 function feast_sypev!(A::Vector{Matrix{T}}, d::Int,
                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
-    coeffs = [Matrix{Complex{T}}(A[i]) for i in eachindex(A)]
+    coeffs = [Complex{T}.(A[i]) for i in eachindex(A)]
     return feast_gepev!(coeffs, d, Emid, r, M0, fpm)
 end
 

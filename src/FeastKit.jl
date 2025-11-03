@@ -12,7 +12,11 @@ export feast_name, feast_memory_estimate
 export full_to_banded, banded_to_full, feast_banded_info
 export distribute_contour_points
 # Dense matrix solver exports
-export feast_sygv!, feast_syev!, feast_heev!, feast_hegv!, feast_gegv!, feast_geev!, feast_pep!
+export feast_sygv!, feast_sygvx!, feast_syev!, feast_syevx!
+export feast_heev!, feast_heevx!, feast_hegv!, feast_hegvx!
+export feast_gegv!, feast_gegvx!, feast_geev!, feast_geevx!
+export feast_pep!, feast_gepev!, feast_gepevx!, feast_hepev!, feast_hepevx!,
+       feast_sypev!, feast_sypevx!
 # Sparse matrix solver exports
 export feast_scsrgv!, feast_scsrev!, feast_hcsrev!, feast_gcsrgv!, feast_gcsrev!
 # Banded matrix solver exports

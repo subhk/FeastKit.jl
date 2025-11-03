@@ -511,3 +511,31 @@ function feast_sypevx!(A::Vector{Matrix{T}}, d::Int,
         feast_sypev!(A, d, Emid, r, M0, fpm)
     end
 end
+
+function feast_srcipev!(A::Vector{Matrix{T}}, d::Int,
+                        Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    return feast_sypev!(A, d, Emid, r, M0, fpm)
+end
+
+function feast_srcipevx!(A::Vector{Matrix{T}}, d::Int,
+                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                         Zne::AbstractVector{Complex{TZ}},
+                         Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_srcipev!(A, d, Emid, r, M0, fpm)
+    end
+end
+
+function feast_grcipev!(A::Vector{Matrix{Complex{T}}}, d::Int,
+                        Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    return feast_gepev!(A, d, Emid, r, M0, fpm)
+end
+
+function feast_grcipevx!(A::Vector{Matrix{Complex{T}}}, d::Int,
+                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                         Zne::AbstractVector{Complex{TZ}},
+                         Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_grcipev!(A, d, Emid, r, M0, fpm)
+    end
+end

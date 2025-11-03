@@ -256,6 +256,48 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     end
 end
 
+# Custom contour RCI wrappers
+function feast_srcix!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
+                      work::Matrix{T}, workc::Matrix{Complex{T}},
+                      Aq::Matrix{T}, Sq::Matrix{T}, fpm::Vector{Int},
+                      epsout::Ref{T}, loop::Ref{Int}, Emin::T, Emax::T, M0::Int,
+                      lambda::Vector{T}, q::Matrix{T}, mode::Ref{Int},
+                      res::Vector{T}, info::Ref{Int},
+                      Zne::AbstractVector{Complex{TZ}},
+                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    with_custom_contour(fpm, Zne, Wne) do
+        feast_srci!(ijob, N, Ze, work, workc, Aq, Sq, fpm, epsout, loop,
+                    Emin, Emax, M0, lambda, q, mode, res, info)
+    end
+end
+
+function feast_hrcix!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
+                      work::Matrix{T}, workc::Matrix{Complex{T}},
+                      zAq::Matrix{Complex{T}}, zSq::Matrix{Complex{T}}, fpm::Vector{Int},
+                      epsout::Ref{T}, loop::Ref{Int}, Emin::T, Emax::T, M0::Int,
+                      lambda::Vector{T}, q::Matrix{Complex{T}}, mode::Ref{Int},
+                      res::Vector{T}, info::Ref{Int},
+                      Zne::AbstractVector{Complex{TZ}},
+                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    with_custom_contour(fpm, Zne, Wne) do
+        feast_hrci!(ijob, N, Ze, work, workc, zAq, zSq, fpm, epsout, loop,
+                    Emin, Emax, M0, lambda, q, mode, res, info)
+    end
+end
+
+function feast_grcix!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
+                      work::Matrix{T}, workc::Matrix{Complex{T}},
+                      Aq::Matrix{Complex{T}}, Sq::Matrix{Complex{T}}, fpm::Vector{Int},
+                      epsout::Ref{T}, loop::Ref{Int}, Emid::Complex{T}, r::T, M0::Int,
+                      lambda::Vector{Complex{T}}, q::Matrix{Complex{T}}, mode::Ref{Int},
+                      res::Vector{T}, info::Ref{Int},
+                      Zne::AbstractVector{Complex{TZ}},
+                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    with_custom_contour(fpm, Zne, Wne) do
+        feast_grci!(ijob, N, Ze, work, workc, Aq, Sq, fpm, epsout, loop,
+                    Emid, r, M0, lambda, q, mode, res, info)
+    end
+end
 function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                      work::Matrix{T}, workc::Matrix{Complex{T}},
                      zAq::Matrix{Complex{T}}, zSq::Matrix{Complex{T}}, 

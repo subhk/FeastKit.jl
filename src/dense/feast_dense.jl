@@ -412,3 +412,102 @@ function feast_geev!(A::Matrix{Complex{T}},
     # Call generalized version with B = I
     return feast_gegv!(A, B, Emid, r, M0, fpm)
 end
+
+# Custom contour (x-suffix) variants
+function feast_sygvx!(A::Matrix{T}, B::Matrix{T},
+                      Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
+                      Zne::AbstractVector{Complex{TZ}},
+                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_sygv!(A, B, Emin, Emax, M0, fpm)
+    end
+end
+
+function feast_syevx!(A::Matrix{T},
+                      Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
+                      Zne::AbstractVector{Complex{TZ}},
+                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_syev!(A, Emin, Emax, M0, fpm)
+    end
+end
+
+function feast_hegvx!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
+                      Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
+                      Zne::AbstractVector{Complex{TZ}},
+                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_hegv!(A, B, Emin, Emax, M0, fpm)
+    end
+end
+
+function feast_heevx!(A::Matrix{Complex{T}},
+                      Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
+                      Zne::AbstractVector{Complex{TZ}},
+                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_heev!(A, Emin, Emax, M0, fpm)
+    end
+end
+
+function feast_gegvx!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
+                      Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                      Zne::AbstractVector{Complex{TZ}},
+                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_gegv!(A, B, Emid, r, M0, fpm)
+    end
+end
+
+function feast_geevx!(A::Matrix{Complex{T}},
+                      Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                      Zne::AbstractVector{Complex{TZ}},
+                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_geev!(A, Emid, r, M0, fpm)
+    end
+end
+
+# Polynomial eigenvalue wrappers
+function feast_gepev!(A::Vector{Matrix{Complex{T}}}, d::Int,
+                      Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    return feast_pep!(A, d, Emid, r, M0, fpm)
+end
+
+function feast_gepevx!(A::Vector{Matrix{Complex{T}}}, d::Int,
+                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                       Zne::AbstractVector{Complex{TZ}},
+                       Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_gepev!(A, d, Emid, r, M0, fpm)
+    end
+end
+
+function feast_hepev!(A::Vector{Matrix{Complex{T}}}, d::Int,
+                      Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    return feast_gepev!(A, d, Emid, r, M0, fpm)
+end
+
+function feast_hepevx!(A::Vector{Matrix{Complex{T}}}, d::Int,
+                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                       Zne::AbstractVector{Complex{TZ}},
+                       Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_hepev!(A, d, Emid, r, M0, fpm)
+    end
+end
+
+function feast_sypev!(A::Vector{Matrix{T}}, d::Int,
+                      Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    coeffs = [Matrix{Complex{T}}(A[i]) for i in eachindex(A)]
+    return feast_gepev!(coeffs, d, Emid, r, M0, fpm)
+end
+
+function feast_sypevx!(A::Vector{Matrix{T}}, d::Int,
+                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                       Zne::AbstractVector{Complex{TZ}},
+                       Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_sypev!(A, d, Emid, r, M0, fpm)
+    end
+end

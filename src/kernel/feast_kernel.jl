@@ -55,14 +55,15 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         end
         
         # Initialize state variables
-        state[:ne] = fpm[2]  # Number of integration points
+        contour = feast_get_custom_contour(fpm)
+        if contour === nothing
+            contour = feast_contour(Emin, Emax, fpm)
+        end
+        state[:Zne] = copy(contour.Zne)
+        state[:Wne] = copy(contour.Wne)
+        state[:ne] = length(state[:Zne])
         state[:eps] = feast_tolerance(fpm)
         state[:maxloop] = fpm[4]
-        
-        # Generate integration contour
-        contour = feast_contour(Emin, Emax, fpm)
-        state[:Zne] = contour.Zne
-        state[:Wne] = contour.Wne
         
         # Initialize counters
         state[:e] = 1  # Current integration point
@@ -117,11 +118,14 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     # Ensure required state entries exist when resuming iterations
     if ijob[] != -1
         if !haskey(state, :Zne) || !haskey(state, :Wne)
-            contour = feast_contour(get(state, :Emin, Emin), get(state, :Emax, Emax), fpm)
-            state[:Zne] = contour.Zne
-            state[:Wne] = contour.Wne
+            contour = feast_get_custom_contour(fpm)
+            if contour === nothing
+                contour = feast_contour(get(state, :Emin, Emin), get(state, :Emax, Emax), fpm)
+            end
+            state[:Zne] = copy(contour.Zne)
+            state[:Wne] = copy(contour.Wne)
         end
-        get!(state, :ne, length(state[:Zne]))
+        state[:ne] = length(state[:Zne])
         get!(state, :e, 1)
         get!(state, :eps, feast_tolerance(fpm))
         get!(state, :maxloop, fpm[4])
@@ -298,17 +302,21 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             return
         end
         
-        state[:ne] = fpm[2]
+        contour = feast_get_custom_contour(fpm)
+        if contour === nothing
+            contour = feast_contour(Emin, Emax, fpm)
+        end
+        state[:Zne] = copy(contour.Zne)
+        state[:Wne] = copy(contour.Wne)
+        state[:ne] = length(state[:Zne])
         state[:eps] = feast_tolerance(fpm)
         state[:maxloop] = fpm[4]
-        
-        contour = feast_contour(Emin, Emax, fpm)
-        state[:Zne] = contour.Zne
-        state[:Wne] = contour.Wne
         
         state[:e] = 1
         loop[] = 0
         state[:M] = 0
+        state[:Emid] = Emid
+        state[:r] = r
         state[:M0] = M0
         state[:Emin] = Emin
         state[:Emax] = Emax
@@ -355,11 +363,14 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     # Ensure required state entries exist when resuming iterations
     if ijob[] != -1
         if !haskey(state, :Zne) || !haskey(state, :Wne)
-            contour = feast_contour(get(state, :Emin, Emin), get(state, :Emax, Emax), fpm)
-            state[:Zne] = contour.Zne
-            state[:Wne] = contour.Wne
+            contour = feast_get_custom_contour(fpm)
+            if contour === nothing
+                contour = feast_contour(get(state, :Emin, Emin), get(state, :Emax, Emax), fpm)
+            end
+            state[:Zne] = copy(contour.Zne)
+            state[:Wne] = copy(contour.Wne)
         end
-        get!(state, :ne, length(state[:Zne]))
+        state[:ne] = length(state[:Zne])
         get!(state, :e, 1)
         get!(state, :eps, feast_tolerance(fpm))
         get!(state, :maxloop, fpm[4])
@@ -546,13 +557,15 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             return
         end
         
-        state[:ne] = fpm[2]
+        contour = feast_get_custom_contour(fpm)
+        if contour === nothing
+            contour = feast_gcontour(Emid, r, fpm)
+        end
+        state[:Zne] = copy(contour.Zne)
+        state[:Wne] = copy(contour.Wne)
+        state[:ne] = length(state[:Zne])
         state[:eps] = feast_tolerance(fpm)
         state[:maxloop] = fpm[4]
-        
-        contour = feast_gcontour(Emid, r, fpm)
-        state[:Zne] = contour.Zne
-        state[:Wne] = contour.Wne
         
         state[:e] = 1
         loop[] = 0
@@ -600,6 +613,22 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         Ze[] = state[:Zne][1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
         return
+    end
+    
+    if ijob[] != -1
+        if !haskey(state, :Zne) || !haskey(state, :Wne)
+            contour = feast_get_custom_contour(fpm)
+            if contour === nothing
+                contour = feast_gcontour(get(state, :Emid, Emid), get(state, :r, r), fpm)
+            end
+            state[:Zne] = copy(contour.Zne)
+            state[:Wne] = copy(contour.Wne)
+        end
+        state[:ne] = length(state[:Zne])
+        state[:eps] = feast_tolerance(fpm)
+        state[:maxloop] = fpm[4]
+        state[:M] = 0
+        state[:e] = get(state, :e, 1)
     end
     
     # Main Feast iteration loop for general (non-Hermitian) eigenvalue problems

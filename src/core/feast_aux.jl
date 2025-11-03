@@ -59,8 +59,9 @@ function with_custom_contour(fpm::Vector{Int},
                              Zne::AbstractVector{Complex{T1}},
                              Wne::AbstractVector{Complex{T2}},
                              solver::Function) where {T1<:Real, T2<:Real}
-    contour = FeastContour{promote_type(T1, T2)}(Vector{Complex{promote_type(T1, T2)}}(Zne),
-                                                 Vector{Complex{promote_type(T1, T2)}}(Wne))
+    base = promote_type(T1, T2)
+    contour = FeastContour{base}(Vector{Complex{base}}(Zne),
+                                 Vector{Complex{base}}(Wne))
     return with_custom_contour(fpm, contour, solver)
 end
 

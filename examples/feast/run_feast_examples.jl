@@ -116,15 +116,17 @@ function sparse_real_scsrgv_lowest()
 end
 
 function sparse_real_gcsrgv()
-    A = read_mm_sparse_real("system3")
-    B = read_mm_sparse_real("system3B")
+    A_real = read_mm_sparse_real("system3")
+    B_real = read_mm_sparse_real("system3B")
+    A = to_complex_sparse(A_real)
+    B = to_complex_sparse(B_real)
     Emid = complex(0.590, 0.0)
     r = 0.410
     M0 = 30
     fpm = zeros(Int, 64)
     FeastKit.feastinit!(fpm)
     fpm[1] = 1
-    result = FeastKit.feast_gcsrgv!(complex.(A), complex.(B), Emid, r, M0, fpm)
+    result = FeastKit.feast_gcsrgv!(copy(A), copy(B), Emid, r, M0, fpm)
     print_summary("F90sparse_dfeast_gcsrgv", result)
 end
 

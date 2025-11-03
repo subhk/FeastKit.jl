@@ -161,6 +161,10 @@ function read_polynomial_sparse_real(prefix::AbstractString)
     return matrices
 end
 
+function to_complex_sparse(A::SparseMatrixCSC{Float64, Int})
+    return SparseMatrixCSC(A.m, A.n, copy(A.colptr), copy(A.rowval), ComplexF64.(A.nzval))
+end
+
 function build_polygonal_contour(zedge::Vector{ComplexF64}, nedge::Vector{Int})
     nodes = ComplexF64[]
     ne = length(zedge)

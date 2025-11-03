@@ -96,6 +96,15 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
     return FeastResult{T, T}(lambda, q, M, res, info[], epsout[], loop[])
 end
 
+function feast_sbgvx!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
+                      Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
+                      Zne::AbstractVector{Complex{TZ}},
+                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_sbgv!(A, B, kla, klb, Emin, Emax, M0, fpm)
+    end
+end
+
 @inline function symmetric_banded_get(A::Matrix{T}, k::Int, i::Int, j::Int) where T
     abs(i - j) > k && return zero(T)
     if i <= j
@@ -230,6 +239,34 @@ function feast_hbev!(A::Matrix{Complex{T}}, ka::Int,
     res = workspace.res[1:M]
     
     return FeastResult{T, Complex{T}}(lambda, q, M, res, info[], epsout[], loop[])
+end
+
+function feast_hbevx!(A::Matrix{Complex{T}}, ka::Int,
+                      Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
+                      Zne::AbstractVector{Complex{TZ}},
+                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_hbev!(A, ka, Emin, Emax, M0, fpm)
+    end
+end
+
+function feast_hbgv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}}, ka::Int, kb::Int,
+                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    N = size(A, 2)
+    size(B, 2) == N || throw(ArgumentError("B must have same dimensions as A"))
+    check_feast_srci_input(N, M0, Emin, Emax, fpm)
+    A_full = banded_to_full_hermitian(A, ka, N)
+    B_full = banded_to_full_hermitian(B, kb, N)
+    return feast_hegv!(A_full, B_full, Emin, Emax, M0, fpm)
+end
+
+function feast_hbgvx!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}}, ka::Int, kb::Int,
+                      Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
+                      Zne::AbstractVector{Complex{TZ}},
+                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_hbgv!(A, B, ka, kb, Emin, Emax, M0, fpm)
+    end
 end
 
 # Helper functions for banded matrix operations
@@ -377,4 +414,49 @@ function feast_sbev!(A::Matrix{T}, ka::Int,
 
     # Call generalized version with B = I
     return feast_sbgv!(A, B, ka, klb, Emin, Emax, M0, fpm)
+end
+
+function feast_sbevx!(A::Matrix{T}, ka::Int,
+                      Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
+                      Zne::AbstractVector{Complex{TZ}},
+                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_sbev!(A, ka, Emin, Emax, M0, fpm)
+    end
+end
+
+function feast_gbgv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}}, ka::Int, kb::Int,
+                     Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    N = size(A, 2)
+    size(B, 2) == N || throw(ArgumentError("B must have same dimensions as A"))
+    check_feast_grci_input(N, M0, Emid, r, fpm)
+    A_full = banded_to_full(A, ka, N)
+    B_full = banded_to_full(B, kb, N)
+    return feast_gegv!(A_full, B_full, Emid, r, M0, fpm)
+end
+
+function feast_gbgvx!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}}, ka::Int, kb::Int,
+                      Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                      Zne::AbstractVector{Complex{TZ}},
+                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_gbgv!(A, B, ka, kb, Emid, r, M0, fpm)
+    end
+end
+
+function feast_gbev!(A::Matrix{Complex{T}}, ka::Int,
+                     Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    N = size(A, 2)
+    check_feast_grci_input(N, M0, Emid, r, fpm)
+    A_full = banded_to_full(A, ka, N)
+    return feast_geev!(A_full, Emid, r, M0, fpm)
+end
+
+function feast_gbevx!(A::Matrix{Complex{T}}, ka::Int,
+                      Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                      Zne::AbstractVector{Complex{TZ}},
+                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_gbev!(A, ka, Emid, r, M0, fpm)
+    end
 end

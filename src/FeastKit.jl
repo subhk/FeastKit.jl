@@ -24,7 +24,9 @@ export feast_gcsrev!, feast_gcsrevx!
 export feast_scsrpev!, feast_scsrpevx!, feast_hcsrpev!, feast_hcsrpevx!
 export feast_gcsrpev!, feast_gcsrpevx!
 # Banded matrix solver exports
-export feast_sbgv!, feast_sbev!, feast_hbev!
+export feast_sbgv!, feast_sbgvx!, feast_sbev!, feast_sbevx!
+export feast_hbev!, feast_hbevx!, feast_hbgv!, feast_hbgvx!
+export feast_gbgv!, feast_gbgvx!, feast_gbev!, feast_gbevx!
 export Feast_SUCCESS, Feast_ERROR_N, Feast_ERROR_M0, Feast_ERROR_EMIN_EMAX,
        Feast_ERROR_EMID_R, Feast_ERROR_NO_CONVERGENCE, Feast_ERROR_MEMORY,
        Feast_ERROR_INTERNAL, Feast_ERROR_LAPACK, Feast_ERROR_FPM

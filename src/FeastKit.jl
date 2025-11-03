@@ -1,7 +1,7 @@
 module FeastKit
 
-export feastinit, feastinit!, feastdefault!
-export feast_srci!, feast_hrci!, feast_grci!
+export feastinit, feastinit!, feastinit_driver, feastdefault!
+export feast_srci!, feast_srcix!, feast_hrci!, feast_hrcix!, feast_grci!, feast_grcix!
 export feast_contour, feast_gcontour, feast_customcontour
 export feast, feast_general, feast_matvec
 export feast_parallel, pfeast_srci!, ParallelFeastState
@@ -16,7 +16,8 @@ export feast_sygv!, feast_sygvx!, feast_syev!, feast_syevx!
 export feast_heev!, feast_heevx!, feast_hegv!, feast_hegvx!
 export feast_gegv!, feast_gegvx!, feast_geev!, feast_geevx!
 export feast_pep!, feast_gepev!, feast_gepevx!, feast_hepev!, feast_hepevx!,
-       feast_sypev!, feast_sypevx!
+       feast_sypev!, feast_sypevx!, feast_srcipev!, feast_srcipevx!,
+       feast_grcipev!, feast_grcipevx!
 # Sparse matrix solver exports
 export feast_scsrgv!, feast_scsrgvx!, feast_scsrev!, feast_scsrevx!
 export feast_hcsrev!, feast_hcsrevx!, feast_gcsrgv!, feast_gcsrgvx!
@@ -42,7 +43,9 @@ export FeastResult, FeastParameters, FeastWorkspaceReal, FeastWorkspaceComplex
 # Matrix-free interface exports
 export MatrixFreeOperator, MatrixVecFunction, LinearOperator
 export feast_matfree_srci!, feast_matfree_grci!
-export feast_contour_expert, feast_contour_custom_weights!, feast_rational_expert
+export feast_contour_expert, feast_contour_custom_weights!, feast_rational_expert,
+       feast_rational, feast_rationalx, feast_grational, feast_grationalx,
+       feast_distribution_type
 export feast_polynomial, create_iterative_solver, allocate_matfree_workspace
 
 using LinearAlgebra

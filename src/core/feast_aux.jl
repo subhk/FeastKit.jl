@@ -9,6 +9,17 @@ function _copy_contour(contour::FeastContour{T}) where T<:Real
     return FeastContour{T}(copy(contour.Zne), copy(contour.Wne))
 end
 
+function feast_distribution_type(N::Int,
+                                 isa::AbstractVector{<:Integer},
+                                 jsa::AbstractVector{<:Integer};
+                                 comm::Any = nothing)
+    if length(isa) == N + 1 && !isempty(jsa)
+        return :csr
+    else
+        return :unknown
+    end
+end
+
 function feast_set_custom_contour!(fpm::Vector{Int}, contour::FeastContour{T}) where T<:Real
     validate_contour(contour.Zne, contour.Wne)
     FEAST_CUSTOM_CONTOURS[fpm] = _copy_contour(contour)

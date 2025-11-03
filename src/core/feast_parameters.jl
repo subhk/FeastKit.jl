@@ -43,6 +43,20 @@ function feastinit()
     return FeastParameters(fpm)
 end
 
+function feastinit_driver(fpm::Vector{Int}, N::Integer)
+    feastinit!(fpm)
+    if N > 0
+        suggested = clamp(Int(ceil(sqrt(Float64(N)))), 8, 64)
+        fpm[2] = suggested
+    end
+    return fpm
+end
+
+function feastinit_driver(N::Integer)
+    fpm = zeros(Int, 64)
+    return feastinit_driver(fpm, N)
+end
+
 function feastdefault!(fpm::Vector{Int})
     # Validate and set default values for Feast parameters
     length(fpm) >= 64 || throw(ArgumentError("fpm array must have at least 64 elements"))

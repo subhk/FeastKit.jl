@@ -239,6 +239,17 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             return
         end
     end
+
+    # Safety check: if we reach here, ijob has an invalid value
+    if ijob[] != -1 && ijob[] != Int(Feast_RCI_FACTORIZE) &&
+       ijob[] != Int(Feast_RCI_SOLVE) && ijob[] != Int(Feast_RCI_MULT_A) &&
+       ijob[] != Int(Feast_RCI_DONE)
+        cleanup_state!()
+        error("FEAST RCI kernel: Invalid job code ijob=$(ijob[]). " *
+              "Expected: -1 (init), $(Int(Feast_RCI_FACTORIZE)) (factorize), " *
+              "$(Int(Feast_RCI_SOLVE)) (solve), $(Int(Feast_RCI_MULT_A)) (mult_a), " *
+              "or $(Int(Feast_RCI_DONE)) (done)")
+    end
 end
 
 function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
@@ -477,6 +488,17 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             return
         end
     end
+
+    # Safety check: if we reach here, ijob has an invalid value
+    if ijob[] != -1 && ijob[] != Int(Feast_RCI_FACTORIZE) &&
+       ijob[] != Int(Feast_RCI_SOLVE) && ijob[] != Int(Feast_RCI_MULT_A) &&
+       ijob[] != Int(Feast_RCI_DONE)
+        cleanup_state!()
+        error("FEAST RCI kernel (Hermitian): Invalid job code ijob=$(ijob[]). " *
+              "Expected: -1 (init), $(Int(Feast_RCI_FACTORIZE)) (factorize), " *
+              "$(Int(Feast_RCI_SOLVE)) (solve), $(Int(Feast_RCI_MULT_A)) (mult_a), " *
+              "or $(Int(Feast_RCI_DONE)) (done)")
+    end
 end
 
 function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
@@ -707,5 +729,16 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return
         end
+    end
+
+    # Safety check: if we reach here, ijob has an invalid value
+    if ijob[] != -1 && ijob[] != Int(Feast_RCI_FACTORIZE) &&
+       ijob[] != Int(Feast_RCI_SOLVE) && ijob[] != Int(Feast_RCI_MULT_A) &&
+       ijob[] != Int(Feast_RCI_DONE)
+        cleanup_state!()
+        error("FEAST RCI kernel (General): Invalid job code ijob=$(ijob[]). " *
+              "Expected: -1 (init), $(Int(Feast_RCI_FACTORIZE)) (factorize), " *
+              "$(Int(Feast_RCI_SOLVE)) (solve), $(Int(Feast_RCI_MULT_A)) (mult_a), " *
+              "or $(Int(Feast_RCI_DONE)) (done)")
     end
 end

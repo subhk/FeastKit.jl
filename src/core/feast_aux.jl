@@ -3,6 +3,67 @@
 
 using Printf
 
+const FEAST_CUSTOM_CONTOURS = IdDict{Vector{Int}, FeastContour}()
+
+function _copy_contour(contour::FeastContour{T}) where T<:Real
+    return FeastContour{T}(copy(contour.Zne), copy(contour.Wne))
+end
+
+function feast_set_custom_contour!(fpm::Vector{Int}, contour::FeastContour{T}) where T<:Real
+    validate_contour(contour.Zne, contour.Wne)
+    FEAST_CUSTOM_CONTOURS[fpm] = _copy_contour(contour)
+    fpm[15] = 1
+    fpm[2] = length(contour.Zne)
+    return FEAST_CUSTOM_CONTOURS[fpm]
+end
+
+function feast_set_custom_contour!(fpm::Vector{Int},
+                                   Zne::AbstractVector{Complex{T1}},
+                                   Wne::AbstractVector{Complex{T2}}) where {T1<:Real, T2<:Real}
+    base = promote_type(T1, T2)
+    Zvec = Vector{Complex{base}}(Zne)
+    Wvec = Vector{Complex{base}}(Wne)
+    contour = FeastContour{base}(Zvec, Wvec)
+    return feast_set_custom_contour!(fpm, contour)
+end
+
+function feast_get_custom_contour(fpm::Vector{Int})
+    return get(FEAST_CUSTOM_CONTOURS, fpm, nothing)
+end
+
+function feast_clear_custom_contour!(fpm::Vector{Int})
+    pop!(FEAST_CUSTOM_CONTOURS, fpm, nothing)
+    return nothing
+end
+
+function with_custom_contour(fpm::Vector{Int}, contour::FeastContour{T},
+                             solver::Function) where T<:Real
+    old_flag = fpm[15]
+    old_ne = fpm[2]
+    old_contour = feast_get_custom_contour(fpm)
+    feast_set_custom_contour!(fpm, contour)
+    try
+        return solver()
+    finally
+        if old_contour === nothing
+            feast_clear_custom_contour!(fpm)
+        else
+            feast_set_custom_contour!(fpm, old_contour)
+        end
+        fpm[15] = old_flag
+        fpm[2] = old_ne
+    end
+end
+
+function with_custom_contour(fpm::Vector{Int},
+                             Zne::AbstractVector{Complex{T1}},
+                             Wne::AbstractVector{Complex{T2}},
+                             solver::Function) where {T1<:Real, T2<:Real}
+    contour = FeastContour{promote_type(T1, T2)}(Vector{Complex{promote_type(T1, T2)}}(Zne),
+                                                 Vector{Complex{promote_type(T1, T2)}}(Wne))
+    return with_custom_contour(fpm, contour, solver)
+end
+
 function check_feast_srci_input(N::Int, M0::Int, Emin::T, Emax::T, 
                                fpm::Vector{Int}) where T<:Real
     # Check validity of RCI Feast inputs for symmetric/Hermitian problems

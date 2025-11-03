@@ -15,7 +15,8 @@ FeastKit.jl is a pure Julia translation of the original FEAST library. FEAST is 
 - **Multiple matrix formats**: Support for dense, sparse, and banded matrices  
 - **Generalized eigenvalue problems**: Solve both Ax = λx and Ax = λBx problems
 - **Complex arithmetic**: Handle both real symmetric/Hermitian and general complex matrices
-- **Parallel computation**: Multi-threaded and distributed computing for contour integration
+- **Precision flexibility**: Works seamlessly with `Float64`/`ComplexF64` and `Float32`/`ComplexF32`
+- **Parallel computation**: Multi-threaded, distributed, and optional MPI-based contour integration
 - **Reverse Communication Interface (RCI)**: Advanced interface for custom linear solvers
 - **Polynomial eigenvalue problems**: Support for polynomial eigenvalue problems
 

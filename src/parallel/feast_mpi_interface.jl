@@ -183,7 +183,7 @@ function feast_parallel_comparison(A::AbstractMatrix, B::AbstractMatrix, interva
     println("Subspace size: $M0")
     println("Available backends:")
     println("  Threads: $(Threads.nthreads())")
-    println("  Workers: $(nworkers())")
+    println("  Workers: $(Distributed.nworkers())")
     println("  MPI: $(mpi_available() ? "Yes" : "No")")
     
     results = Dict{Symbol, Any}()

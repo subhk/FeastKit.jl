@@ -80,6 +80,23 @@ using Distributed
             @info "Skipping high-level feast() smoke run (set FEAST_RUN_LONG_TESTS=true to enable)"
         end
     end
+
+    @testset "Single precision support" begin
+        n = 4
+        A = Matrix{Float32}(SymTridiagonal(fill(2.0f0, n), fill(-1.0f0, n-1)))
+        B = Matrix{Float32}(I, n, n)
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        result = feast_sygv!(copy(A), copy(B), 0.0f0, 4.0f0, n, fpm)
+        @test result.info == 0
+        @test result.M >= 1
+
+        A_complex = Matrix{ComplexF32}(Hermitian(rand(ComplexF32, n, n)))
+        result_complex = feast_heev!(copy(A_complex), -2.0f0, 2.0f0, n, fpm)
+        @test result_complex.info == 0
+        @test result_complex.M >= 1
+    end
     
     @testset "Sparse matrix support" begin
         # Test sparse matrix creation and info

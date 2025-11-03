@@ -355,6 +355,26 @@ function feast_banded_info(A_banded::Matrix{T}, k::Int, N::Int) where T
     # Use Printf for formatted percentage
     pct = stored_elements / total_elements * 100
     println("  Storage efficiency: ", Printf.@sprintf("%.1f", pct), "%")
-    
+
     return (N, bandwidth, stored_elements)
+end
+
+# Standard eigenvalue problem variants (B = I)
+
+function feast_sbev!(A::Matrix{T}, ka::Int,
+                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    # Feast for banded real symmetric standard eigenvalue problem
+    # Solves: A*q = lambda*q where A is symmetric banded
+    # This is equivalent to feast_sbgv! with B = I
+
+    N = size(A, 2)
+
+    # Create identity matrix in banded format
+    # For identity, we only need the diagonal, so k=0
+    B = zeros(T, 1, N)
+    B[1, :] .= one(T)
+    klb = 0
+
+    # Call generalized version with B = I
+    return feast_sbgv!(A, B, ka, klb, Emin, Emax, M0, fpm)
 end

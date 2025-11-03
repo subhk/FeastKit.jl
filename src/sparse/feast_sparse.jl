@@ -519,6 +519,40 @@ function feast_sparse_info(A::SparseMatrixCSC)
     println("  Non-zeros: $(nnz_A)")
     # Use Printf for formatted percentage
     println("  Density: ", Printf.@sprintf("%.2f", density), "%")
-    
+
     return (N, nnz_A, density)
+end
+
+# Standard eigenvalue problem variants (B = I)
+
+function feast_scsrev!(A::SparseMatrixCSC{T,Int},
+                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    # Feast for sparse real symmetric standard eigenvalue problem
+    # Solves: A*q = lambda*q where A is symmetric
+    # This is equivalent to feast_scsrgv! with B = I
+
+    N = size(A, 1)
+    size(A, 2) == N || throw(ArgumentError("A must be square"))
+
+    # Create sparse identity matrix for B
+    B = sparse(I, N, N)
+
+    # Call generalized version with B = I
+    return feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
+end
+
+function feast_gcsrev!(A::SparseMatrixCSC{Complex{T},Int},
+                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    # Feast for sparse complex general standard eigenvalue problem
+    # Solves: A*q = lambda*q where A is a general matrix
+    # This is equivalent to feast_gcsrgv! with B = I
+
+    N = size(A, 1)
+    size(A, 2) == N || throw(ArgumentError("A must be square"))
+
+    # Create sparse identity matrix for B
+    B = sparse(Complex{T}(1.0) * I, N, N)
+
+    # Call generalized version with B = I
+    return feast_gcsrgv!(A, B, Emid, r, M0, fpm)
 end

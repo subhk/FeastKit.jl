@@ -292,7 +292,123 @@ function feast_pep!(A::Vector{Matrix{Complex{T}}}, d::Int,
     M = result.M
     lambda = result.lambda[1:M]
     q_orig = result.q[1:N, 1:M]
-    
-    return FeastResult{T, Complex{T}}(lambda, q_orig, M, result.res[1:M], 
+
+    return FeastResult{T, Complex{T}}(lambda, q_orig, M, result.res[1:M],
                                      result.info, result.epsout, result.loop)
+end
+
+# Standard eigenvalue problem variants (B = I)
+
+function feast_syev!(A::Matrix{T},
+                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    # Feast for dense real symmetric standard eigenvalue problem
+    # Solves: A*q = lambda*q where A is symmetric
+    # This is equivalent to feast_sygv! with B = I
+
+    N = size(A, 1)
+    size(A, 2) == N || throw(ArgumentError("A must be square"))
+
+    # Create identity matrix for B
+    B = Matrix{T}(I, N, N)
+
+    # Call generalized version with B = I
+    return feast_sygv!(A, B, Emin, Emax, M0, fpm)
+end
+
+function feast_hegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
+                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    # Feast for dense complex Hermitian generalized eigenvalue problem
+    # Solves: A*q = lambda*B*q where A and B are Hermitian, B is positive definite
+
+    N = size(A, 1)
+    size(A, 2) == N || throw(ArgumentError("A must be square"))
+    size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
+
+    # Check inputs
+    check_feast_srci_input(N, M0, Emin, Emax, fpm)
+
+    # Initialize workspace
+    workspace = FeastWorkspaceComplex{T}(N, M0)
+
+    # Initialize variables for RCI
+    ijob = Ref(-1)
+    Ze = Ref(zero(Complex{T}))
+    epsout = Ref(zero(T))
+    loop = Ref(0)
+    mode = Ref(0)
+    info = Ref(0)
+
+    # LU factorization workspace
+    LU_factorization = nothing
+    temp_matrix = Matrix{Complex{T}}(undef, N, N)
+
+    while true
+        # Call Feast RCI kernel
+        feast_hrci!(ijob, N, Ze, workspace.work, workspace.workc,
+                   workspace.zAq, workspace.zSq, fpm, epsout, loop,
+                   Emin, Emax, M0, workspace.lambda, workspace.q,
+                   mode, workspace.res, info)
+
+        if ijob[] == Int(Feast_RCI_FACTORIZE)
+            # Factorize Ze*B - A
+            z = Ze[]
+            temp_matrix .= z .* B .- A
+
+            # LU factorization
+            try
+                LU_factorization = lu!(temp_matrix)
+            catch e
+                info[] = Int(Feast_ERROR_LAPACK)
+                break
+            end
+
+        elseif ijob[] == Int(Feast_RCI_SOLVE)
+            # Solve linear systems: (Ze*B - A) * X = B * workspace.workc
+            rhs = B * workspace.workc[:, 1:M0]
+
+            try
+                workspace.workc[:, 1:M0] .= LU_factorization \ rhs
+            catch e
+                info[] = Int(Feast_ERROR_LAPACK)
+                break
+            end
+
+        elseif ijob[] == Int(Feast_RCI_MULT_A)
+            # Compute A * q for residual calculation
+            M = mode[]
+            workspace.work[:, 1:M] .= real.(A * workspace.q[:, 1:M])
+
+        elseif ijob[] == Int(Feast_RCI_DONE)
+            break
+        else
+            # Unexpected ijob value - error out to prevent infinite loop
+            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
+                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
+                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
+        end
+    end
+
+    # Extract results
+    M = mode[]
+    lambda = workspace.lambda[1:M]
+    q = workspace.q[:, 1:M]
+    res = workspace.res[1:M]
+
+    return FeastResult{T, Complex{T}}(lambda, q, M, res, info[], epsout[], loop[])
+end
+
+function feast_geev!(A::Matrix{Complex{T}},
+                     Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    # Feast for dense complex general standard eigenvalue problem
+    # Solves: A*q = lambda*q where A is a general matrix
+    # This is equivalent to feast_gegv! with B = I
+
+    N = size(A, 1)
+    size(A, 2) == N || throw(ArgumentError("A must be square"))
+
+    # Create identity matrix for B
+    B = Matrix{Complex{T}}(I, N, N)
+
+    # Call generalized version with B = I
+    return feast_gegv!(A, B, Emid, r, M0, fpm)
 end

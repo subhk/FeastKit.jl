@@ -124,6 +124,51 @@ using Distributed
         @test isapprox(sort(result_sparse.lambda), sparse_eigs; atol=1e-9)
     end
 
+    @testset "General eigenvalue problems" begin
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+
+        # Dense standard problem (B = I)
+        A_dense = ComplexF64[1  2+1im;
+                             0  3]
+        center = 2 + 0im
+        radius = 2.5
+        result_standard = feast_general(A_dense, center, radius; M0=4, fpm=copy(fpm), parallel=:serial)
+        @test result_standard.info == 0
+        @test result_standard.M == 2
+        expected_dense = sort(real.(eigvals(Matrix(A_dense))))
+        @test isapprox(sort(result_standard.lambda), expected_dense; atol=1e-9)
+
+        # Dense generalized problem with diagonal B
+        B_dense = ComplexF64[1 0;
+                             0 2]
+        result_general = feast_general(A_dense, B_dense, center, radius; M0=4, fpm=copy(fpm), parallel=:serial)
+        @test result_general.info == 0
+        @test result_general.M == 2
+        expected_general = sort(real.(eigvals(Matrix(A_dense), Matrix(B_dense))))
+        @test isapprox(sort(result_general.lambda), expected_general; atol=1e-9)
+
+        # Sparse standard problem (automatic type promotion)
+        A_sparse = sparse(A_dense)
+        result_sparse = feast_general(A_sparse, center, radius; M0=4, fpm=copy(fpm), parallel=:serial)
+        @test result_sparse.info == 0
+        @test result_sparse.M == 2
+        @test isapprox(sort(result_sparse.lambda), expected_dense; atol=1e-9)
+
+        # Real input should be promoted to complex
+        A_real = [1.0 2.0; 0.0 3.0]
+        result_real = feast_general(A_real, center, radius; M0=4, fpm=copy(fpm), parallel=:serial)
+        @test result_real.info == 0
+        @test result_real.M == 2
+        @test isapprox(sort(result_real.lambda), expected_dense; atol=1e-9)
+
+        # Invalid configurations
+        @test_throws ArgumentError feast_general(A_dense, B_dense, center, 0.0; M0=4, fpm=copy(fpm))
+        B_bad = rand(ComplexF64, 3, 3)
+        @test_throws ArgumentError feast_general(A_dense, B_bad, center, radius; M0=4, fpm=copy(fpm))
+    end
+
     if get(ENV, "FEAST_RUN_PRECISION_TESTS", "false") == "true"
         @testset "Single precision support" begin
             n = 4

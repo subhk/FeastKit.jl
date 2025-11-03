@@ -58,6 +58,33 @@ function _feast_run_serial(A, B, interval, M0, fpm)
     end
 end
 
+@inline function _execute_feast_general(A, B, center, radius, backend, M0, fpm, comm, use_threads)
+    if backend != :serial
+        @warn "Parallel execution for general problems is not yet available, falling back to serial"
+    end
+    return _feast_run_general_serial(A, B, center, radius, M0, fpm)
+end
+
+function _feast_run_general_serial(A, B, center, radius, M0, fpm)
+    try
+        return feast_general_serial(A, B, center, radius, M0, fpm)
+    catch e
+        if e isa ArgumentError || e isa ErrorException || e isa UndefVarError
+            rethrow()
+        else
+            throw(ErrorException(string(e)))
+        end
+    end
+end
+
+@inline _real_component_type(::Type{Complex{T}}) where T<:Real = T
+@inline _real_component_type(::Type{T}) where T<:Real = T
+
+function _ensure_complex_matrix(A::AbstractMatrix)
+    materialized = _materialize_matrix(A)
+    return eltype(materialized) <: Complex ? materialized : Complex.(materialized)
+end
+
 # Main Feast interface functions
 function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                interval::Tuple{T,T}; M0::Int = 10,
@@ -126,25 +153,57 @@ function feast(A::AbstractMatrix{Complex{T}}, interval::Tuple{T,T};
                  use_threads=use_threads, comm=comm)
 end
 
-function feast_general(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
-                      center::Complex{T}, radius::T; M0::Int = 10,
-                      fpm::Union{Vector{Int}, Nothing} = nothing) where T<:Real
+function feast_general(A::AbstractMatrix, B::AbstractMatrix,
+                       center::Complex{T}, radius::T; M0::Int = 10,
+                       fpm::Union{Vector{Int}, Nothing} = nothing,
+                       parallel::Union{Bool, Symbol} = false,
+                       use_threads::Bool = true,
+                       comm = nothing) where T<:Real
     # Feast interface for general (non-Hermitian) eigenvalue problems
     # Uses circular contour in complex plane
-    
-    # Initialize Feast parameters if not provided
-    if fpm === nothing
-        fpm = zeros(Int, 64)
-        feastinit!(fpm)
-    end
-    
-    if isa(A, Matrix) && isa(B, Matrix)
-        return feast_gegv!(copy(A), copy(B), center, radius, M0, fpm)
-    elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
-        return feast_gcsrgv!(A, B, center, radius, M0, fpm)
+
+    size(A, 1) == size(A, 2) || throw(ArgumentError("A must be square"))
+    size(B) == size(A) || throw(ArgumentError("B must match the size of A"))
+
+    params = _ensure_feast_parameters(fpm)
+    backend = determine_parallel_backend(_normalize_parallel(parallel), comm)
+
+    A_complex = _ensure_complex_matrix(A)
+    B_complex = _ensure_complex_matrix(B)
+
+    real_type = promote_type(_real_component_type(eltype(A_complex)),
+                             _real_component_type(eltype(B_complex)),
+                             _real_component_type(typeof(center)),
+                             T)
+    complex_type = Complex{real_type}
+
+    A_exec = complex_type.(A_complex)
+    B_exec = complex_type.(B_complex)
+
+    center_exec = complex_type(center)
+    radius_exec = convert(real_type, radius)
+    radius_exec > zero(real_type) ||
+        throw(ArgumentError("Radius must be positive, got $radius"))
+
+    return _execute_feast_general(A_exec, B_exec, center_exec, radius_exec,
+                                  backend, M0, params, comm, use_threads)
+end
+
+function feast_general(A::AbstractMatrix, center::Complex{T}, radius::T;
+                       M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing,
+                       parallel::Union{Bool, Symbol} = false,
+                       use_threads::Bool = true,
+                       comm = nothing) where T<:Real
+    # Feast interface for standard general eigenvalue problems (B = I)
+
+    N = size(A, 1)
+    if isa(A, SparseMatrixCSC)
+        B = spdiagm(0 => ones(eltype(A), N))
     else
-        throw(ArgumentError("Unsupported matrix types: $(typeof(A)), $(typeof(B))"))
+        B = Matrix{eltype(A)}(I, N, N)
     end
+    return feast_general(A, B, center, radius; M0=M0, fpm=fpm,
+                         parallel=parallel, use_threads=use_threads, comm=comm)
 end
 
 function feast_banded(A::Matrix{T}, kla::Int, interval::Tuple{T,T};

@@ -132,6 +132,17 @@ function feast_serial(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{T,T}
     end
 end
 
+function feast_general_serial(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
+                              center::Complex{T}, radius::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    if isa(A, Matrix) && isa(B, Matrix)
+        return feast_gegv!(copy(A), copy(B), center, radius, M0, fpm)
+    elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
+        return feast_gcsrgv!(A, B, center, radius, M0, fpm)
+    else
+        throw(ArgumentError("Unsupported matrix types for general problems: $(typeof(A)), $(typeof(B))"))
+    end
+end
+
 # Check parallel computing capabilities
 function feast_parallel_capabilities()
     capabilities = Dict{Symbol, Bool}()

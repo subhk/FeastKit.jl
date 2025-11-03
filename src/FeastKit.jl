@@ -11,6 +11,12 @@ export check_feast_srci_input, feast_inside_contour, feast_inside_gcontour
 export feast_name, feast_memory_estimate
 export full_to_banded, banded_to_full, feast_banded_info
 export distribute_contour_points
+# Dense matrix solver exports
+export feast_sygv!, feast_syev!, feast_heev!, feast_hegv!, feast_gegv!, feast_geev!, feast_pep!
+# Sparse matrix solver exports
+export feast_scsrgv!, feast_scsrev!, feast_hcsrev!, feast_gcsrgv!, feast_gcsrev!
+# Banded matrix solver exports
+export feast_sbgv!, feast_sbev!, feast_hbev!
 export Feast_SUCCESS, Feast_ERROR_N, Feast_ERROR_M0, Feast_ERROR_EMIN_EMAX,
        Feast_ERROR_EMID_R, Feast_ERROR_NO_CONVERGENCE, Feast_ERROR_MEMORY,
        Feast_ERROR_INTERNAL, Feast_ERROR_LAPACK, Feast_ERROR_FPM

@@ -1,48 +1,55 @@
 # High-level Feast interfaces for easy use
 # These provide simplified interfaces to the Feast algorithms
 
-# Main Feast interface functions
-function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T}, 
-               interval::Tuple{T,T}; M0::Int = 10, 
-               fpm::Union{Vector{Int}, Nothing} = nothing,
-               parallel::Union{Bool, Symbol} = false,
-               use_threads::Bool = true,
-               comm = nothing) where T<:Real
-    # Main Feast interface for generalized eigenvalue problems
-    # Automatically detects matrix type and calls appropriate solver
-    
-    Emin, Emax = interval
-    
-    # Initialize Feast parameters if not provided
+const FEAST_PARAMETERS_LENGTH = 64
+
+@inline function _ensure_feast_parameters(fpm::Union{Vector{Int},Nothing})
     if fpm === nothing
-        fpm = zeros(Int, 64)
-        feastinit!(fpm)
+        params = zeros(Int, FEAST_PARAMETERS_LENGTH)
+        feastinit!(params)
+        return params
     end
-    
-    # Handle parallel backend selection
-    if parallel == true
-        parallel = :auto  # Convert old boolean API to new symbol API
-    elseif parallel == false
-        parallel = :serial
+    length(fpm) >= FEAST_PARAMETERS_LENGTH ||
+        throw(ArgumentError("fpm vector must have length ≥ $(FEAST_PARAMETERS_LENGTH)"))
+    return fpm
+end
+
+@inline function _normalize_parallel(parallel::Union{Bool,Symbol})
+    parallel === true && return :auto
+    parallel === false && return :serial
+    parallel isa Symbol && return parallel
+    throw(ArgumentError("Invalid parallel option: $parallel"))
+end
+
+function _materialize_matrix(A::AbstractMatrix)
+    if A isa Matrix || A isa SparseMatrixCSC
+        return A
+    elseif A isa Symmetric
+        parent(A) isa SparseMatrixCSC && return SparseMatrixCSC(A)
+        return Matrix(A)
+    elseif A isa Hermitian
+        parent(A) isa SparseMatrixCSC && return SparseMatrixCSC(A)
+        return Matrix(A)
+    else
+        return Matrix(A)
     end
-    
-    # Determine and use appropriate backend
-    backend = determine_parallel_backend(parallel, comm)
-    
+end
+
+@inline function _execute_feast(A, B, interval, backend, M0, fpm, comm, use_threads)
     if backend != :serial
-        # Try parallel execution
         try
             return feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads)
         catch e
             @debug "Parallel execution failed, falling back to serial" exception=e
         end
     end
-    
-    # Serial execution
+    return _feast_run_serial(A, B, interval, M0, fpm)
+end
+
+function _feast_run_serial(A, B, interval, M0, fpm)
     try
         return feast_serial(A, B, interval, M0, fpm)
     catch e
-        # Normalize exception types for friendlier testing/UX
         if e isa ArgumentError || e isa ErrorException || e isa UndefVarError
             rethrow()
         else
@@ -51,24 +58,72 @@ function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     end
 end
 
-function feast(A::AbstractMatrix{T}, interval::Tuple{T,T}; 
+# Main Feast interface functions
+function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
+               interval::Tuple{T,T}; M0::Int = 10,
+               fpm::Union{Vector{Int}, Nothing} = nothing,
+               parallel::Union{Bool, Symbol} = false,
+               use_threads::Bool = true,
+               comm = nothing) where T<:Real
+    # Main Feast interface for real symmetric generalized eigenvalue problems
+    size(A, 1) == size(A, 2) || throw(ArgumentError("A must be square"))
+    size(B) == size(A) || throw(ArgumentError("B must match the size of A"))
+    issymmetric(A) || throw(ArgumentError("feast expects a symmetric real matrix A; use feast_general for non-symmetric problems"))
+    issymmetric(B) || throw(ArgumentError("B must be symmetric positive definite for real generalized problems"))
+
+    feast_validate_interval(A, interval)
+
+    params = _ensure_feast_parameters(fpm)
+    backend = determine_parallel_backend(_normalize_parallel(parallel), comm)
+
+    A_exec = _materialize_matrix(A)
+    B_exec = _materialize_matrix(B)
+
+    return _execute_feast(A_exec, B_exec, interval, backend, M0, params, comm, use_threads)
+end
+
+function feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
+               interval::Tuple{T,T}; M0::Int = 10,
+               fpm::Union{Vector{Int}, Nothing} = nothing,
+               parallel::Union{Bool, Symbol} = false,
+               use_threads::Bool = true,
+               comm = nothing) where T<:Real
+    # Feast interface for complex Hermitian generalized eigenvalue problems
+    size(A, 1) == size(A, 2) || throw(ArgumentError("A must be square"))
+    size(B) == size(A) || throw(ArgumentError("B must match the size of A"))
+    ishermitian(A) || throw(ArgumentError("feast expects a Hermitian matrix A when using real intervals; call feast_general for non-Hermitian problems"))
+    ishermitian(B) || throw(ArgumentError("B must be Hermitian positive definite for complex generalized problems"))
+
+    params = _ensure_feast_parameters(fpm)
+    backend = determine_parallel_backend(_normalize_parallel(parallel), comm)
+
+    A_exec = _materialize_matrix(A)
+    B_exec = _materialize_matrix(B)
+
+    return _execute_feast(A_exec, B_exec, interval, backend, M0, params, comm, use_threads)
+end
+
+function feast(A::AbstractMatrix{T}, interval::Tuple{T,T};
                M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing,
-               parallel::Union{Bool, Symbol} = false, 
+               parallel::Union{Bool, Symbol} = false,
                use_threads::Bool = true, comm = nothing) where T<:Real
-    # Feast interface for standard eigenvalue problems (B = I)
-    
+    # Feast interface for standard real symmetric eigenvalue problems (B = I)
     N = size(A, 1)
-    
-    # Create identity matrix of appropriate type
-    if isa(A, SparseMatrixCSC)
-        B = sparse(I, N, N)
-    else
-        B = Matrix{T}(I, N, N)
-    end
-    
-    # Use the generalized eigenvalue interface
-    return feast(A, B, interval, M0=M0, fpm=fpm, parallel=parallel, 
-                use_threads=use_threads, comm=comm)
+    B = isa(A, SparseMatrixCSC) ? spdiagm(0 => fill(one(T), N)) : Matrix{T}(I, N, N)
+    return feast(A, B, interval, M0=M0, fpm=fpm, parallel=parallel,
+                 use_threads=use_threads, comm=comm)
+end
+
+function feast(A::AbstractMatrix{Complex{T}}, interval::Tuple{T,T};
+               M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing,
+               parallel::Union{Bool, Symbol} = false,
+               use_threads::Bool = true, comm = nothing) where T<:Real
+    # Feast interface for standard complex Hermitian eigenvalue problems (B = I)
+    N = size(A, 1)
+    identity_vals = fill(one(Complex{T}), N)
+    B = isa(A, SparseMatrixCSC) ? spdiagm(0 => identity_vals) : Matrix{Complex{T}}(I, N, N)
+    return feast(A, B, interval, M0=M0, fpm=fpm, parallel=parallel,
+                 use_threads=use_threads, comm=comm)
 end
 
 function feast_general(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},

@@ -44,34 +44,91 @@ function determine_parallel_backend(parallel::Symbol, comm=nothing)
     end
 end
 
-# Execute Feast with the appropriate backend
 function feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads)
     if backend == :mpi && mpi_available()
-        return mpi_feast(A, B, interval, M0=M0, fpm=fpm, comm=comm)
+        if eltype(A) <: Real && eltype(B) <: Real
+            return mpi_feast(A, B, interval, M0=M0, fpm=fpm, comm=comm)
+        else
+            @warn "MPI backend currently supports real symmetric problems; falling back to serial execution"
+        end
     elseif backend in [:threads, :distributed]
-        return feast_parallel(A, B, interval, M0=M0, fpm=fpm, use_threads=(backend==:threads))
-    else
-        # Fall back to serial execution
-        return feast_serial(A, B, interval, M0, fpm)
+        if eltype(A) <: Real && eltype(B) <: Real
+            return feast_parallel(A, B, interval, M0=M0, fpm=fpm, use_threads=(backend==:threads))
+        else
+            @warn "Threaded/distributed backends currently support real symmetric problems; falling back to serial execution"
+        end
     end
+    # Fall back to serial execution
+    return feast_serial(A, B, interval, M0, fpm)
+end
+
+# Detect identity matrices for dispatching specialized routines
+function _is_identity_matrix(B::Matrix)
+    isdiag(B) || return false
+    n = size(B, 1)
+    n == size(B, 2) || return false
+    one_val = one(eltype(B))
+    @inbounds for i in 1:n
+        if B[i, i] != one_val
+            return false
+        end
+    end
+    return true
+end
+
+function _is_identity_matrix(B::SparseMatrixCSC)
+    n = size(B, 1)
+    n == size(B, 2) || return false
+    nnz(B) == n || return false
+    nzval = B.nzval
+    rowval = B.rowval
+    colptr = B.colptr
+    one_val = one(eltype(B))
+    @inbounds for col in 1:n
+        start = colptr[col]
+        stop = colptr[col + 1] - 1
+        stop == start || return false
+        if rowval[start] != col
+            return false
+        end
+        if nzval[start] != one_val
+            return false
+        end
+    end
+    return true
 end
 
 # Serial Feast execution
-function feast_serial(A::AbstractMatrix{T}, B::AbstractMatrix{T}, interval::Tuple{T,T}, M0::Int, fpm::Vector{Int}) where T<:Real
+function feast_serial(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{T,T}, M0::Int, fpm::Vector{Int}) where T<:Real
     Emin, Emax = interval
-    
-    if isa(A, Matrix) && isa(B, Matrix)
-        # Dense matrices
-        if T <: Real
+    elem_type = eltype(A)
+
+    if elem_type <: Real
+        if isa(A, Matrix) && isa(B, Matrix)
             return feast_sygv!(copy(A), copy(B), Emin, Emax, M0, fpm)
+        elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
+            return feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
         else
-            return feast_gegv!(A, B, Complex(Emin), Emax - Emin, M0, fpm)
+            throw(ArgumentError("Unsupported matrix storage types for real symmetric problems: $(typeof(A)), $(typeof(B))"))
         end
-    elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
-        # Sparse matrices
-        return feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
+    elseif elem_type <: Complex
+        if isa(A, Matrix) && isa(B, Matrix)
+            if _is_identity_matrix(B)
+                return feast_heev!(copy(A), Emin, Emax, M0, fpm)
+            else
+                return feast_hegv!(copy(A), copy(B), Emin, Emax, M0, fpm)
+            end
+        elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
+            if _is_identity_matrix(B)
+                return feast_hcsrev!(A, Emin, Emax, M0, fpm)
+            else
+                throw(ArgumentError("Sparse complex generalized problems with non-identity B are not yet supported"))
+            end
+        else
+            throw(ArgumentError("Unsupported matrix storage types for complex Hermitian problems: $(typeof(A)), $(typeof(B))"))
+        end
     else
-        throw(ArgumentError("Unsupported matrix types: $(typeof(A)), $(typeof(B))"))
+        throw(ArgumentError("Unsupported element type $(elem_type) in feast_serial"))
     end
 end
 

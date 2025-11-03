@@ -71,8 +71,8 @@ function dense_complex_syev()
     fpm = zeros(Int, 64)
     FeastKit.feastinit!(fpm)
     fpm[1] = 1
-    result = FeastKit.feast_syev!(copy(A), Emid, r, M0, fpm)
-    print_summary("F90dense_zfeast_syev", result)
+    result = FeastKit.feast_geev!(copy(A), Emid, r, M0, fpm)
+    print_summary("F90dense_zfeast_syev (general solver)", result)
 end
 
 function dense_complex_syevx()
@@ -83,11 +83,11 @@ function dense_complex_syevx()
     FeastKit.feastinit!(fpm)
     fpm[1] = 1
     fpm[8] = length(contour.Zne)
-    Emin = real(4.0 - 3.0)
-    Emax = real(4.0 + 3.0)
-    result = FeastKit.feast_syevx!(copy(A), Emin, Emax, M0, fpm,
+    Emid = complex(4.0, 0.0)
+    r = 3.0
+    result = FeastKit.feast_geevx!(copy(A), Emid, r, M0, fpm,
                                    contour.Zne, contour.Wne)
-    print_summary("F90dense_zfeast_syevx", result)
+    print_summary("F90dense_zfeast_syevx (general solver)", result)
 end
 
 function sparse_real_scsrgv()
@@ -183,8 +183,8 @@ end
 function banded_real_sbgv()
     A_band, kl_a, ku_a = read_banded_real("system1")
     B_band, kl_b, ku_b = read_banded_real("system1B")
-    ka = ku_a
-    kb = ku_b
+    ka = max(kl_a, ku_a)
+    kb = max(kl_b, ku_b)
     Emin, Emax = 0.18, 1.0
     M0 = 25
     fpm = zeros(Int, 64)
@@ -203,8 +203,10 @@ function banded_real_gbgv()
     fpm = zeros(Int, 64)
     FeastKit.feastinit!(fpm)
     fpm[1] = 1
+    ka = max(kl_a, ku_a)
+    kb = max(kl_b, ku_b)
     result = FeastKit.feast_gbgv!(complex.(A_band), complex.(B_band),
-                                  ku_a, ku_b, Emid, r, M0, fpm)
+                                  ka, kb, Emid, r, M0, fpm)
     print_summary("F90banded_dfeast_gbgv", result)
 end
 
@@ -215,7 +217,8 @@ function banded_complex_hbev()
     fpm = zeros(Int, 64)
     FeastKit.feastinit!(fpm)
     fpm[1] = 1
-    result = FeastKit.feast_hbev!(copy(A_band), ku_a, Emin, Emax, M0, fpm)
+    ka = max(kl_a, ku_a)
+    result = FeastKit.feast_hbev!(copy(A_band), ka, Emin, Emax, M0, fpm)
     print_summary("F90banded_zfeast_hbev", result)
 end
 
@@ -227,8 +230,9 @@ function banded_complex_sbev()
     fpm = zeros(Int, 64)
     FeastKit.feastinit!(fpm)
     fpm[1] = 1
-    result = FeastKit.feast_sbev!(copy(A_band), ku_a, Emid, r, M0, fpm)
-    print_summary("F90banded_zfeast_sbev", result)
+    ka = max(kl_a, ku_a)
+    result = FeastKit.feast_gbev!(copy(A_band), ka, Emid, r, M0, fpm)
+    print_summary("F90banded_zfeast_sbev (general solver)", result)
 end
 
 function banded_complex_sbevx()
@@ -241,9 +245,12 @@ function banded_complex_sbevx()
     FeastKit.feastinit!(fpm)
     fpm[1] = 1
     fpm[8] = length(contour.Zne)
-    result = FeastKit.feast_sbevx!(copy(A_band), ku_a, Emin, Emax, M0,
+    ka = max(kl_a, ku_a)
+    Emid = complex(4.0, 0.0)
+    r = 3.0
+    result = FeastKit.feast_gbevx!(copy(A_band), ka, Emid, r, M0,
                                    fpm, contour.Zne, contour.Wne)
-    print_summary("F90banded_zfeast_sbevx", result)
+    print_summary("F90banded_zfeast_sbevx (general solver)", result)
 end
 
 function main()

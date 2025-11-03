@@ -131,6 +131,24 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     return FeastResult{T, T}(lambda, q, M, res, info[], epsout[], loop[])
 end
 
+function feast_scsrgvx!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
+                        Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
+                        Zne::AbstractVector{Complex{TZ}},
+                        Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
+    end
+end
+
+function feast_scsrevx!(A::SparseMatrixCSC{T,Int},
+                        Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
+                        Zne::AbstractVector{Complex{TZ}},
+                        Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_scsrev!(A, Emin, Emax, M0, fpm)
+    end
+end
+
 function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
                        Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
     # Feast for sparse complex Hermitian eigenvalue problem
@@ -208,6 +226,15 @@ function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
     res = workspace.res[1:M]
 
     return FeastResult{T, Complex{T}}(lambda, q, M, res, info[], epsout[], loop[])
+end
+
+function feast_hcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
+                        Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
+                        Zne::AbstractVector{Complex{TZ}},
+                        Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_hcsrev!(A, Emin, Emax, M0, fpm)
+    end
 end
 
 function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
@@ -295,6 +322,24 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     return FeastResult{T, Complex{T}}(real.(lambda), q, M, res, info[], epsout[], loop[])
 end
 
+function feast_gcsrgvx!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
+                        Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                        Zne::AbstractVector{Complex{TZ}},
+                        Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_gcsrgv!(A, B, Emid, r, M0, fpm)
+    end
+end
+
+function feast_gcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
+                        Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                        Zne::AbstractVector{Complex{TZ}},
+                        Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_gcsrev!(A, Emid, r, M0, fpm)
+    end
+end
+
 # Iterative refinement for sparse problems
 function feast_scsrgv_iterative!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                                  Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
@@ -322,6 +367,54 @@ function feast_scsrgv_iterative!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T
     end
     
     return result
+end
+
+function feast_scsrpev!(A::Vector{SparseMatrixCSC{T,Int}}, d::Int,
+                        Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    length(A) == d + 1 || throw(ArgumentError("Need d+1 coefficient matrices"))
+    dense_coeffs = [Matrix{T}(Ai) for Ai in A]
+    return feast_sypev!(dense_coeffs, d, Emid, r, M0, fpm)
+end
+
+function feast_scsrpevx!(A::Vector{SparseMatrixCSC{T,Int}}, d::Int,
+                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                         Zne::AbstractVector{Complex{TZ}},
+                         Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_scsrpev!(A, d, Emid, r, M0, fpm)
+    end
+end
+
+function feast_hcsrpev!(A::Vector{SparseMatrixCSC{Complex{T},Int}}, d::Int,
+                        Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    length(A) == d + 1 || throw(ArgumentError("Need d+1 coefficient matrices"))
+    dense_coeffs = [Matrix{Complex{T}}(Ai) for Ai in A]
+    return feast_hepev!(dense_coeffs, d, Emid, r, M0, fpm)
+end
+
+function feast_hcsrpevx!(A::Vector{SparseMatrixCSC{Complex{T},Int}}, d::Int,
+                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                         Zne::AbstractVector{Complex{TZ}},
+                         Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_hcsrpev!(A, d, Emid, r, M0, fpm)
+    end
+end
+
+function feast_gcsrpev!(A::Vector{SparseMatrixCSC{Complex{T},Int}}, d::Int,
+                        Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    length(A) == d + 1 || throw(ArgumentError("Need d+1 coefficient matrices"))
+    dense_coeffs = [Matrix{Complex{T}}(Ai) for Ai in A]
+    return feast_gepev!(dense_coeffs, d, Emid, r, M0, fpm)
+end
+
+function feast_gcsrpevx!(A::Vector{SparseMatrixCSC{Complex{T},Int}}, d::Int,
+                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                         Zne::AbstractVector{Complex{TZ}},
+                         Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_gcsrpev!(A, d, Emid, r, M0, fpm)
+    end
 end
 
 # Matrix-free interface for sparse problems with GMRES solver

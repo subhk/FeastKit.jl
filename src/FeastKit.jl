@@ -18,7 +18,11 @@ export feast_gegv!, feast_gegvx!, feast_geev!, feast_geevx!
 export feast_pep!, feast_gepev!, feast_gepevx!, feast_hepev!, feast_hepevx!,
        feast_sypev!, feast_sypevx!
 # Sparse matrix solver exports
-export feast_scsrgv!, feast_scsrev!, feast_hcsrev!, feast_gcsrgv!, feast_gcsrev!
+export feast_scsrgv!, feast_scsrgvx!, feast_scsrev!, feast_scsrevx!
+export feast_hcsrev!, feast_hcsrevx!, feast_gcsrgv!, feast_gcsrgvx!
+export feast_gcsrev!, feast_gcsrevx!
+export feast_scsrpev!, feast_scsrpevx!, feast_hcsrpev!, feast_hcsrpevx!
+export feast_gcsrpev!, feast_gcsrpevx!
 # Banded matrix solver exports
 export feast_sbgv!, feast_sbev!, feast_hbev!
 export Feast_SUCCESS, Feast_ERROR_N, Feast_ERROR_M0, Feast_ERROR_EMIN_EMAX,

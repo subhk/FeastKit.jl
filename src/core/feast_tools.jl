@@ -261,6 +261,36 @@ function feast_grational(lambda::Vector{Complex{T}}, Emid::Complex{T},
     return rational_values
 end
 
+function feast_rationalx(lambda::Vector{T},
+                         Zne::AbstractVector{Complex{TZ}},
+                         Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    ne = length(Zne)
+    ne == length(Wne) || throw(ArgumentError("Zne and Wne must have the same length"))
+    contour = FeastContour{promote_type(TZ, TW)}(
+        Vector{Complex{promote_type(TZ, TW)}}(Zne),
+        Vector{Complex{promote_type(TZ, TW)}}(Wne))
+    return feast_rational_expert(contour.Zne, contour.Wne, lambda)
+end
+
+function feast_grationalx(lambda::Vector{Complex{T}},
+                          Zne::AbstractVector{Complex{TZ}},
+                          Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    ne = length(Zne)
+    ne == length(Wne) || throw(ArgumentError("Zne and Wne must have the same length"))
+    base = promote_type(TZ, TW)
+    Zvec = Vector{Complex{base}}(Zne)
+    Wvec = Vector{Complex{base}}(Wne)
+    values = Vector{T}(undef, length(lambda))
+    for j in eachindex(lambda)
+        sum_val = zero(Complex{base})
+        for i in 1:ne
+            sum_val += Wvec[i] / (Zvec[i] - lambda[j])
+        end
+        values[j] = abs(sum_val) / (2π)
+    end
+    return values
+end
+
 # Check if eigenvalue is inside contour
 function feast_inside_contour(lambda::T, Emin::T, Emax::T) where T<:Real
     return Emin <= lambda <= Emax

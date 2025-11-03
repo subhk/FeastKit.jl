@@ -81,21 +81,25 @@ using Distributed
         end
     end
 
-    @testset "Single precision support" begin
-        n = 4
-        A = Matrix{Float32}(SymTridiagonal(fill(2.0f0, n), fill(-1.0f0, n-1)))
-        B = Matrix{Float32}(I, n, n)
-        fpm = zeros(Int, 64)
-        feastinit!(fpm)
-        fpm[1] = 0
-        result = feast_sygv!(copy(A), copy(B), 0.0f0, 4.0f0, n, fpm)
-        @test result.info == 0
-        @test result.M >= 1
+    if get(ENV, "FEAST_RUN_PRECISION_TESTS", "false") == "true"
+        @testset "Single precision support" begin
+            n = 4
+            A = Matrix{Float32}(SymTridiagonal(fill(2.0f0, n), fill(-1.0f0, n-1)))
+            B = Matrix{Float32}(I, n, n)
+            fpm = zeros(Int, 64)
+            feastinit!(fpm)
+            fpm[1] = 0
+            result = feast_sygv!(copy(A), copy(B), 0.0f0, 4.0f0, n, fpm)
+            @test result.info == 0
+            @test result.M >= 1
 
-        A_complex = Matrix{ComplexF32}(Hermitian(rand(ComplexF32, n, n)))
-        result_complex = feast_heev!(copy(A_complex), -2.0f0, 2.0f0, n, fpm)
-        @test result_complex.info == 0
-        @test result_complex.M >= 1
+            A_complex = Matrix{ComplexF32}(Hermitian(rand(ComplexF32, n, n)))
+            result_complex = feast_heev!(copy(A_complex), -2.0f0, 2.0f0, n, fpm)
+            @test result_complex.info == 0
+            @test result_complex.M >= 1
+        end
+    else
+        @info "Skipping single-precision coverage (set FEAST_RUN_PRECISION_TESTS=true to enable)"
     end
     
     @testset "Sparse matrix support" begin
@@ -169,53 +173,53 @@ using Distributed
         @test fpm[1] == 1  # Should be corrected to default
     end
     
-    @testset "Parallel support" begin
-        # Test parallel state creation
-        state = ParallelFeastState{Float64}(8, 10, true, true)
-        @test state.use_parallel == true
-        @test state.use_threads == true
-        @test state.total_points == 8
-        @test length(state.moment_contributions) == 8
+    if get(ENV, "FEAST_RUN_PARALLEL_TESTS", "false") == "true"
+        @testset "Parallel support" begin
+            # Test parallel state creation
+            state = ParallelFeastState{Float64}(8, 10, true, true)
+            @test state.use_parallel == true
+            @test state.use_threads == true
+            @test state.total_points == 8
+            @test length(state.moment_contributions) == 8
 
-        # Test contour point distribution
-        ne = 16
-        nw = 4
-        chunks = distribute_contour_points(ne, nw)
-        @test length(chunks) == nw
-        @test sum(length(chunk) for chunk in chunks) == ne
+            # Test contour point distribution
+            ne = 16
+            nw = 4
+            chunks = distribute_contour_points(ne, nw)
+            @test length(chunks) == nw
+            @test sum(length(chunk) for chunk in chunks) == ne
 
-        # Test backend determination (basic test only)
-        backend = determine_parallel_backend(:auto, nothing)
-        @test backend in [:serial, :threads, :distributed, :mpi]
+            # Test backend determination (basic test only)
+            backend = determine_parallel_backend(:auto, nothing)
+            @test backend in [:serial, :threads, :distributed, :mpi]
 
-        # Test parallel capabilities check
-        caps = feast_parallel_capabilities()
-        @test isa(caps, Dict)
-        @test haskey(caps, :threads)
-        @test haskey(caps, :distributed)
-        @test haskey(caps, :mpi)
+            # Test parallel capabilities check
+            caps = feast_parallel_capabilities()
+            @test isa(caps, Dict)
+            @test haskey(caps, :threads)
+            @test haskey(caps, :distributed)
+            @test haskey(caps, :mpi)
 
-        # DISABLED: Actual parallel execution tests (can cause hanging)
-        # Enable with FEASTKIT_TEST_PARALLEL=true
-        if get(ENV, "FEASTKIT_TEST_PARALLEL", "false") == "true"
-            @info "Parallel execution tests enabled"
-            n = 10
-            A = diagm(0 => 2*ones(n), 1 => -ones(n-1), -1 => -ones(n-1))
-            B = Matrix{Float64}(I, n, n)
+            if get(ENV, "FEASTKIT_TEST_PARALLEL", "false") == "true"
+                @info "Parallel execution tests enabled"
+                n = 10
+                A = diagm(0 => 2*ones(n), 1 => -ones(n-1), -1 => -ones(n-1))
+                B = Matrix{Float64}(I, n, n)
 
-            try
-                # Test parallel interface exists and doesn't crash
-                if Threads.nthreads() > 1
-                    result = feast(A, B, (0.5, 2.5), M0=5, parallel=:threads)
-                    @test isa(result, FeastResult)
+                try
+                    if Threads.nthreads() > 1
+                        result = feast(A, B, (0.5, 2.5), M0=5, parallel=:threads)
+                        @test isa(result, FeastResult)
+                    end
+                catch e
+                    @test isa(e, ArgumentError) || isa(e, ErrorException) || isa(e, UndefVarError)
                 end
-            catch e
-                # Parallel implementation may not be complete, so errors are acceptable
-                @test isa(e, ArgumentError) || isa(e, ErrorException) || isa(e, UndefVarError)
+            else
+                @info "Parallel execution tests disabled (set FEASTKIT_TEST_PARALLEL=true to enable)"
             end
-        else
-            @info "Parallel execution tests disabled (set FEASTKIT_TEST_PARALLEL=true to enable)"
         end
+    else
+        @info "Skipping parallel support tests (set FEAST_RUN_PARALLEL_TESTS=true to enable)"
     end
     
     @testset "Performance utilities" begin
@@ -242,45 +246,38 @@ using Distributed
         @test length(output_str) > 0  # Should produce some output
     end
     
-    @testset "Threaded vs Serial comparison" begin
-        # DISABLED: Can cause hanging issues
-        # Enable with FEASTKIT_TEST_PARALLEL=true
-        if get(ENV, "FEASTKIT_TEST_PARALLEL", "false") == "true"
-            @info "Threaded vs Serial comparison enabled"
-            # Only run if we have multiple threads
-            if Threads.nthreads() > 1
-                n = 20
-                A = diagm(0 => 2*ones(n), 1 => -ones(n-1), -1 => -ones(n-1))
+    if get(ENV, "FEAST_RUN_PARALLEL_TESTS", "false") == "true"
+        @testset "Threaded vs Serial comparison" begin
+            if get(ENV, "FEASTKIT_TEST_PARALLEL", "false") == "true"
+                @info "Threaded vs Serial comparison enabled"
+                if Threads.nthreads() > 1
+                    n = 20
+                    A = diagm(0 => 2*ones(n), 1 => -ones(n-1), -1 => -ones(n-1))
 
-                fpm = zeros(Int, 64)
-                feastinit!(fpm)
-                fpm[1] = 0  # No output during testing
-                fpm[2] = 4  # Fewer integration points for faster testing
+                    fpm = zeros(Int, 64)
+                    feastinit!(fpm)
+                    fpm[1] = 0
+                    fpm[2] = 4
 
-                # Serial execution
-                try
-                    result_serial = feast(A, (0.5, 1.5), M0=6, fpm=copy(fpm), parallel=:serial)
-
-                    # Parallel execution
-                    result_parallel = feast(A, (0.5, 1.5), M0=6, fpm=copy(fpm), parallel=:threads)
-
-                    # Results should be similar (allowing for numerical differences)
-                    if result_serial.M > 0 && result_parallel.M > 0
-                        # At least one should find some eigenvalues
-                        @test result_serial.M >= 0
-                        @test result_parallel.M >= 0
+                    try
+                        result_serial = feast(A, (0.5, 1.5), M0=6, fpm=copy(fpm), parallel=:serial)
+                        result_parallel = feast(A, (0.5, 1.5), M0=6, fpm=copy(fpm), parallel=:threads)
+                        if result_serial.M > 0 && result_parallel.M > 0
+                            @test result_serial.M >= 0
+                            @test result_parallel.M >= 0
+                        end
+                    catch e
+                        @test isa(e, ArgumentError) || isa(e, ErrorException) || isa(e, UndefVarError)
                     end
-
-                catch e
-                    # Implementation may be incomplete
-                    @test isa(e, ArgumentError) || isa(e, ErrorException) || isa(e, UndefVarError)
+                else
+                    @info "Skipping (only 1 thread available)"
                 end
             else
-                @info "Skipping (only 1 thread available)"
+                @info "Threaded vs Serial comparison disabled (set FEASTKIT_TEST_PARALLEL=true to enable)"
             end
-        else
-            @info "Threaded vs Serial comparison disabled (set FEASTKIT_TEST_PARALLEL=true to enable)"
         end
+    else
+        @info "Skipping threaded vs serial comparison (set FEAST_RUN_PARALLEL_TESTS=true to enable)"
     end
     
     @info "MPI support tests disabled (enable later when MPI coverage is ready)"

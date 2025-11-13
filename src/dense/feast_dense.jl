@@ -796,3 +796,27 @@ function feast_grcipevx!(A::Vector{Matrix{Complex{T}}}, d::Int,
         feast_grcipev!(A, d, Emid, r, M0, fpm)
     end
 end
+function feast_geev_complex_sym!(A::Matrix{Complex{T}},
+                                 Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                                 solver::Symbol = :direct,
+                                 solver_tol::Real = 0.0,
+                                 solver_maxiter::Int = 500,
+                                 solver_restart::Int = 30) where T<:Real
+    check_complex_symmetric(A)
+    return feast_geev!(A, Emid, r, M0, fpm;
+                       solver=solver, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function feast_gegv_complex_sym!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
+                                 Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                                 solver::Symbol = :direct,
+                                 solver_tol::Real = 0.0,
+                                 solver_maxiter::Int = 500,
+                                 solver_restart::Int = 30) where T<:Real
+    check_complex_symmetric(A)
+    check_complex_symmetric(B)
+    return feast_gegv!(A, B, Emid, r, M0, fpm;
+                       solver=solver, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end

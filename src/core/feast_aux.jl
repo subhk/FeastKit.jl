@@ -307,3 +307,7 @@ function feast_memory_estimate(N::Int, M0::Int, precision::Type{T}) where T<:Rea
     
     return total_size
 end
+@inline function check_complex_symmetric(A::AbstractMatrix{Complex{T}}) where T<:Real
+    issymmetric(A) || throw(ArgumentError("Matrix must be complex-symmetric (equal to its transpose)."))
+    return true
+end

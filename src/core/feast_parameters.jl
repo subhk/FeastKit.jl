@@ -1,44 +1,24 @@
 # Feast parameter initialization and management
 # Translated from feast_tools.f90
 
+# Sentinel value to indicate uninitialized parameters (matches Fortran FEAST)
+const FEAST_UNINITIALIZED = -111
+
 function feastinit!(fpm::Vector{Int})
     length(fpm) >= 64 || throw(ArgumentError("fpm array must have at least 64 elements"))
-    
-    # Initialize all parameters to zero
-    fill!(fpm, 0)
-    
-    # Set default values
-    fpm[1] = 1    # Print level
-    fpm[2] = 8    # Number of contour points
-    fpm[3] = 12   # Stopping criteria
-    fpm[4] = 20   # Maximum number of refinement loops
-    fpm[5] = 0    # Initial guess
-    fpm[6] = 0    # Convergence criteria
-    fpm[7] = 5    # Error trace
-    fpm[8] = 1    # Check input matrices
-    fpm[9] = 0    # Single/double precision
-    fpm[10] = 0   # Matrix type
-    fpm[11] = 1   # Solver type
-    fpm[12] = 0   # Direct solver
-    fpm[13] = 0   # Matrix storage
-    fpm[14] = 1   # Sub-space iteration
-    fpm[15] = 0   # Custom contour
-    fpm[16] = 0   # Integration type
-    fpm[17] = 1   # Orthogonalization
-    fpm[18] = 1   # Eigen-decomposition
-    fpm[19] = 1   # Return mode
-    fpm[20] = 1   # Use residual
-    
-    # Initialize remaining parameters to default values
-    for i in 21:64
-        fpm[i] = 0
+
+    # Initialize all parameters to -111 (sentinel value)
+    # This matches the Fortran implementation exactly
+    # Parameters set to -111 indicate "not set by user" and will be assigned defaults later
+    for i in 1:64
+        fpm[i] = FEAST_UNINITIALIZED
     end
-    
+
     return fpm
 end
 
 function feastinit()
-    fpm = zeros(Int, 64)
+    fpm = Vector{Int}(undef, 64)
     feastinit!(fpm)
     return FeastParameters(fpm)
 end
@@ -46,6 +26,7 @@ end
 function feastinit_driver(fpm::Vector{Int}, N::Integer)
     feastinit!(fpm)
     if N > 0
+        # Optionally suggest number of contour points based on problem size
         suggested = clamp(Int(ceil(sqrt(Float64(N)))), 8, 64)
         fpm[2] = suggested
     end
@@ -53,71 +34,133 @@ function feastinit_driver(fpm::Vector{Int}, N::Integer)
 end
 
 function feastinit_driver(N::Integer)
-    fpm = zeros(Int, 64)
+    fpm = Vector{Int}(undef, 64)
     return feastinit_driver(fpm, N)
 end
 
 function feastdefault!(fpm::Vector{Int})
-    # Validate and set default values for Feast parameters
+    # Set default values for Feast parameters
+    # Only modifies parameters that are still equal to FEAST_UNINITIALIZED (-111)
+    # This allows users to override specific parameters before calling FEAST
+    # Matches Fortran implementation in feast_tools.f90::feastdefault
+
     length(fpm) >= 64 || throw(ArgumentError("fpm array must have at least 64 elements"))
-    
-    # Validate fpm[1] - print level
-    if fpm[1] < 0 || fpm[1] > 1
-        @warn "Invalid print level fpm[1]=$(fpm[1]), setting to default (1)"
-        fpm[1] = 1
+
+    # fpm[1]: Print level (0=off, 1=on)
+    if fpm[1] == FEAST_UNINITIALIZED
+        fpm[1] = 0  # Default: comments off
+    elseif fpm[1] > 1
+        throw(ArgumentError("Invalid fpm[1]=$(fpm[1]): print level must be 0 or 1"))
     end
-    
-    # Validate fpm[2] - number of contour points
-    if fpm[2] < 3
-        @warn "Invalid number of contour points fpm[2]=$(fpm[2]), setting to default (8)"
-        fpm[2] = 8
+
+    # fpm[14]: Must be defined before fpm[2] and fpm[16]
+    if fpm[14] == FEAST_UNINITIALIZED
+        fpm[14] = 0  # Default: standard iteration
+    elseif fpm[14] < 0 || fpm[14] > 2
+        throw(ArgumentError("Invalid fpm[14]=$(fpm[14]): must be 0, 1, or 2"))
     end
-    
-    # Validate fpm[3] - stopping criteria
-    if fpm[3] < 1 || fpm[3] > 15
-        @warn "Invalid stopping criteria fpm[3]=$(fpm[3]), setting to default (12)"
-        fpm[3] = 12
+
+    # fpm[16]: Integration type (0=Gauss, 1=Trapezoidal, 2=Zolotarev)
+    if fpm[16] == FEAST_UNINITIALIZED
+        fpm[16] = 0  # Default: Gauss for symmetric/Hermitian
+    elseif fpm[16] < 0 || fpm[16] > 2
+        throw(ArgumentError("Invalid fpm[16]=$(fpm[16]): must be 0, 1, or 2"))
     end
-    
-    # Validate fpm[4] - maximum number of refinement loops
-    if fpm[4] < 1
-        @warn "Invalid max refinement loops fpm[4]=$(fpm[4]), setting to default (20)"
-        fpm[4] = 20
+
+    # fpm[2]: Number of contour points (half-contour for symmetric/Hermitian)
+    if fpm[2] == FEAST_UNINITIALIZED
+        fpm[2] = 8  # Default half-contour
+        if fpm[14] == 2
+            fpm[2] = 3  # Stochastic estimate
+        end
+    elseif fpm[2] < 1
+        throw(ArgumentError("Invalid fpm[2]=$(fpm[2]): must be positive"))
+    elseif (fpm[16] == 0 || fpm[16] == 2) && fpm[2] > 20
+        # Gauss or Zolotarev restrictions
+        throw(ArgumentError("Invalid fpm[2]=$(fpm[2]): max 20 for Gauss/Zolotarev integration"))
     end
-    
-    # Set other parameters if they are zero
-    if fpm[7] == 0
-        fpm[7] = 5
+
+    # fpm[3]: Convergence tolerance (stopping criteria: 10^(-fpm[3]))
+    if fpm[3] == FEAST_UNINITIALIZED
+        fpm[3] = 12  # Default: 10^-12
+    elseif fpm[3] < 0 || fpm[3] > 16
+        throw(ArgumentError("Invalid fpm[3]=$(fpm[3]): must be between 0 and 16"))
     end
-    
-    if fpm[8] == 0
-        fpm[8] = 1
+
+    # fpm[4]: Maximum number of refinement loops
+    if fpm[4] == FEAST_UNINITIALIZED
+        fpm[4] = 20  # Default
+    elseif fpm[4] < 1
+        throw(ArgumentError("Invalid fpm[4]=$(fpm[4]): must be positive"))
     end
-    
-    if fpm[11] == 0
-        fpm[11] = 1
+
+    # fpm[5]: Initial subspace (0=random, 1=user-provided)
+    if fpm[5] == FEAST_UNINITIALIZED
+        fpm[5] = 0  # Default: random initial guess
+    elseif fpm[5] < 0 || fpm[5] > 1
+        throw(ArgumentError("Invalid fpm[5]=$(fpm[5]): must be 0 or 1"))
     end
-    
-    if fpm[14] == 0
-        fpm[14] = 1
+
+    # fpm[6]: Convergence criteria (0=relative, 1=absolute)
+    if fpm[6] == FEAST_UNINITIALIZED
+        fpm[6] = 0  # Default: relative convergence
+    elseif fpm[6] < 0 || fpm[6] > 1
+        throw(ArgumentError("Invalid fpm[6]=$(fpm[6]): must be 0 or 1"))
     end
-    
-    if fpm[17] == 0
+
+    # fpm[7]: Error trace estimate
+    if fpm[7] == FEAST_UNINITIALIZED
+        fpm[7] = 5  # Default
+    end
+
+    # fpm[8]: Check input matrices
+    if fpm[8] == FEAST_UNINITIALIZED
+        fpm[8] = 1  # Default: check
+    end
+
+    # fpm[9]: MPI communicator (for PFEAST)
+    if fpm[9] == FEAST_UNINITIALIZED
+        fpm[9] = 0
+    end
+
+    # fpm[10]-[13]: Internal use
+    for i in 10:13
+        if fpm[i] == FEAST_UNINITIALIZED
+            fpm[i] = 0
+        end
+    end
+
+    # fpm[15]: Custom contour (0=default, 1=custom)
+    if fpm[15] == FEAST_UNINITIALIZED
+        fpm[15] = 0  # Default: use standard contour
+    end
+
+    # fpm[17]: Orthogonalization
+    if fpm[17] == FEAST_UNINITIALIZED
         fpm[17] = 1
     end
-    
-    if fpm[18] == 0
-        fpm[18] = 1
+
+    # fpm[18]: Ellipse aspect ratio (percentage * 100, e.g., 100 = circle)
+    if fpm[18] == FEAST_UNINITIALIZED
+        fpm[18] = 100  # Default: circle
+    elseif fpm[18] < 0
+        throw(ArgumentError("Invalid fpm[18]=$(fpm[18]): aspect ratio must be positive"))
     end
-    
-    if fpm[19] == 0
-        fpm[19] = 1
+
+    # fpm[19]-[20]: Internal use
+    for i in 19:20
+        if fpm[i] == FEAST_UNINITIALIZED
+            fpm[i] = 0
+        end
     end
-    
-    if fpm[20] == 0
-        fpm[20] = 1
+
+    # fpm[21]-[64]: Internal use and output parameters
+    for i in 21:64
+        if fpm[i] == FEAST_UNINITIALIZED
+            fpm[i] = 0
+        end
     end
-    
+
     return fpm
 end
 

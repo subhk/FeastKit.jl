@@ -8,7 +8,7 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
 - **Dense:** Standard/generalized/polynomial real & complex covered; GMRES-backed iterative variants exist for real symmetric (`difeast_sygv/syev`), complex Hermitian (`zifeast_heev/hegv`), and general non-Hermitian (`zifeast_gegv/geev`). Complex-symmetric (`zfeast_sy*`) still relies on general solvers.
 - **Sparse:** Real/complex standard plus Hermitian/generalized (`zfeast_hcsrgv/x`) routines implemented; GMRES-backed variants now cover real CSR (`difeast_scsrgv/x`) and complex Hermitian/general/non-Hermitian (`zifeast_hcsrev/hcsrgv/gcsrgv/gcsrev`). Complex-symmetric wrappers (`feast_scsrgv_complex!`, etc.) are available, though dense/banded complex-symmetric paths still rely on general solvers.
 - **Banded:** Real and complex Hermitian/non-Hermitian wrappers present; GMRES-backed iterative options available via conversions to dense solvers (`difeast_sbgv/sbev`, `zifeast_hbev/hbgv`, `zifeast_gbgv/gbev`).
-- **RCI:** Base kernels (`feast_srci!`, `feast_hrci!`, `feast_grci!`) done; polynomial and custom-contour wrappers added; iterative variants absent.
+- **RCI:** Base kernels (`feast_srci!`, `feast_hrci!`, `feast_grci!`) plus the polynomial kernels (`feast_srcipev!`, `feast_grcipev!`) are implemented; iterative variants are still absent.
 - **Utilities:** Contour generators, rational helpers, parameter init, distribution helper present; parallel distribution helpers beyond CSR classification not yet ported.
 - **Parallel:** Threaded helpers exist; MPI (`pd*`, `pz*`) and full distributed support not implemented.
 - **Precision:** Double- and single-precision (Float64/ComplexF64 and Float32/ComplexF32) workflows are supported end-to-end.
@@ -25,11 +25,7 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
 3. **Complex-Symmetric Specialized Paths**
    - Sparse complex-symmetric wrappers (`feast_scsrgv_complex!`, etc.) now exist; dense and banded variants still rely on the general solvers and should gain dedicated convenience wrappers/storage optimizations.
 
-4. **Advanced Polynomial/Custom Contour RCI**
-   - `feast_srcipev`/`feast_grcipev` wrappers exist, but direct RCI entry points for polynomial problems (`feast_grcipev!` etc.) still rely on generalized wrappers.
-   - Need direct polynomial linearization for banded/sparse cases without dense expansion.
-
-5. **Comprehensive Example Ports**
+4. **Comprehensive Example Ports**
    - `examples/feast/run_feast_examples.jl` covers main cases, but additional Fortran demos (`PFEAST-L*`) still pending translation (especially MPI ones).
 
 ## Secondary Gaps

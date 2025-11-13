@@ -323,6 +323,62 @@ using Distributed
         @test isapprox(sort(result_x.lambda), sort(result.lambda); atol=1e-8)
     end
 
+    @testset "Sparse complex iterative" begin
+        n = 6
+        diag = ComplexF64[2.5, 3.0, 3.4, 3.9, 4.4, 4.9]
+        off = ComplexF64[0.2 + 0.05im, 0.1 - 0.02im, 0.15 + 0.03im, 0.05 - 0.01im, 0.08 + 0.02im]
+        A = spdiagm(-1 => conj.(off), 0 => diag, 1 => off)
+
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        Emin, Emax = 1.0, 4.5
+
+        direct = feast_hcsrev!(copy(A), Emin, Emax, n, copy(fpm))
+        gmres = feast_hcsrev!(copy(A), Emin, Emax, n, copy(fpm);
+                              solver=:gmres, solver_tol=1e-8,
+                              solver_maxiter=400, solver_restart=30)
+        @test gmres.info == 0
+        @test isapprox(sort(gmres.lambda), sort(direct.lambda); atol=1e-8)
+        wrapper = zifeast_hcsrev!(copy(A), Emin, Emax, n, copy(fpm);
+                                  solver_tol=1e-8, solver_maxiter=400, solver_restart=30)
+        @test isapprox(sort(wrapper.lambda), sort(direct.lambda); atol=1e-8)
+
+        Bdiag = ComplexF64[1.4, 1.5, 1.6, 1.7, 1.8, 1.9]
+        B = spdiagm(0 => Bdiag)
+        direct_g = feast_hcsrgv!(copy(A), copy(B), Emin, Emax, n, copy(fpm))
+        gmres_g = feast_hcsrgv!(copy(A), copy(B), Emin, Emax, n, copy(fpm);
+                                solver=:gmres, solver_tol=1e-8,
+                                solver_maxiter=400, solver_restart=30)
+        @test isapprox(sort(gmres_g.lambda), sort(direct_g.lambda); atol=1e-8)
+        wrapper_g = zifeast_hcsrgv!(copy(A), copy(B), Emin, Emax, n, copy(fpm);
+                                    solver_tol=1e-8, solver_maxiter=400, solver_restart=30)
+        @test isapprox(sort(wrapper_g.lambda), sort(direct_g.lambda); atol=1e-8)
+
+        A_general = sprand(ComplexF64, n, n, 0.5) + 3I
+        B_general = sprand(ComplexF64, n, n, 0.4) + 2I
+        Emid = complex(0.0, 0.0)
+        radius = 4.0
+        direct_gen = feast_gcsrgv!(copy(A_general), copy(B_general), Emid, radius, n, copy(fpm))
+        gmres_gen = feast_gcsrgv!(copy(A_general), copy(B_general), Emid, radius, n, copy(fpm);
+                                  solver=:gmres, solver_tol=1e-7,
+                                  solver_maxiter=400, solver_restart=30)
+        @test gmres_gen.info == 0
+        @test isapprox(sort(real.(gmres_gen.lambda)), sort(real.(direct_gen.lambda)); atol=1e-7)
+        wrapper_gen = zifeast_gcsrgv!(copy(A_general), copy(B_general), Emid, radius, n, copy(fpm);
+                                      solver_tol=1e-7, solver_maxiter=400, solver_restart=30)
+        @test isapprox(sort(real.(wrapper_gen.lambda)), sort(real.(direct_gen.lambda)); atol=1e-7)
+
+        direct_std = feast_gcsrev!(copy(A_general), Emid, radius, n, copy(fpm))
+        gmres_std = feast_gcsrev!(copy(A_general), Emid, radius, n, copy(fpm);
+                                  solver=:gmres, solver_tol=1e-7,
+                                  solver_maxiter=400, solver_restart=30)
+        @test isapprox(sort(real.(gmres_std.lambda)), sort(real.(direct_std.lambda)); atol=1e-7)
+        wrapper_std = zifeast_gcsrev!(copy(A_general), Emid, radius, n, copy(fpm);
+                                      solver_tol=1e-7, solver_maxiter=400, solver_restart=30)
+        @test isapprox(sort(real.(wrapper_std.lambda)), sort(real.(direct_std.lambda)); atol=1e-7)
+    end
+
     @testset "Sparse iterative FEAST (GMRES)" begin
         n = 12
         A = spdiagm(-1 => -ones(n-1), 0 => 2.0 .* ones(n), 1 => -ones(n-1))

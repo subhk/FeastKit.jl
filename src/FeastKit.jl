@@ -25,8 +25,9 @@ export feast_pep!, feast_gepev!, feast_gepevx!, feast_hepev!, feast_hepevx!,
 export feast_scsrgv!, feast_scsrgvx!, feast_scsrev!, feast_scsrevx!,
        feast_scsrgv_iterative!, difeast_scsrgv!, difeast_scsrgvx!
 export feast_hcsrev!, feast_hcsrevx!, feast_hcsrgv!, feast_hcsrgvx!,
-       feast_gcsrgv!, feast_gcsrgvx!
-export feast_gcsrev!, feast_gcsrevx!
+       zifeast_hcsrev!, zifeast_hcsrevx!, zifeast_hcsrgv!, zifeast_hcsrgvx!,
+       feast_gcsrgv!, feast_gcsrgvx!, zifeast_gcsrgv!, zifeast_gcsrgvx!
+export feast_gcsrev!, feast_gcsrevx!, zifeast_gcsrev!, zifeast_gcsrevx!
 export feast_scsrpev!, feast_scsrpevx!, feast_hcsrpev!, feast_hcsrpevx!
 export feast_gcsrpev!, feast_gcsrpevx!
 # Banded matrix solver exports

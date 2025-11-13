@@ -627,6 +627,21 @@ function feast_gcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
     end
 end
 
+function zifeast_gcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
+                          Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                          Zne::AbstractVector{Complex{TZ}},
+                          Wne::AbstractVector{Complex{TW}};
+                          solver_tol::Real = 0.0,
+                          solver_maxiter::Int = 500,
+                          solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        zifeast_gcsrev!(A, Emid, r, M0, fpm;
+                        solver_tol=solver_tol,
+                        solver_maxiter=solver_maxiter,
+                        solver_restart=solver_restart)
+    end
+end
+
 function zifeast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
                          Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
                          solver_tol::Real = 0.0,
@@ -957,7 +972,11 @@ function feast_scsrev!(A::SparseMatrixCSC{T,Int},
 end
 
 function feast_gcsrev!(A::SparseMatrixCSC{Complex{T},Int},
-                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                       solver::Symbol = :direct,
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
     # Feast for sparse complex general standard eigenvalue problem
     # Solves: A*q = lambda*q where A is a general matrix
     # This is equivalent to feast_gcsrgv! with B = I
@@ -969,5 +988,17 @@ function feast_gcsrev!(A::SparseMatrixCSC{Complex{T},Int},
     B = sparse(Complex{T}(1.0) * I, N, N)
 
     # Call generalized version with B = I
-    return feast_gcsrgv!(A, B, Emid, r, M0, fpm)
+    return feast_gcsrgv!(A, B, Emid, r, M0, fpm;
+                         solver=solver, solver_tol=solver_tol,
+                         solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function zifeast_gcsrev!(A::SparseMatrixCSC{Complex{T},Int},
+                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                         solver_tol::Real = 0.0,
+                         solver_maxiter::Int = 500,
+                         solver_restart::Int = 30) where T<:Real
+    return feast_gcsrev!(A, Emid, r, M0, fpm;
+                         solver=:gmres, solver_tol=solver_tol,
+                         solver_maxiter=solver_maxiter, solver_restart=solver_restart)
 end

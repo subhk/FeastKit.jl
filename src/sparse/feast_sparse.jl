@@ -24,6 +24,10 @@ function LinearAlgebra.mul!(y::AbstractVector{CT},
     return y
 end
 
+@inline function _check_complex_symmetric(A::SparseMatrixCSC)
+    issymmetric(A) || throw(ArgumentError("Matrix must be complex symmetric (equal to its transpose)"))
+end
+
 function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                                   rhs::AbstractMatrix{CT},
                                   A::SparseMatrixCSC,

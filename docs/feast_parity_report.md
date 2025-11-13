@@ -6,7 +6,7 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
 ## Coverage Summary
 
 - **Dense:** Standard/generalized/polynomial real & complex are covered; complex-symmetric (`zfeast_sy*` family) still relies on general solvers.
-- **Sparse:** Real/complex standard and generalized routines implemented; missing iterative (`*ifeast_*`) and complex-symmetric specializations.
+- **Sparse:** Real/complex standard plus Hermitian generalized (`zfeast_hcsrgv/x`) routines implemented; iterative (`*ifeast_*`) and complex-symmetric specializations remain outstanding.
 - **Banded:** Real and complex Hermitian/non-Hermitian wrappers present, implemented via dense conversions.
 - **RCI:** Base kernels (`feast_srci!`, `feast_hrci!`, `feast_grci!`) done; polynomial and custom-contour wrappers added; iterative variants absent.
 - **Utilities:** Contour generators, rational helpers, parameter init, distribution helper present; parallel distribution helpers beyond CSR classification not yet ported.
@@ -50,4 +50,3 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
 3. Expand MPI layer using MPI.jl to replicate `pdfeast_*` (start with sparse symmetric generalized).
 4. Enhance banded solvers to operate without dense conversion (banded LU/solve).
 5. Complete example suite (translate remaining Fortran sample programs, include README guidance).
-

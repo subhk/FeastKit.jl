@@ -207,7 +207,9 @@ function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
         elseif ijob[] == Int(Feast_RCI_MULT_A)
             # Compute A * q for residual calculation
             M = mode[]
-            workspace.work[:, 1:M] .= real.(A * workspace.q[:, 1:M])
+            Aq = A * workspace.q[:, 1:M]
+            workspace.workc[:, 1:M] .= Aq
+            workspace.work[:, 1:M] .= real.(Aq)
 
         elseif ijob[] == Int(Feast_RCI_DONE)
             break

@@ -631,6 +631,116 @@ function feast_gcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
     end
 end
 
+function feast_scsrgv_complex!(A::SparseMatrixCSC{Complex{T},Int},
+                               B::SparseMatrixCSC{Complex{T},Int},
+                               Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                               solver::Symbol = :direct,
+                               solver_tol::Real = 0.0,
+                               solver_maxiter::Int = 500,
+                               solver_restart::Int = 30) where T<:Real
+    _check_complex_symmetric(A)
+    _check_complex_symmetric(B)
+    return feast_gcsrgv!(A, B, Emid, r, M0, fpm;
+                         solver=solver, solver_tol=solver_tol,
+                         solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function feast_scsrgvx_complex!(A::SparseMatrixCSC{Complex{T},Int},
+                                B::SparseMatrixCSC{Complex{T},Int},
+                                Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                                Zne::AbstractVector{Complex{TZ}},
+                                Wne::AbstractVector{Complex{TW}};
+                                solver::Symbol = :direct,
+                                solver_tol::Real = 0.0,
+                                solver_maxiter::Int = 500,
+                                solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_scsrgv_complex!(A, B, Emid, r, M0, fpm;
+                              solver=solver, solver_tol=solver_tol,
+                              solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+    end
+end
+
+function feast_scsrev_complex!(A::SparseMatrixCSC{Complex{T},Int},
+                               Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                               solver::Symbol = :direct,
+                               solver_tol::Real = 0.0,
+                               solver_maxiter::Int = 500,
+                               solver_restart::Int = 30) where T<:Real
+    _check_complex_symmetric(A)
+    B = sparse(Complex{T}(1.0) * I, size(A, 1), size(A, 2))
+    return feast_scsrgv_complex!(A, B, Emid, r, M0, fpm;
+                                 solver=solver, solver_tol=solver_tol,
+                                 solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function feast_scsrevx_complex!(A::SparseMatrixCSC{Complex{T},Int},
+                                Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                                Zne::AbstractVector{Complex{TZ}},
+                                Wne::AbstractVector{Complex{TW}};
+                                solver::Symbol = :direct,
+                                solver_tol::Real = 0.0,
+                                solver_maxiter::Int = 500,
+                                solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_scsrev_complex!(A, Emid, r, M0, fpm;
+                              solver=solver, solver_tol=solver_tol,
+                              solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+    end
+end
+
+function zifeast_scsrgv_complex!(A::SparseMatrixCSC{Complex{T},Int},
+                                 B::SparseMatrixCSC{Complex{T},Int},
+                                 Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                                 solver_tol::Real = 0.0,
+                                 solver_maxiter::Int = 500,
+                                 solver_restart::Int = 30) where T<:Real
+    return feast_scsrgv_complex!(A, B, Emid, r, M0, fpm;
+                                 solver=:gmres, solver_tol=solver_tol,
+                                 solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function zifeast_scsrgvx_complex!(A::SparseMatrixCSC{Complex{T},Int},
+                                  B::SparseMatrixCSC{Complex{T},Int},
+                                  Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                                  Zne::AbstractVector{Complex{TZ}},
+                                  Wne::AbstractVector{Complex{TW}};
+                                  solver_tol::Real = 0.0,
+                                  solver_maxiter::Int = 500,
+                                  solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        zifeast_scsrgv_complex!(A, B, Emid, r, M0, fpm;
+                                solver_tol=solver_tol,
+                                solver_maxiter=solver_maxiter,
+                                solver_restart=solver_restart)
+    end
+end
+
+function zifeast_scsrev_complex!(A::SparseMatrixCSC{Complex{T},Int},
+                                 Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                                 solver_tol::Real = 0.0,
+                                 solver_maxiter::Int = 500,
+                                 solver_restart::Int = 30) where T<:Real
+    return feast_scsrev_complex!(A, Emid, r, M0, fpm;
+                                 solver=:gmres, solver_tol=solver_tol,
+                                 solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function zifeast_scsrevx_complex!(A::SparseMatrixCSC{Complex{T},Int},
+                                  Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                                  Zne::AbstractVector{Complex{TZ}},
+                                  Wne::AbstractVector{Complex{TW}};
+                                  solver_tol::Real = 0.0,
+                                  solver_maxiter::Int = 500,
+                                  solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        zifeast_scsrev_complex!(A, Emid, r, M0, fpm;
+                                solver_tol=solver_tol,
+                                solver_maxiter=solver_maxiter,
+                                solver_restart=solver_restart)
+    end
+end
+
 function zifeast_gcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
                           Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
                           Zne::AbstractVector{Complex{TZ}},

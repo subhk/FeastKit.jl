@@ -406,6 +406,122 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
     return FeastResult{T, Complex{T}}(real.(lambda), q, M, res, info[], epsout[], loop[])
 end
 
+# Polynomial helpers
+
+function _check_polynomial_coeffs(coeffs::Vector{Matrix{Complex{T}}}, d::Int) where T<:Real
+    length(coeffs) == d + 1 ||
+        throw(ArgumentError("Need d+1 coefficient matrices, got $(length(coeffs)) for degree $d"))
+    N = size(coeffs[1], 1)
+    size(coeffs[1], 2) == N ||
+        throw(ArgumentError("Coefficient matrices must be square"))
+    for (idx, mat) in enumerate(coeffs)
+        size(mat) == (N, N) ||
+            throw(ArgumentError("Coefficient matrix $idx must be size ($N, $N)"))
+    end
+    return N
+end
+
+function _evaluate_polynomial_matrix!(dest::AbstractMatrix{Complex{T}},
+                                      coeffs::Vector{Matrix{Complex{T}}}, z::Complex{T}) where T<:Real
+    dest .= coeffs[end]
+    for k in length(coeffs)-1:-1:1
+        @. dest = z * dest
+        dest .+= coeffs[k]
+    end
+    return dest
+end
+
+function _apply_polynomial!(dest::AbstractVector{Complex{T}},
+                            coeffs::Vector{Matrix{Complex{T}}}, λ::Complex{T},
+                            vec::AbstractVector{Complex{T}},
+                            scratch::AbstractVector{Complex{T}}) where T<:Real
+    fill!(dest, zero(Complex{T}))
+    λpow = one(Complex{T})
+    for mat in coeffs
+        mul!(scratch, mat, vec)
+        @. dest += λpow * scratch
+        λpow *= λ
+    end
+    return dest
+end
+
+function _feast_polynomial_rci!(coeffs::Vector{Matrix{Complex{T}}}, d::Int,
+                                Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    N = _check_polynomial_coeffs(coeffs, d)
+    check_feast_grci_input(N, M0, Emid, r, fpm)
+
+    contour = feast_get_custom_contour(fpm)
+    if contour === nothing
+        contour = feast_gcontour(Emid, r, fpm)
+    end
+    Zne = Complex{T}.(contour.Zne)
+    Wne = Complex{T}.(contour.Wne)
+
+    work = zeros(Complex{T}, N, M0)
+    workc = similar(work)
+    Aq = zeros(Complex{T}, M0, M0)
+    Bq = similar(Aq)
+    lambda = zeros(Complex{T}, M0)
+    q = similar(work)
+    res = zeros(T, M0)
+
+    ijob = Ref(-1)
+    Ze = Ref(zero(Complex{T}))
+    epsout = Ref(zero(T))
+    loop = Ref(0)
+    mode = Ref(0)
+    info = Ref(0)
+
+    factorization = nothing
+    poly_matrix = similar(coeffs[1])
+    scratch_vec = zeros(Complex{T}, N)
+
+    while true
+        feast_grcipevx!(ijob, d, N, Ze, work, workc, Aq, Bq, fpm, epsout, loop,
+                        Emid, r, M0, lambda, q, mode, res, info, Zne, Wne)
+
+        if ijob[] == Int(Feast_RCI_FACTORIZE)
+            _evaluate_polynomial_matrix!(poly_matrix, coeffs, Ze[])
+            try
+                factorization = lu!(poly_matrix)
+            catch e
+                info[] = Int(Feast_ERROR_LAPACK)
+                break
+            end
+        elseif ijob[] == Int(Feast_RCI_SOLVE)
+            if factorization === nothing
+                info[] = Int(Feast_ERROR_INTERNAL)
+                break
+            end
+            try
+                workc[:, 1:M0] .= factorization \ work[:, 1:M0]
+            catch e
+                info[] = Int(Feast_ERROR_LAPACK)
+                break
+            end
+        elseif ijob[] == Int(Feast_RCI_MULT_A)
+            M = mode[]
+            for j in 1:M
+                vec = view(q, :, j)
+                dest = view(workc, :, j)
+                _apply_polynomial!(dest, coeffs, lambda[j], vec, scratch_vec)
+            end
+        elseif ijob[] == Int(Feast_RCI_DONE)
+            break
+        else
+            error("Unexpected FEAST polynomial RCI job code: ijob=$(ijob[])")
+        end
+    end
+
+    M = mode[]
+    lambda_real = real.(lambda[1:M])
+    q_res = q[:, 1:M]
+    res_res = res[1:M]
+
+    return FeastResult{T, Complex{T}}(lambda_real, q_res, M, res_res,
+                                      info[], epsout[], loop[])
+end
+
 # Polynomial eigenvalue problem support
 function feast_pep!(A::Vector{Matrix{Complex{T}}}, d::Int,
                     Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
@@ -762,7 +878,8 @@ end
 
 function feast_srcipev!(A::Vector{Matrix{T}}, d::Int,
                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
-    return feast_sypev!(A, d, Emid, r, M0, fpm)
+    coeffs = [Complex{T}.(mat) for mat in A]
+    return _feast_polynomial_rci!(coeffs, d, Emid, r, M0, fpm)
 end
 
 function feast_srcipevx!(A::Vector{Matrix{T}}, d::Int,
@@ -776,7 +893,7 @@ end
 
 function feast_grcipev!(A::Vector{Matrix{Complex{T}}}, d::Int,
                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
-    return feast_gepev!(A, d, Emid, r, M0, fpm)
+    return _feast_polynomial_rci!(A, d, Emid, r, M0, fpm)
 end
 
 function feast_grcipevx!(A::Vector{Matrix{Complex{T}}}, d::Int,

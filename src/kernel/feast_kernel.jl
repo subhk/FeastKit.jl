@@ -792,9 +792,253 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
        ijob[] != Int(Feast_RCI_SOLVE) && ijob[] != Int(Feast_RCI_MULT_A) &&
        ijob[] != Int(Feast_RCI_DONE)
         cleanup_state!()
-        error("FEAST RCI kernel (General): Invalid job code ijob=$(ijob[]). " *
-              "Expected: -1 (init), $(Int(Feast_RCI_FACTORIZE)) (factorize), " *
-              "$(Int(Feast_RCI_SOLVE)) (solve), $(Int(Feast_RCI_MULT_A)) (mult_a), " *
-              "or $(Int(Feast_RCI_DONE)) (done)")
+       error("FEAST RCI kernel (General): Invalid job code ijob=$(ijob[]). " *
+             "Expected: -1 (init), $(Int(Feast_RCI_FACTORIZE)) (factorize), " *
+             "$(Int(Feast_RCI_SOLVE)) (solve), $(Int(Feast_RCI_MULT_A)) (mult_a), " *
+             "or $(Int(Feast_RCI_DONE)) (done)")
+    end
+end
+
+############################
+# Polynomial RCI interfaces
+############################
+
+@static if !@isdefined(_feast_poly_rci_state)
+    global _feast_poly_rci_state = Dict{UInt64, Dict{Symbol, Any}}()
+end
+
+function feast_grcipevx!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
+                         work::Matrix{Complex{T}}, workc::Matrix{Complex{T}},
+                         Aq::Matrix{Complex{T}}, Bq::Matrix{Complex{T}},
+                         fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
+                         Emid::Complex{T}, r::T, M0::Int,
+                         lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
+                         mode::Ref{Int}, res::Vector{T}, info::Ref{Int},
+                         Zne::AbstractVector{Complex{TZ}},
+                         Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    contour_nodes = Complex{T}.(Zne)
+    contour_weights = Complex{T}.(Wne)
+    _feast_poly_grci!(ijob, dmax, N, Ze, work, workc, Aq, Bq, fpm, epsout, loop,
+                      Emid, r, M0, lambda, q, mode, res, info,
+                      contour_nodes, contour_weights)
+end
+
+function feast_grcipev!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
+                        work::Matrix{Complex{T}}, workc::Matrix{Complex{T}},
+                        Aq::Matrix{Complex{T}}, Bq::Matrix{Complex{T}},
+                        fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
+                        Emid::Complex{T}, r::T, M0::Int,
+                        lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
+                        mode::Ref{Int}, res::Vector{T}, info::Ref{Int}) where T<:Real
+    contour = feast_gcontour(Emid, r, fpm)
+    feast_grcipevx!(ijob, dmax, N, Ze, work, workc, Aq, Bq, fpm, epsout, loop,
+                    Emid, r, M0, lambda, q, mode, res, info,
+                    contour.Zne, contour.Wne)
+end
+
+function feast_srcipevx!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
+                         work::Matrix{Complex{T}}, workc::Matrix{Complex{T}},
+                         Aq::Matrix{Complex{T}}, Bq::Matrix{Complex{T}},
+                         fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
+                         Emid::Complex{T}, r::Real, M0::Int,
+                         lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
+                         mode::Ref{Int}, res::Vector{T}, info::Ref{Int},
+                         Zne::AbstractVector{Complex{TZ}},
+                         Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    contour_nodes = Complex{T}.(Zne)
+    contour_weights = Complex{T}.(Wne)
+    _feast_poly_grci!(ijob, dmax, N, Ze, work, workc, Aq, Bq, fpm, epsout, loop,
+                      Emid, T(r), M0, lambda, q, mode, res, info,
+                      contour_nodes, contour_weights)
+end
+
+function feast_srcipev!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
+                        work::Matrix{Complex{T}}, workc::Matrix{Complex{T}},
+                        Aq::Matrix{Complex{T}}, Bq::Matrix{Complex{T}},
+                        fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
+                        Emid::Complex{T}, r::Real, M0::Int,
+                        lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
+                        mode::Ref{Int}, res::Vector{T}, info::Ref{Int}) where T<:Real
+    contour = feast_gcontour(Emid, T(r), fpm)
+    feast_srcipevx!(ijob, dmax, N, Ze, work, workc, Aq, Bq, fpm, epsout, loop,
+                    Emid, r, M0, lambda, q, mode, res, info,
+                    contour.Zne, contour.Wne)
+end
+
+function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
+                           work::Matrix{Complex{T}}, workc::Matrix{Complex{T}},
+                           Aq::Matrix{Complex{T}}, Bq::Matrix{Complex{T}},
+                           fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
+                           Emid::Complex{T}, r::T, M0::Int,
+                           lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
+                           mode::Ref{Int}, res::Vector{T}, info::Ref{Int},
+                           Zne::Vector{Complex{T}}, Wne::Vector{Complex{T}}) where T<:Real
+
+    state_key = UInt64(objectid(work))
+    state = get!(() -> Dict{Symbol, Any}(), _feast_poly_rci_state, state_key)
+    cleanup_state! = () -> pop!(_feast_poly_rci_state, state_key, nothing)
+
+    if ijob[] == -1
+        feastdefault!(fpm)
+        empty!(state)
+
+        info[] = Int(Feast_SUCCESS)
+
+        if dmax < 1
+            info[] = Int(Feast_ERROR_INTERNAL)
+            return
+        end
+
+        if N <= 0
+            info[] = Int(Feast_ERROR_N)
+            return
+        end
+
+        if M0 <= 0
+            info[] = Int(Feast_ERROR_M0)
+            return
+        end
+
+        if r <= zero(T)
+            info[] = Int(Feast_ERROR_EMID_R)
+            return
+        end
+
+        state[:Zne] = copy(Zne)
+        state[:Wne] = copy(Wne)
+        state[:ne] = length(Zne)
+        state[:eps] = feast_tolerance(fpm)
+        state[:maxloop] = max(1, fpm[4])
+        state[:M] = 0
+        state[:e] = 1
+        state[:Emid] = Emid
+        state[:r] = r
+
+        fill!(Aq, zero(Complex{T}))
+        fill!(Bq, zero(Complex{T}))
+        fill!(lambda, zero(Complex{T}))
+        fill!(q, zero(Complex{T}))
+        fill!(res, zero(T))
+
+        if fpm[5] == 1
+            for j in 1:M0
+                normval = norm(work[:, j])
+                if normval > 0
+                    work[:, j] ./= normval
+                else
+                    for i in 1:N
+                        work[i, j] = Complex{T}(randn(T), randn(T))
+                    end
+                    work[:, j] ./= norm(work[:, j])
+                end
+            end
+        else
+            for j in 1:M0
+                for i in 1:N
+                    work[i, j] = Complex{T}(randn(T), randn(T))
+                end
+                work[:, j] ./= norm(work[:, j])
+            end
+        end
+
+        Ze[] = state[:Zne][1]
+        ijob[] = Int(Feast_RCI_FACTORIZE)
+        return
+    end
+
+    if !haskey(state, :Zne)
+        state[:Zne] = copy(Zne)
+        state[:Wne] = copy(Wne)
+        state[:ne] = length(Zne)
+    end
+    state[:eps] = feast_tolerance(fpm)
+    state[:maxloop] = max(1, fpm[4])
+
+    if ijob[] == Int(Feast_RCI_FACTORIZE)
+        ijob[] = Int(Feast_RCI_SOLVE)
+        return
+    end
+
+    if ijob[] == Int(Feast_RCI_SOLVE)
+        e = get(state, :e, 1)
+        temp = work[:, 1:M0]' * workc[:, 1:M0]
+        Aq .+= state[:Wne][e] * temp
+        Bq .+= state[:Wne][e] * state[:Zne][e] * temp
+
+        state[:e] = e + 1
+        if e < state[:ne]
+            Ze[] = state[:Zne][e + 1]
+            ijob[] = Int(Feast_RCI_FACTORIZE)
+            return
+        end
+
+        state[:e] = 1
+        try
+            F = eigen(Aq[1:M0, 1:M0], Bq[1:M0, 1:M0])
+            lambda_red = F.values
+            v_red = F.vectors
+
+            M = 0
+            for i in 1:M0
+                if feast_inside_gcontour(lambda_red[i], state[:Emid], state[:r])
+                    M += 1
+                    lambda[M] = lambda_red[i]
+                    q[:, M] .= work[:, 1:M0] * v_red[:, i]
+                    q_norm = norm(q[:, M])
+                    if q_norm > 0
+                        q[:, M] ./= q_norm
+                    end
+                end
+            end
+
+            if M == 0
+                info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                ijob[] = Int(Feast_RCI_DONE)
+                cleanup_state!()
+                return
+            end
+
+            state[:M] = M
+            mode[] = M
+            ijob[] = Int(Feast_RCI_MULT_A)
+            return
+        catch err
+            info[] = Int(Feast_ERROR_LAPACK)
+            ijob[] = Int(Feast_RCI_DONE)
+            cleanup_state!()
+            return
+        end
+    end
+
+    if ijob[] == Int(Feast_RCI_MULT_A)
+        M = get(state, :M, 0)
+        max_res = zero(T)
+        for j in 1:M
+            residual = view(workc, :, j) .- lambda[j] .* view(q, :, j)
+            res[j] = norm(residual)
+            max_res = max(max_res, res[j])
+        end
+        epsout[] = max_res
+
+        if epsout[] <= state[:eps] || loop[] >= state[:maxloop]
+            feast_sort_general!(lambda, q, res, M)
+            mode[] = M
+            ijob[] = Int(Feast_RCI_DONE)
+            cleanup_state!()
+            return
+        else
+            loop[] += 1
+            fill!(Aq, zero(Complex{T}))
+            fill!(Bq, zero(Complex{T}))
+            work[:, 1:M] .= q[:, 1:M]
+            Ze[] = state[:Zne][1]
+            ijob[] = Int(Feast_RCI_FACTORIZE)
+            return
+        end
+    end
+
+    if ijob[] != Int(Feast_RCI_DONE)
+        cleanup_state!()
+        error("FEAST polynomial RCI kernel: unexpected ijob=$(ijob[]).")
     end
 end

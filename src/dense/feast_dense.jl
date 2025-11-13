@@ -1,11 +1,59 @@
 # Feast dense matrix routines
 # Translated from dzfeast_dense.f90 and dzfeast_pev_dense.f90
 
+struct DenseShiftOperator{F,T<:Real}
+    mulfun::F
+    N::Int
+end
+
+Base.size(op::DenseShiftOperator) = (op.N, op.N)
+
+function LinearAlgebra.mul!(y::AbstractVector{Complex{T}},
+                            op::DenseShiftOperator{F,T},
+                            x::AbstractVector{Complex{T}}) where {F,T<:Real}
+    op.mulfun(y, x)
+    return y
+end
+
+function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
+                              rhs::AbstractMatrix{Complex{T}},
+                              apply_shift!::Function,
+                              solver::Symbol, tol::T,
+                              maxiter::Int, restart::Int) where T<:Real
+    solver == :direct && error("Direct solve should be handled before calling solve_dense_shifted!")
+
+    if !FEAST_KRYLOV_AVAILABLE[]
+        error("Krylov.jl required for iterative dense FEAST solves")
+    end
+
+    N = size(rhs, 1)
+    op = DenseShiftOperator{typeof(apply_shift!), T}(apply_shift!, N)
+
+    for j in 1:size(rhs, 2)
+        b = view(rhs, :, j)
+        x0 = zeros(Complex{T}, N)
+        x_sol, stats = gmres(op, b, x0;
+                             restart=true,
+                             memory=max(restart, 2),
+                             rtol=tol,
+                             atol=tol,
+                             itmax=maxiter)
+        stats.solved || return false
+        dest[:, j] .= x_sol
+    end
+
+    return true
+end
+
 function feast_sygv!(A::Matrix{T}, B::Matrix{T}, 
-                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                     solver::Symbol = :direct,
+                     solver_tol::Real = 0.0,
+                     solver_maxiter::Int = 500,
+                     solver_restart::Int = 30) where T<:Real
     # Feast for dense real symmetric generalized eigenvalue problem
     # Solves: A*q = lambda*B*q where A is symmetric, B is symmetric positive definite
-    
+
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
@@ -13,6 +61,22 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
     # Check inputs
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
     
+    solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
+    solver_choice == :invalid &&
+        throw(ArgumentError("Unsupported solver '$solver'. Use :direct or :gmres."))
+    use_direct = solver_choice == :direct
+    use_iterative = !use_direct
+    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+
+    use_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
+        throw(ArgumentError("Krylov.jl is required for iterative dense FEAST solves."))
+
+    A_iter = use_iterative ? Complex{T}.(A) : nothing
+    B_iter = use_iterative ? Complex{T}.(B) : nothing
+    tmpAx = use_iterative ? zeros(Complex{T}, N) : nothing
+    tmpBx = use_iterative ? zeros(Complex{T}, N) : nothing
+    current_shift = Ref(zero(Complex{T}))
+
     # Initialize workspace
     workspace = FeastWorkspaceReal{T}(N, M0)
     
@@ -35,28 +99,46 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
                    Emin, Emax, M0, workspace.lambda, workspace.q,
                    mode, workspace.res, info)
         if ijob[] == Int(Feast_RCI_FACTORIZE)
-            # Factorize Ze*B - A
             z = Ze[]
             temp_matrix .= z .* B .- A
 
-            # LU factorization
-            try
-                LU_factorization = lu!(temp_matrix)
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if use_direct
+                try
+                    LU_factorization = lu!(temp_matrix)
+                catch e
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                current_shift[] = z
             end
 
         elseif ijob[] == Int(Feast_RCI_SOLVE)
-            # Solve linear systems: (Ze*B - A) * X = B * workspace.work
             rhs = B * workspace.work[:, 1:M0]
 
-            try
-                # Solve with LU factors
-                workspace.workc[:, 1:M0] .= LU_factorization \ rhs
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if use_direct
+                try
+                    workspace.workc[:, 1:M0] .= LU_factorization \ rhs
+                catch e
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                rhs_complex = Complex{T}.(rhs)
+                function shifted_mul!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
+                    mul!(tmpBx, B_iter, x)
+                    @. tmpBx = current_shift[] * tmpBx
+                    mul!(tmpAx, A_iter, x)
+                    @. y = tmpBx - tmpAx
+                    return y
+                end
+                success = solve_dense_shifted!(workspace.workc[:, 1:M0], rhs_complex,
+                                               shifted_mul!, solver_choice, tol_value,
+                                               solver_maxiter, solver_restart)
+                success || begin
+                    info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                    break
+                end
             end
 
         elseif ijob[] == Int(Feast_RCI_MULT_A)
@@ -84,7 +166,11 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
 end
 
 function feast_heev!(A::Matrix{Complex{T}}, 
-                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                     solver::Symbol = :direct,
+                     solver_tol::Real = 0.0,
+                     solver_maxiter::Int = 500,
+                     solver_restart::Int = 30) where T<:Real
     # Feast for dense complex Hermitian eigenvalue problem
     # Solves: A*q = lambda*q where A is Hermitian
     
@@ -94,6 +180,20 @@ function feast_heev!(A::Matrix{Complex{T}},
     # Check inputs
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
     
+    solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
+    solver_choice == :invalid &&
+        throw(ArgumentError("Unsupported solver '$solver'. Use :direct or :gmres."))
+    use_direct = solver_choice == :direct
+    use_iterative = !use_direct
+    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+
+    use_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
+        throw(ArgumentError("Krylov.jl is required for iterative dense FEAST solves."))
+
+    A_iter = use_iterative ? Matrix{Complex{T}}(A) : nothing
+    tmpAx = use_iterative ? zeros(Complex{T}, N) : nothing
+    current_shift = Ref(zero(Complex{T}))
+
     # Initialize workspace
     workspace = FeastWorkspaceComplex{T}(N, M0)
     
@@ -117,25 +217,43 @@ function feast_heev!(A::Matrix{Complex{T}},
                    mode, workspace.res, info)
 
         if ijob[] == Int(Feast_RCI_FACTORIZE)
-            # Factorize Ze*I - A
             z = Ze[]
             temp_matrix .= z .* I .- A
 
-            # LU factorization
-            try
-                LU_factorization = lu!(temp_matrix)
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if use_direct
+                try
+                    LU_factorization = lu!(temp_matrix)
+                catch e
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                current_shift[] = z
             end
 
         elseif ijob[] == Int(Feast_RCI_SOLVE)
-            # Solve linear systems: (Ze*I - A) * X = workspace.workc
-            try
-                workspace.workc[:, 1:M0] .= LU_factorization \ workspace.workc[:, 1:M0]
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if use_direct
+                try
+                    workspace.workc[:, 1:M0] .= LU_factorization \ workspace.workc[:, 1:M0]
+                catch e
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                function shifted_mul!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
+                    copy!(tmpAx, x)
+                    @. tmpAx = current_shift[] * tmpAx
+                    mul!(y, A_iter, x)
+                    @. y = tmpAx - y
+                    return y
+                end
+                success = solve_dense_shifted!(workspace.workc[:, 1:M0], workspace.workc[:, 1:M0],
+                                               shifted_mul!, solver_choice, tol_value,
+                                               solver_maxiter, solver_restart)
+                success || begin
+                    info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                    break
+                end
             end
 
         elseif ijob[] == Int(Feast_RCI_MULT_A)
@@ -163,7 +281,11 @@ function feast_heev!(A::Matrix{Complex{T}},
 end
 
 function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
-                     Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                     Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                     solver::Symbol = :direct,
+                     solver_tol::Real = 0.0,
+                     solver_maxiter::Int = 500,
+                     solver_restart::Int = 30) where T<:Real
     # Feast for dense complex general eigenvalue problem
     # Solves: A*q = lambda*B*q where A and B are general matrices
     
@@ -174,6 +296,22 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
     # Check inputs
     check_feast_grci_input(N, M0, Emid, r, fpm)
     
+    solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
+    solver_choice == :invalid &&
+        throw(ArgumentError("Unsupported solver '$solver'. Use :direct or :gmres."))
+    use_direct = solver_choice == :direct
+    use_iterative = !use_direct
+    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+
+    use_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
+        throw(ArgumentError("Krylov.jl is required for iterative dense FEAST solves."))
+
+    A_iter = use_iterative ? Matrix{Complex{T}}(A) : nothing
+    B_iter = use_iterative ? Matrix{Complex{T}}(B) : nothing
+    tmpAx = use_iterative ? zeros(Complex{T}, N) : nothing
+    tmpBx = use_iterative ? zeros(Complex{T}, N) : nothing
+    current_shift = Ref(zero(Complex{T}))
+
     # Initialize workspace
     workspace = FeastWorkspaceComplex{T}(N, M0)
     
@@ -205,23 +343,43 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
             z = Ze[]
             temp_matrix .= z .* B .- A
 
-            # LU factorization
-            try
-                LU_factorization = lu!(temp_matrix)
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if use_direct
+                try
+                    LU_factorization = lu!(temp_matrix)
+                catch e
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                current_shift[] = z
             end
 
         elseif ijob[] == Int(Feast_RCI_SOLVE)
             # Solve linear systems: (Ze*B - A) * X = B * workspace.workc
             rhs = B * workspace.workc[:, 1:M0]
 
-            try
-                workspace.workc[:, 1:M0] .= LU_factorization \ rhs
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if use_direct
+                try
+                    workspace.workc[:, 1:M0] .= LU_factorization \ rhs
+                catch e
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                function shifted_mul!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
+                    mul!(tmpBx, B_iter, x)
+                    @. tmpBx = current_shift[] * tmpBx
+                    mul!(tmpAx, A_iter, x)
+                    @. y = tmpBx - tmpAx
+                    return y
+                end
+                success = solve_dense_shifted!(workspace.workc[:, 1:M0], rhs,
+                                               shifted_mul!, solver_choice, tol_value,
+                                               solver_maxiter, solver_restart)
+                success || begin
+                    info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                    break
+                end
             end
             
         elseif ijob[] == Int(Feast_RCI_MULT_A)
@@ -315,7 +473,11 @@ function feast_syev!(A::Matrix{T},
 end
 
 function feast_hegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
-                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                     solver::Symbol = :direct,
+                     solver_tol::Real = 0.0,
+                     solver_maxiter::Int = 500,
+                     solver_restart::Int = 30) where T<:Real
     # Feast for dense complex Hermitian generalized eigenvalue problem
     # Solves: A*q = lambda*B*q where A and B are Hermitian, B is positive definite
 
@@ -325,6 +487,22 @@ function feast_hegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
 
     # Check inputs
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
+
+    solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
+    solver_choice == :invalid &&
+        throw(ArgumentError("Unsupported solver '$solver'. Use :direct or :gmres."))
+    use_direct = solver_choice == :direct
+    use_iterative = !use_direct
+    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+
+    use_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
+        throw(ArgumentError("Krylov.jl is required for iterative dense FEAST solves."))
+
+    A_iter = use_iterative ? Matrix{Complex{T}}(A) : nothing
+    B_iter = use_iterative ? Matrix{Complex{T}}(B) : nothing
+    tmpAx = use_iterative ? zeros(Complex{T}, N) : nothing
+    tmpBx = use_iterative ? zeros(Complex{T}, N) : nothing
+    current_shift = Ref(zero(Complex{T}))
 
     # Initialize workspace
     workspace = FeastWorkspaceComplex{T}(N, M0)
@@ -349,27 +527,47 @@ function feast_hegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
                    mode, workspace.res, info)
 
         if ijob[] == Int(Feast_RCI_FACTORIZE)
-            # Factorize Ze*B - A
             z = Ze[]
             temp_matrix .= z .* B .- A
 
-            # LU factorization
-            try
-                LU_factorization = lu!(temp_matrix)
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if use_direct
+                try
+                    LU_factorization = lu!(temp_matrix)
+                catch e
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                current_shift[] = z
             end
 
         elseif ijob[] == Int(Feast_RCI_SOLVE)
             # Solve linear systems: (Ze*B - A) * X = B * workspace.workc
             rhs = B * workspace.workc[:, 1:M0]
 
-            try
-                workspace.workc[:, 1:M0] .= LU_factorization \ rhs
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if use_direct
+                try
+                    workspace.workc[:, 1:M0] .= LU_factorization \ rhs
+                catch e
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                rhs_complex = Complex{T}.(rhs)
+                function shifted_mul!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
+                    mul!(tmpBx, B_iter, x)
+                    @. tmpBx = current_shift[] * tmpBx
+                    mul!(tmpAx, A_iter, x)
+                    @. y = tmpBx - tmpAx
+                    return y
+                end
+                success = solve_dense_shifted!(workspace.workc[:, 1:M0], rhs_complex,
+                                               shifted_mul!, solver_choice, tol_value,
+                                               solver_maxiter, solver_restart)
+                success || begin
+                    info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                    break
+                end
             end
 
         elseif ijob[] == Int(Feast_RCI_MULT_A)
@@ -410,6 +608,46 @@ function feast_geev!(A::Matrix{Complex{T}},
 
     # Call generalized version with B = I
     return feast_gegv!(A, B, Emid, r, M0, fpm)
+end
+
+function difeast_sygv!(A::Matrix{T}, B::Matrix{T},
+                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
+    return feast_sygv!(A, B, Emin, Emax, M0, fpm;
+                       solver=:gmres, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function difeast_syev!(A::Matrix{T},
+                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
+    return feast_syev!(A, Emin, Emax, M0, fpm;
+                       solver=:gmres, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function zifeast_heev!(A::Matrix{Complex{T}},
+                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
+    return feast_heev!(A, Emin, Emax, M0, fpm;
+                       solver=:gmres, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function zifeast_hegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
+                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
+    return feast_hegv!(A, B, Emin, Emax, M0, fpm;
+                       solver=:gmres, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
 end
 
 # Custom contour (x-suffix) variants

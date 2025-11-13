@@ -4,14 +4,6 @@
 using SparseArrays
 using LinearAlgebra
 
-# Try to import Krylov, but provide fallback if not available
-const KRYLOV_AVAILABLE = try
-    using Krylov: gmres
-    true
-catch
-    false
-end
-
 struct SparseShiftedOperator{T,TA<:AbstractMatrix{T},TB<:AbstractMatrix{T}}
     A::TA
     B::TB
@@ -82,7 +74,7 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
         throw(ArgumentError("Unsupported solver option '$solver'. Use :direct or :gmres."))
     solver_is_direct = solver_choice == :direct
     solver_is_iterative = !solver_is_direct
-    solver_is_iterative && !KRYLOV_AVAILABLE &&
+    solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
         throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Please ensure it is in the environment."))
 
     # Initialize workspace
@@ -651,7 +643,7 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                 x0 = zeros(Complex{T}, N)
                 
                 # Solve using GMRES (Krylov.jl if available, otherwise fallback)
-                if KRYLOV_AVAILABLE
+                if FEAST_KRYLOV_AVAILABLE[]
                     # Create linear operator for Krylov.jl
                     op = LinearOperator{Complex{T}}(N, N, false, false, shifted_matvec!)
                     

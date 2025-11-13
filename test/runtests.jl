@@ -208,6 +208,53 @@ using Distributed
         @test result_complex.info == 0
         @test result_complex.M >= 1
     end
+
+    @testset "Dense iterative FEAST" begin
+        n = 6
+        A = Matrix{Float64}(SymTridiagonal(fill(2.0, n), fill(-1.0, n-1)))
+        B = Matrix{Float64}(I, n, n)
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+
+        direct = feast_sygv!(copy(A), copy(B), 0.0, 4.0, n, copy(fpm))
+        gmres_result = feast_sygv!(copy(A), copy(B), 0.0, 4.0, n, copy(fpm);
+                                   solver=:gmres, solver_tol=1e-8,
+                                   solver_maxiter=400, solver_restart=25)
+        @test gmres_result.info == 0
+        @test gmres_result.M == direct.M
+        @test isapprox(sort(gmres_result.lambda), sort(direct.lambda); atol=1e-8)
+
+        wrapper = difeast_sygv!(copy(A), copy(B), 0.0, 4.0, n, copy(fpm);
+                                solver_tol=1e-8, solver_maxiter=400, solver_restart=25)
+        @test isapprox(sort(wrapper.lambda), sort(direct.lambda); atol=1e-8)
+
+        A_complex = Matrix{ComplexF64}(Hermitian(rand(ComplexF64, n, n)))
+        direct_h = feast_heev!(copy(A_complex), -1.0, 1.0, n, copy(fpm))
+        gmres_h = feast_heev!(copy(A_complex), -1.0, 1.0, n, copy(fpm);
+                               solver=:gmres, solver_tol=1e-8,
+                               solver_maxiter=400, solver_restart=25)
+        @test gmres_h.info == 0
+        @test gmres_h.M == direct_h.M
+        @test isapprox(sort(gmres_h.lambda), sort(direct_h.lambda); atol=1e-8)
+
+        wrapper_h = zifeast_heev!(copy(A_complex), -1.0, 1.0, n, copy(fpm);
+                                  solver_tol=1e-8, solver_maxiter=400, solver_restart=25)
+        @test isapprox(sort(wrapper_h.lambda), sort(direct_h.lambda); atol=1e-8)
+
+        B_complex = Matrix{ComplexF64}(Hermitian(rand(ComplexF64, n, n))) + 2I
+        direct_hg = feast_hegv!(copy(A_complex), copy(B_complex), -1.0, 1.0, n, copy(fpm))
+        gmres_hg = feast_hegv!(copy(A_complex), copy(B_complex), -1.0, 1.0, n, copy(fpm);
+                                solver=:gmres, solver_tol=1e-8,
+                                solver_maxiter=400, solver_restart=25)
+        @test gmres_hg.info == 0
+        @test gmres_hg.M == direct_hg.M
+        @test isapprox(sort(gmres_hg.lambda), sort(direct_hg.lambda); atol=1e-8)
+
+        wrapper_hg = zifeast_hegv!(copy(A_complex), copy(B_complex), -1.0, 1.0, n, copy(fpm);
+                                   solver_tol=1e-8, solver_maxiter=400, solver_restart=25)
+        @test isapprox(sort(wrapper_hg.lambda), sort(direct_hg.lambda); atol=1e-8)
+    end
     
     @testset "Sparse matrix support" begin
         # Test sparse matrix creation and info

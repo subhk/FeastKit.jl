@@ -12,8 +12,10 @@ export feast_name, feast_memory_estimate
 export full_to_banded, banded_to_full, feast_banded_info
 export distribute_contour_points
 # Dense matrix solver exports
-export feast_sygv!, feast_sygvx!, feast_syev!, feast_syevx!
-export feast_heev!, feast_heevx!, feast_hegv!, feast_hegvx!
+export feast_sygv!, feast_sygvx!, feast_syev!, feast_syevx!,
+       difeast_sygv!, difeast_syev!
+export feast_heev!, feast_heevx!, feast_hegv!, feast_hegvx!,
+       zifeast_heev!, zifeast_hegv!
 export feast_gegv!, feast_gegvx!, feast_geev!, feast_geevx!
 export feast_pep!, feast_gepev!, feast_gepevx!, feast_hepev!, feast_hepevx!,
        feast_sypev!, feast_sypevx!, feast_srcipev!, feast_srcipevx!,
@@ -54,6 +56,15 @@ using LinearAlgebra
 using SparseArrays
 using Distributed
 using FastGaussQuadrature
+
+const FEAST_KRYLOV_AVAILABLE = Ref(false)
+try
+    @eval using Krylov: gmres
+    FEAST_KRYLOV_AVAILABLE[] = true
+catch e
+    @debug "Krylov.jl not available; iterative FEAST variants requiring GMRES will be disabled." exception=e
+    FEAST_KRYLOV_AVAILABLE[] = false
+end
 
 include("core/feast_types.jl")
 include("core/feast_parameters.jl")

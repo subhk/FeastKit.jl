@@ -6,51 +6,66 @@ using LinearAlgebra
 
 # Try to import Krylov, but provide fallback if not available
 const KRYLOV_AVAILABLE = try
-    using Krylov
+    using Krylov: gmres
     true
 catch
     false
 end
 
-# Simple GMRES fallback implementation (for demonstration)
-function simple_gmres(A_op!::Function, b::Vector{Complex{T}}, x0::Vector{Complex{T}};
-                     rtol::T = T(1e-6), atol::T = T(1e-12), 
-                     restart::Int = 20, maxiter::Int = 200) where T<:Real
-    
-    n = length(b)
-    x = copy(x0)
-    
-    # Simple BiCGSTAB-like iteration as fallback
-    r = copy(b)
-    A_op!(similar(r), x)
-    r .-= similar(r)
-    
-    rho = norm(r)
-    initial_residual = rho
-    
-    for iter in 1:maxiter
-        if rho <= atol || rho <= rtol * initial_residual
-            return x, (solved=true, residuals=[rho])
-        end
-        
-        # Very simplified iterative step
-        # In a real implementation, this would be proper GMRES/BiCGSTAB
-        z = r / (norm(r) + 1e-14)
-        A_op!(r, z)
-        alpha = dot(r, z) / (dot(r, r) + 1e-14)
-        x .+= alpha * z
-        
-        # Update residual
-        A_op!(r, x)
-        r .= b .- r
-        rho = norm(r)
+struct SparseShiftedOperator{T,TA<:AbstractMatrix{T},TB<:AbstractMatrix{T}}
+    A::TA
+    B::TB
+    z::Complex{T}
+    tmpB::Vector{Complex{T}}
+    tmpA::Vector{Complex{T}}
+end
+
+Base.size(op::SparseShiftedOperator) = (length(op.tmpB), length(op.tmpB))
+
+function LinearAlgebra.mul!(y::AbstractVector{Complex{T}},
+                            op::SparseShiftedOperator{T},
+                            x::AbstractVector{Complex{T}}) where T<:Real
+    mul!(op.tmpB, op.B, x)
+    @. op.tmpB = op.z * op.tmpB
+    mul!(op.tmpA, op.A, x)
+    @. y = op.tmpB - op.tmpA
+    return y
+end
+
+function solve_shifted_iterative!(dest::AbstractMatrix{Complex{T}},
+                                  rhs::AbstractMatrix{Complex{T}},
+                                  A::SparseMatrixCSC{T,Int},
+                                  B::SparseMatrixCSC{T,Int},
+                                  z::Complex{T}, tol::T,
+                                  maxiter::Int, restart::Int) where T<:Real
+    N = size(A, 1)
+    tmpB = Vector{Complex{T}}(undef, N)
+    tmpA = Vector{Complex{T}}(undef, N)
+    op = SparseShiftedOperator(A, B, z, tmpB, tmpA)
+    ncols = size(rhs, 2)
+
+    for j in 1:ncols
+        b = view(rhs, :, j)
+        x_initial = zeros(Complex{T}, N)
+        x_sol, stats = gmres(op, b, x_initial;
+                             restart=true,
+                             memory=max(restart, 2),
+                             rtol=tol,
+                             atol=tol,
+                             itmax=maxiter)
+        dest[:, j] .= x_sol
+        stats.solved || return false
     end
-    
-    return x, (solved=false, residuals=[rho])
+
+    return true
 end
 
 function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
-                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                       solver::Symbol = :direct,
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
     # Feast for sparse real symmetric generalized eigenvalue problem in CSR format
     # Solves: A*q = lambda*B*q where A is symmetric, B is symmetric positive definite
     
@@ -61,6 +76,15 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     # Check inputs
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
     
+    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+    solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
+    solver_choice == :invalid &&
+        throw(ArgumentError("Unsupported solver option '$solver'. Use :direct or :gmres."))
+    solver_is_direct = solver_choice == :direct
+    solver_is_iterative = !solver_is_direct
+    solver_is_iterative && !KRYLOV_AVAILABLE &&
+        throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Please ensure it is in the environment."))
+
     # Initialize workspace
     workspace = FeastWorkspaceReal{T}(N, M0)
     
@@ -72,8 +96,10 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     mode = Ref(0)
     info = Ref(0)
     
-    # Sparse linear solver workspace
+    # Sparse linear solver / iterative workspace
     sparse_solver = nothing
+    current_shift = Ref(zero(Complex{T}))
+    rhs_iterative = solver_is_iterative ? zeros(Complex{T}, N, M0) : nothing
     
     while true
         # Call Feast RCI kernel
@@ -84,27 +110,43 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
         
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             # Factorize Ze*B - A for sparse matrices
-            z = Ze[]
-            sparse_matrix = z * B - A
-            
-            # LU factorization for sparse matrix
-            try
-                sparse_solver = lu(sparse_matrix)
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if solver_is_direct
+                z = Ze[]
+                sparse_matrix = z * B - A
+
+                # LU factorization for sparse matrix
+                try
+                    sparse_solver = lu(sparse_matrix)
+                catch e
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                current_shift[] = Ze[]
             end
             
         elseif ijob[] == Int(Feast_RCI_SOLVE)
             # Solve sparse linear systems: (Ze*B - A) * X = B * workspace.work
-            rhs = B * workspace.work[:, 1:M0]
-            
-            try
-                # Solve with sparse LU factors
-                workspace.workc[:, 1:M0] .= sparse_solver \ rhs
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if solver_is_direct
+                rhs = B * workspace.work[:, 1:M0]
+                
+                try
+                    # Solve with sparse LU factors
+                    workspace.workc[:, 1:M0] .= sparse_solver \ rhs
+                catch e
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                mul!(rhs_iterative, B, workspace.work[:, 1:M0])
+                success = solve_shifted_iterative!(workspace.workc[:, 1:M0],
+                                                   rhs_iterative, A, B,
+                                                   current_shift[], tol_value,
+                                                   solver_maxiter, solver_restart)
+                if !success
+                    info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                    break
+                end
             end
             
         elseif ijob[] == Int(Feast_RCI_MULT_A)
@@ -134,9 +176,17 @@ end
 function feast_scsrgvx!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                         Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
                         Zne::AbstractVector{Complex{TZ}},
-                        Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+                        Wne::AbstractVector{Complex{TW}};
+                        solver::Symbol = :direct,
+                        solver_tol::Real = 0.0,
+                        solver_maxiter::Int = 500,
+                        solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
-        feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
+        feast_scsrgv!(A, B, Emin, Emax, M0, fpm;
+                      solver=solver,
+                      solver_tol=solver_tol,
+                      solver_maxiter=solver_maxiter,
+                      solver_restart=solver_restart)
     end
 end
 
@@ -428,27 +478,37 @@ function feast_scsrgv_iterative!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T
                                  max_iter::Int = 3) where T<:Real
     # Feast with iterative refinement for better accuracy
     
-    result = feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
-    
-    # Perform iterative refinement if converged
-    if result.info == 0 && max_iter > 1
-        for iter in 2:max_iter
-            # Use previous result as initial guess
-            fpm[5] = 1  # Use initial guess
-            
-            # Refine the solution
-            result_new = feast_scsrgv!(A, B, Emin, Emax, result.M, fpm)
-            
-            # Check if refinement improved the solution
-            if result_new.epsout < result.epsout
-                result = result_new
-            else
-                break  # No improvement, stop refinement
-            end
-        end
-    end
-    
-    return result
+    return feast_scsrgv!(A, B, Emin, Emax, M0, fpm;
+                         solver=:gmres,
+                         solver_tol=10.0^(-fpm[3]),
+                         solver_maxiter=400,
+                         solver_restart=30)
+end
+
+function difeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
+                         Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                         solver_tol::Real = 0.0,
+                         solver_maxiter::Int = 500,
+                         solver_restart::Int = 30) where T<:Real
+    return feast_scsrgv!(A, B, Emin, Emax, M0, fpm;
+                         solver=:gmres,
+                         solver_tol=solver_tol,
+                         solver_maxiter=solver_maxiter,
+                         solver_restart=solver_restart)
+end
+
+function difeast_scsrgvx!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
+                          Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
+                          Zne::AbstractVector{Complex{TZ}},
+                          Wne::AbstractVector{Complex{TW}};
+                          solver_tol::Real = 0.0,
+                          solver_maxiter::Int = 500,
+                          solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+    return feast_scsrgvx!(A, B, Emin, Emax, M0, fpm, Zne, Wne;
+                          solver=:gmres,
+                          solver_tol=solver_tol,
+                          solver_maxiter=solver_maxiter,
+                          solver_restart=solver_restart)
 end
 
 function feast_scsrpev!(A::Vector{SparseMatrixCSC{T,Int}}, d::Int,

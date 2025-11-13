@@ -6,7 +6,7 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
 ## Coverage Summary
 
 - **Dense:** Standard/generalized/polynomial real & complex are covered; complex-symmetric (`zfeast_sy*` family) still relies on general solvers.
-- **Sparse:** Real/complex standard plus Hermitian generalized (`zfeast_hcsrgv/x`) routines implemented; iterative (`*ifeast_*`) and complex-symmetric specializations remain outstanding.
+- **Sparse:** Real/complex standard plus Hermitian generalized (`zfeast_hcsrgv/x`) routines implemented; iterative (`difeast_scsrgv/x`) variants now available for symmetric real CSR problems, while complex-symmetric specializations remain outstanding.
 - **Banded:** Real and complex Hermitian/non-Hermitian wrappers present, implemented via dense conversions.
 - **RCI:** Base kernels (`feast_srci!`, `feast_hrci!`, `feast_grci!`) done; polynomial and custom-contour wrappers added; iterative variants absent.
 - **Utilities:** Contour generators, rational helpers, parameter init, distribution helper present; parallel distribution helpers beyond CSR classification not yet ported.
@@ -16,8 +16,7 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
 ## Missing Feature High-Priority Items
 
 1. **Iterative FEAST (IFEAST) Variants**
-   - Fortran provides `difeast_*`, `zifeast_*` (dense/sparse/banded).
-   - Requires iterative linear solvers inside RCI loop (GMRES/BiCGSTAB support, convergence tolerances).
+   - Sparse real CSR iterative (`difeast_scsrgv/x`) now available via GMRES; remaining work covers dense, banded, complex, and polynomial variants (`difeast_*`, `zifeast_*` families).
 
 2. **MPI/Parallel Families**
    - `pdfeast_*`, `pzfeast_*`, `pdifeast_*`, `pzifeast_*`.

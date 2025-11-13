@@ -19,7 +19,8 @@ export feast_pep!, feast_gepev!, feast_gepevx!, feast_hepev!, feast_hepevx!,
        feast_sypev!, feast_sypevx!, feast_srcipev!, feast_srcipevx!,
        feast_grcipev!, feast_grcipevx!
 # Sparse matrix solver exports
-export feast_scsrgv!, feast_scsrgvx!, feast_scsrev!, feast_scsrevx!
+export feast_scsrgv!, feast_scsrgvx!, feast_scsrev!, feast_scsrevx!,
+       feast_scsrgv_iterative!, difeast_scsrgv!, difeast_scsrgvx!
 export feast_hcsrev!, feast_hcsrevx!, feast_hcsrgv!, feast_hcsrgvx!,
        feast_gcsrgv!, feast_gcsrgvx!
 export feast_gcsrev!, feast_gcsrevx!

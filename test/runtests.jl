@@ -249,6 +249,30 @@ using Distributed
         @test fpm_custom[15] == 0
         @test isapprox(sort(result_x.lambda), sort(result.lambda); atol=1e-8)
     end
+
+    @testset "Sparse iterative FEAST (GMRES)" begin
+        n = 12
+        A = spdiagm(-1 => -ones(n-1), 0 => 2.0 .* ones(n), 1 => -ones(n-1))
+        B = spdiagm(0 => 1.0 .+ 0.1 .* collect(0:n-1))
+        Emin, Emax = 0.5, 1.5
+        M0 = 6
+
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+
+        direct = feast_scsrgv!(copy(A), copy(B), Emin, Emax, M0, copy(fpm))
+        gmres_result = feast_scsrgv!(copy(A), copy(B), Emin, Emax, M0, copy(fpm);
+                                     solver=:gmres, solver_tol=1e-6,
+                                     solver_maxiter=400, solver_restart=20)
+        @test gmres_result.info == 0
+        @test gmres_result.M == direct.M
+        @test isapprox(sort(gmres_result.lambda), sort(direct.lambda); atol=1e-6)
+
+        iter_result = difeast_scsrgv!(copy(A), copy(B), Emin, Emax, M0, copy(fpm))
+        @test iter_result.info == 0
+        @test isapprox(sort(iter_result.lambda), sort(direct.lambda); atol=1e-6)
+    end
     
     @testset "Banded matrix utilities" begin
         # Test banded matrix conversion utilities

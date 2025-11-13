@@ -28,15 +28,21 @@ function zolotarev_point(n::Int, k::Int)
 end
 
 function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:Real
+    # Ensure fpm parameters are initialized
+    # If fpm[2] is still -111 (uninitialized), apply defaults first
+    if fpm[2] == FEAST_UNINITIALIZED || fpm[2] <= 0
+        feastdefault!(fpm)
+    end
+
     ne = fpm[2]  # Number of integration points (half-contour)
     fpm16 = get(fpm, 16, 0)  # Integration type: 0=Gauss, 1=Trapezoidal, 2=Zolotarev
     fpm18 = get(fpm, 18, 100)  # Ellipse ratio a/b * 100 (default: 100 = circle)
-    
+
     # Parameters from Fortran implementation
     r = (Emax - Emin) / 2  # Semi-major axis
     Emid = Emin + r        # Center point
     aspect_ratio = fpm18 * 0.01  # Convert percentage to ratio
-    
+
     # Generate half-contour (symmetric about real axis)
     Zne = Vector{Complex{T}}(undef, ne)
     Wne = Vector{Complex{T}}(undef, ne)
@@ -85,8 +91,14 @@ function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:Real
 end
 
 function feast_gcontour(Emid::Complex{T}, r::T, fpm::Vector{Int}) where T<:Real
+    # Ensure fpm parameters are initialized
+    # If fpm[2] is still -111 (uninitialized), apply defaults first
+    if fpm[2] == FEAST_UNINITIALIZED || fpm[2] <= 0
+        feastdefault!(fpm)
+    end
+
     ne = fpm[2]  # Number of integration points
-    
+
     # Generate circular contour in complex plane
     Zne = Vector{Complex{T}}(undef, ne)
     Wne = Vector{Complex{T}}(undef, ne)

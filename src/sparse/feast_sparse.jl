@@ -239,6 +239,86 @@ function feast_hcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
     end
 end
 
+function feast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
+                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    # Feast for sparse complex Hermitian generalized eigenvalue problems
+    # Solves: A*q = lambda*B*q where A and B are Hermitian (B positive definite)
+
+    N = size(A, 1)
+    size(A, 2) == N || throw(ArgumentError("A must be square"))
+    size(B) == (N, N) || throw(ArgumentError("B must match the size of A"))
+    ishermitian(A) || throw(ArgumentError("A must be Hermitian for feast_hcsrgv!"))
+    ishermitian(B) || throw(ArgumentError("B must be Hermitian positive definite for feast_hcsrgv!"))
+
+    check_feast_srci_input(N, M0, Emin, Emax, fpm)
+
+    workspace = FeastWorkspaceComplex{T}(N, M0)
+    ijob = Ref(-1)
+    Ze = Ref(zero(Complex{T}))
+    epsout = Ref(zero(T))
+    loop = Ref(0)
+    mode = Ref(0)
+    info = Ref(0)
+
+    sparse_solver = nothing
+
+    while true
+        feast_hrci!(ijob, N, Ze, workspace.work, workspace.workc,
+                    workspace.zAq, workspace.zSq, fpm, epsout, loop,
+                    Emin, Emax, M0, workspace.lambda, workspace.q,
+                    mode, workspace.res, info)
+
+        if ijob[] == Int(Feast_RCI_FACTORIZE)
+            z = Ze[]
+            shifted_matrix = z * B - A
+            try
+                sparse_solver = lu(shifted_matrix)
+            catch
+                info[] = Int(Feast_ERROR_LAPACK)
+                break
+            end
+
+        elseif ijob[] == Int(Feast_RCI_SOLVE)
+            rhs = B * workspace.workc[:, 1:M0]
+            try
+                workspace.workc[:, 1:M0] .= sparse_solver \ rhs
+            catch
+                info[] = Int(Feast_ERROR_LAPACK)
+                break
+            end
+
+        elseif ijob[] == Int(Feast_RCI_MULT_A)
+            M = mode[]
+            Aq = A * workspace.q[:, 1:M]
+            workspace.workc[:, 1:M] .= Aq
+            workspace.work[:, 1:M] .= real.(Aq)
+
+        elseif ijob[] == Int(Feast_RCI_DONE)
+            break
+        else
+            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
+                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
+                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
+        end
+    end
+
+    M = mode[]
+    lambda = workspace.lambda[1:M]
+    q = workspace.q[:, 1:M]
+    res = workspace.res[1:M]
+
+    return FeastResult{T, Complex{T}}(lambda, q, M, res, info[], epsout[], loop[])
+end
+
+function feast_hcsrgvx!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
+                        Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
+                        Zne::AbstractVector{Complex{TZ}},
+                        Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        feast_hcsrgv!(A, B, Emin, Emax, M0, fpm)
+    end
+end
+
 function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
                        Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
     # Feast for sparse complex general eigenvalue problem

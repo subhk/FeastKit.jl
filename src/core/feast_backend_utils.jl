@@ -122,7 +122,7 @@ function feast_serial(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{T,T}
             if _is_identity_matrix(B)
                 return feast_hcsrev!(A, Emin, Emax, M0, fpm)
             else
-                throw(ArgumentError("Sparse complex generalized problems with non-identity B are not yet supported"))
+                return feast_hcsrgv!(A, B, Emin, Emax, M0, fpm)
             end
         else
             throw(ArgumentError("Unsupported matrix storage types for complex Hermitian problems: $(typeof(A)), $(typeof(B))"))

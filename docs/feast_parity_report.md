@@ -11,7 +11,7 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
 - **RCI:** Base kernels (`feast_srci!`, `feast_hrci!`, `feast_grci!`) done; polynomial and custom-contour wrappers added; iterative variants absent.
 - **Utilities:** Contour generators, rational helpers, parameter init, distribution helper present; parallel distribution helpers beyond CSR classification not yet ported.
 - **Parallel:** Threaded helpers exist; MPI (`pd*`, `pz*`) and full distributed support not implemented.
-- **Precision:** Only double-precision supported; single-precision (`sfeast_*`, `cfeast_*`) missing.
+- **Precision:** Double- and single-precision (Float64/ComplexF64 and Float32/ComplexF32) workflows are supported end-to-end.
 
 ## Missing Feature High-Priority Items
 
@@ -27,14 +27,11 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
    - Fortran includes `zfeast_sy*` dense/sparse/banded routines.
    - Julia uses general solvers; specialized symmetric storage not supported.
 
-4. **Single Precision Support**
-   - Provide `Float32`/`ComplexF32` workflows matching `sfeast_*` and `cfeast_*`.
-
-5. **Advanced Polynomial/Custom Contour RCI**
+4. **Advanced Polynomial/Custom Contour RCI**
    - `feast_srcipev`/`feast_grcipev` wrappers exist, but direct RCI entry points for polynomial problems (`feast_grcipev!` etc.) still rely on generalized wrappers.
    - Need direct polynomial linearization for banded/sparse cases without dense expansion.
 
-6. **Comprehensive Example Ports**
+5. **Comprehensive Example Ports**
    - `examples/feast/run_feast_examples.jl` covers main cases, but additional Fortran demos (`PFEAST-L*`) still pending translation (especially MPI ones).
 
 ## Secondary Gaps

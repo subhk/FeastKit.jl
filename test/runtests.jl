@@ -84,6 +84,7 @@ using Distributed
     @testset "High-level feast dispatch" begin
         n = 3
         # Real symmetric generalized problem
+        @info "Dispatch: real symmetric generalized"
         A_sym = Symmetric(diagm(0 => 2.0 .* ones(n), 1 => -1.0 .* ones(n-1), -1 => -1.0 .* ones(n-1)))
         B_real = Matrix{Float64}(I, n, n)
         fpm = zeros(Int, 64)
@@ -99,6 +100,7 @@ using Distributed
         @test_throws ArgumentError feast(A_nonsym, B_real, (0.5, 3.5), M0=n, fpm=copy(fpm), parallel=:serial)
 
         # Dense complex Hermitian standard problem
+        @info "Dispatch: dense Hermitian standard"
         A_herm = Hermitian([2.5 + 0im 0.2 + 0.1im 0.0;
                             0.2 - 0.1im 3.5 + 0im 0.3 - 0.2im;
                             0.0 0.3 + 0.2im 4.0 + 0im])
@@ -114,6 +116,7 @@ using Distributed
         @test_throws ArgumentError feast(A_nonherm, B_complex, (0.0, 5.0), M0=2, fpm=copy(fpm), parallel=:serial)
 
         # Sparse complex Hermitian standard problem
+        @info "Dispatch: sparse Hermitian standard"
         v = ComplexF64[0.1 + 0.2im, -0.05 + 0.1im]
         diag_vals = ComplexF64[2.0, 3.0, 4.0]
         A_sparse = spdiagm(-1 => conj.(v), 0 => diag_vals, 1 => v)
@@ -130,35 +133,39 @@ using Distributed
         fpm[1] = 0
 
         # Dense standard problem (B = I)
+        @info "General: dense standard"
         A_dense = ComplexF64[1  2+1im;
                              0  3]
         center = 2 + 0im
         radius = 2.5
-        result_standard = feast_general(A_dense, center, radius; M0=4, fpm=copy(fpm), parallel=:serial)
+        result_standard = feast_general(A_dense, center, radius; M0=size(A_dense, 1), fpm=copy(fpm), parallel=:serial)
         @test result_standard.info == 0
         @test result_standard.M == 2
         expected_dense = sort(real.(eigvals(Matrix(A_dense))))
         @test isapprox(sort(result_standard.lambda), expected_dense; atol=1e-9)
 
         # Dense generalized problem with diagonal B
+        @info "General: dense generalized"
         B_dense = ComplexF64[1 0;
                              0 2]
-        result_general = feast_general(A_dense, B_dense, center, radius; M0=4, fpm=copy(fpm), parallel=:serial)
+        result_general = feast_general(A_dense, B_dense, center, radius; M0=size(A_dense, 1), fpm=copy(fpm), parallel=:serial)
         @test result_general.info == 0
         @test result_general.M == 2
         expected_general = sort(real.(eigvals(Matrix(A_dense), Matrix(B_dense))))
         @test isapprox(sort(result_general.lambda), expected_general; atol=1e-9)
 
         # Sparse standard problem (automatic type promotion)
+        @info "General: sparse standard"
         A_sparse = sparse(A_dense)
-        result_sparse = feast_general(A_sparse, center, radius; M0=4, fpm=copy(fpm), parallel=:serial)
+        result_sparse = feast_general(A_sparse, center, radius; M0=size(A_sparse, 1), fpm=copy(fpm), parallel=:serial)
         @test result_sparse.info == 0
         @test result_sparse.M == 2
         @test isapprox(sort(result_sparse.lambda), expected_dense; atol=1e-9)
 
         # Real input should be promoted to complex
+        @info "General: real input promotion"
         A_real = [1.0 2.0; 0.0 3.0]
-        result_real = feast_general(A_real, center, radius; M0=4, fpm=copy(fpm), parallel=:serial)
+        result_real = feast_general(A_real, center, radius; M0=size(A_real, 1), fpm=copy(fpm), parallel=:serial)
         @test result_real.info == 0
         @test result_real.M == 2
         @test isapprox(sort(result_real.lambda), expected_dense; atol=1e-9)
@@ -199,6 +206,36 @@ using Distributed
         @test info[1] == n  # Size
         @test info[2] > 0   # Non-zeros
         @test info[3] > 0   # Density
+    end
+
+    @testset "Sparse Hermitian generalized" begin
+        n = 6
+        diag = ComplexF64[2.5 + 0im, 3.0 + 0im, 3.6 + 0im, 4.2 + 0im, 4.8 + 0im, 5.1 + 0im]
+        offdiag = ComplexF64[0.2 + 0.05im, 0.15 - 0.03im, 0.1 + 0.02im, 0.12 - 0.04im, 0.08 + 0.01im]
+        A = spdiagm(-1 => conj.(offdiag), 0 => diag, 1 => offdiag)
+        Bdiag = ComplexF64[1.3 + 0im, 1.4 + 0im, 1.5 + 0im, 1.6 + 0im, 1.7 + 0im, 1.8 + 0im]
+        B = spdiagm(0 => Bdiag)
+
+        dense_vals = sort(real.(eigvals(Matrix(A), Matrix(B))))
+        Emin = dense_vals[2] - 0.2
+        Emax = dense_vals[4] + 0.2
+        expected = [λ for λ in dense_vals if Emin <= λ <= Emax]
+
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        result = feast_hcsrgv!(copy(A), copy(B), Emin, Emax, n, copy(fpm))
+
+        @test result.info == 0
+        @test result.M == length(expected)
+        @test isapprox(sort(result.lambda), sort(expected); atol=1e-8)
+
+        contour = feast_contour(Emin, Emax, copy(fpm))
+        fpm_custom = copy(fpm)
+        result_x = feast_hcsrgvx!(copy(A), copy(B), Emin, Emax, n, fpm_custom,
+                                  contour.Zne, contour.Wne)
+        @test fpm_custom[15] == 0
+        @test isapprox(sort(result_x.lambda), sort(result.lambda); atol=1e-8)
     end
     
     @testset "Banded matrix utilities" begin

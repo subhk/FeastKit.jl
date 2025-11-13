@@ -38,13 +38,14 @@ using Distributed
     @testset "Contour generation" begin
         fpm = zeros(Int, 64)
         feastinit!(fpm)
-        
+        feastdefault!(fpm)  # Apply defaults before using contour functions
+
         # Test elliptical contour for real interval
         Emin, Emax = 0.0, 10.0
         contour = feast_contour(Emin, Emax, fpm)
         @test length(contour.Zne) == fpm[2]
         @test length(contour.Wne) == fpm[2]
-        
+
         # Test circular contour for complex region
         Emid = 5.0 + 2.0im
         r = 3.0

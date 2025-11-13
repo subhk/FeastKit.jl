@@ -26,7 +26,9 @@ export feast_scsrgv!, feast_scsrgvx!, feast_scsrev!, feast_scsrevx!,
        feast_scsrgv_iterative!, difeast_scsrgv!, difeast_scsrgvx!
 export feast_hcsrev!, feast_hcsrevx!, feast_hcsrgv!, feast_hcsrgvx!,
        zifeast_hcsrev!, zifeast_hcsrevx!, zifeast_hcsrgv!, zifeast_hcsrgvx!,
-       feast_gcsrgv!, feast_gcsrgvx!, zifeast_gcsrgv!, zifeast_gcsrgvx!
+       feast_gcsrgv!, feast_gcsrgvx!, zifeast_gcsrgv!, zifeast_gcsrgvx!,
+       feast_scsrgv_complex!, feast_scsrgvx_complex!, feast_scsrev_complex!, feast_scsrevx_complex!,
+       zifeast_scsrgv_complex!, zifeast_scsrgvx_complex!, zifeast_scsrev_complex!, zifeast_scsrevx_complex!
 export feast_gcsrev!, feast_gcsrevx!, zifeast_gcsrev!, zifeast_gcsrevx!
 export feast_scsrpev!, feast_scsrpevx!, feast_hcsrpev!, feast_hcsrpevx!
 export feast_gcsrpev!, feast_gcsrpevx!

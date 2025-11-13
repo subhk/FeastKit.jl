@@ -377,6 +377,24 @@ using Distributed
         wrapper_std = zifeast_gcsrev!(copy(A_general), Emid, radius, n, copy(fpm);
                                       solver_tol=1e-7, solver_maxiter=400, solver_restart=30)
         @test isapprox(sort(real.(wrapper_std.lambda)), sort(real.(direct_std.lambda)); atol=1e-7)
+
+        # Complex-symmetric wrappers
+        A_sym = tril(rand(ComplexF64, n, n))
+        A_sym += transpose(A_sym) - diagm(0 => diag(A_sym))
+        B_sym = tril(rand(ComplexF64, n, n))
+        B_sym += transpose(B_sym) - diagm(0 => diag(B_sym))
+
+        Emid_cs = complex(0.5, 0.0)
+        r_cs = 2.0
+        cs_direct = feast_gcsrgv!(sparse(A_sym), sparse(B_sym), Emid_cs, r_cs, n, copy(fpm))
+        cs_wrap = feast_scsrgv_complex!(sparse(A_sym), sparse(B_sym), Emid_cs, r_cs, n, copy(fpm))
+        @test isapprox(sort(real.(cs_wrap.lambda)), sort(real.(cs_direct.lambda)); atol=1e-9)
+
+        cs_std = feast_scsrev_complex!(sparse(A_sym), Emid_cs, r_cs, n, copy(fpm))
+        cs_std_direct = feast_gcsrev!(sparse(A_sym), Emid_cs, r_cs, n, copy(fpm))
+        @test isapprox(sort(real.(cs_std.lambda)), sort(real.(cs_std_direct.lambda)); atol=1e-9)
+
+        @test_throws ArgumentError feast_scsrgv_complex!(sparse(A_general), sparse(B_sym), Emid_cs, r_cs, n, copy(fpm))
     end
 
     @testset "Sparse iterative FEAST (GMRES)" begin

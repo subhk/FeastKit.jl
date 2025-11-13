@@ -342,7 +342,11 @@ function zifeast_hcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
 end
 
 function feast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
-                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                       solver::Symbol = :direct,
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
     # Feast for sparse complex Hermitian generalized eigenvalue problems
     # Solves: A*q = lambda*B*q where A and B are Hermitian (B positive definite)
 
@@ -353,6 +357,17 @@ function feast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     ishermitian(B) || throw(ArgumentError("B must be Hermitian positive definite for feast_hcsrgv!"))
 
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
+
+    solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
+    solver_choice == :invalid &&
+        throw(ArgumentError("Unsupported solver option '$solver'. Use :direct or :gmres."))
+    solver_is_direct = solver_choice == :direct
+    solver_is_iterative = !solver_is_direct
+    solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
+        throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Please ensure it is in the environment."))
+    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+    current_shift = Ref(zero(Complex{T}))
+    rhs_iterative = solver_is_iterative ? zeros(Complex{T}, N, M0) : nothing
 
     workspace = FeastWorkspaceComplex{T}(N, M0)
     ijob = Ref(-1)
@@ -372,21 +387,36 @@ function feast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
 
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             z = Ze[]
-            shifted_matrix = z * B - A
-            try
-                sparse_solver = lu(shifted_matrix)
-            catch
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if solver_is_direct
+                shifted_matrix = z * B - A
+                try
+                    sparse_solver = lu(shifted_matrix)
+                catch
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                current_shift[] = z
             end
 
         elseif ijob[] == Int(Feast_RCI_SOLVE)
             rhs = B * workspace.workc[:, 1:M0]
-            try
-                workspace.workc[:, 1:M0] .= sparse_solver \ rhs
-            catch
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if solver_is_direct
+                try
+                    workspace.workc[:, 1:M0] .= sparse_solver \ rhs
+                catch
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                rhs_iterative .= rhs
+                success = solve_shifted_iterative!(workspace.workc[:, 1:M0], rhs_iterative,
+                                                   A, B, current_shift[],
+                                                   tol_value, solver_maxiter, solver_restart)
+                if !success
+                    info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                    break
+                end
             end
 
         elseif ijob[] == Int(Feast_RCI_MULT_A)
@@ -415,14 +445,49 @@ end
 function feast_hcsrgvx!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
                         Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
                         Zne::AbstractVector{Complex{TZ}},
-                        Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+                        Wne::AbstractVector{Complex{TW}};
+                        solver::Symbol = :direct,
+                        solver_tol::Real = 0.0,
+                        solver_maxiter::Int = 500,
+                        solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
-        feast_hcsrgv!(A, B, Emin, Emax, M0, fpm)
+        feast_hcsrgv!(A, B, Emin, Emax, M0, fpm;
+                      solver=solver, solver_tol=solver_tol,
+                      solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+    end
+end
+
+function zifeast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
+                         Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                         solver_tol::Real = 0.0,
+                         solver_maxiter::Int = 500,
+                         solver_restart::Int = 30) where T<:Real
+    return feast_hcsrgv!(A, B, Emin, Emax, M0, fpm;
+                         solver=:gmres, solver_tol=solver_tol,
+                         solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function zifeast_hcsrgvx!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
+                          Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
+                          Zne::AbstractVector{Complex{TZ}},
+                          Wne::AbstractVector{Complex{TW}};
+                          solver_tol::Real = 0.0,
+                          solver_maxiter::Int = 500,
+                          solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        zifeast_hcsrgv!(A, B, Emin, Emax, M0, fpm;
+                        solver_tol=solver_tol,
+                        solver_maxiter=solver_maxiter,
+                        solver_restart=solver_restart)
     end
 end
 
 function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
-                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                       solver::Symbol = :direct,
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
     # Feast for sparse complex general eigenvalue problem
     # Solves: A*q = lambda*B*q where A and B are general sparse matrices
     
@@ -433,6 +498,17 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     # Check inputs
     check_feast_grci_input(N, M0, Emid, r, fpm)
     
+    solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
+    solver_choice == :invalid &&
+        throw(ArgumentError("Unsupported solver option '$solver'. Use :direct or :gmres."))
+    solver_is_direct = solver_choice == :direct
+    solver_is_iterative = !solver_is_direct
+    solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
+        throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Please ensure it is in the environment."))
+    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+    current_shift = Ref(zero(Complex{T}))
+    rhs_iterative = solver_is_iterative ? zeros(Complex{T}, N, M0) : nothing
+
     # Initialize workspace
     workspace = FeastWorkspaceComplex{T}(N, M0)
     
@@ -461,25 +537,40 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             # Factorize Ze*B - A for sparse matrices
             z = Ze[]
-            sparse_matrix = z * B - A
-            
-            # LU factorization for sparse matrix
-            try
-                sparse_solver = lu(sparse_matrix)
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if solver_is_direct
+                sparse_matrix = z * B - A
+                
+                # LU factorization for sparse matrix
+                try
+                    sparse_solver = lu(sparse_matrix)
+                catch e
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                current_shift[] = z
             end
             
         elseif ijob[] == Int(Feast_RCI_SOLVE)
             # Solve sparse linear systems: (Ze*B - A) * X = B * workspace.workc
             rhs = B * workspace.workc[:, 1:M0]
             
-            try
-                workspace.workc[:, 1:M0] .= sparse_solver \ rhs
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if solver_is_direct
+                try
+                    workspace.workc[:, 1:M0] .= sparse_solver \ rhs
+                catch e
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                rhs_iterative .= rhs
+                success = solve_shifted_iterative!(workspace.workc[:, 1:M0], rhs_iterative,
+                                                   A, B, current_shift[],
+                                                   tol_value, solver_maxiter, solver_restart)
+                if !success
+                    info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                    break
+                end
             end
             
         elseif ijob[] == Int(Feast_RCI_MULT_A)
@@ -509,18 +600,55 @@ end
 function feast_gcsrgvx!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
                         Zne::AbstractVector{Complex{TZ}},
-                        Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+                        Wne::AbstractVector{Complex{TW}};
+                        solver::Symbol = :direct,
+                        solver_tol::Real = 0.0,
+                        solver_maxiter::Int = 500,
+                        solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
-        feast_gcsrgv!(A, B, Emid, r, M0, fpm)
+        feast_gcsrgv!(A, B, Emid, r, M0, fpm;
+                      solver=solver, solver_tol=solver_tol,
+                      solver_maxiter=solver_maxiter, solver_restart=solver_restart)
     end
 end
 
 function feast_gcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
                         Zne::AbstractVector{Complex{TZ}},
-                        Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+                        Wne::AbstractVector{Complex{TW}};
+                        solver::Symbol = :direct,
+                        solver_tol::Real = 0.0,
+                        solver_maxiter::Int = 500,
+                        solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
-        feast_gcsrev!(A, Emid, r, M0, fpm)
+        feast_gcsrev!(A, Emid, r, M0, fpm;
+                      solver=solver, solver_tol=solver_tol,
+                      solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+    end
+end
+
+function zifeast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
+                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                         solver_tol::Real = 0.0,
+                         solver_maxiter::Int = 500,
+                         solver_restart::Int = 30) where T<:Real
+    return feast_gcsrgv!(A, B, Emid, r, M0, fpm;
+                         solver=:gmres, solver_tol=solver_tol,
+                         solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function zifeast_gcsrgvx!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
+                          Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
+                          Zne::AbstractVector{Complex{TZ}},
+                          Wne::AbstractVector{Complex{TW}};
+                          solver_tol::Real = 0.0,
+                          solver_maxiter::Int = 500,
+                          solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        zifeast_gcsrgv!(A, B, Emid, r, M0, fpm;
+                        solver_tol=solver_tol,
+                        solver_maxiter=solver_maxiter,
+                        solver_restart=solver_restart)
     end
 end
 

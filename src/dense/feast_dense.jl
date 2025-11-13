@@ -595,11 +595,7 @@ function feast_hegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
 end
 
 function feast_geev!(A::Matrix{Complex{T}},
-                     Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
-                     solver::Symbol = :direct,
-                     solver_tol::Real = 0.0,
-                     solver_maxiter::Int = 500,
-                     solver_restart::Int = 30) where T<:Real
+                     Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
     # Feast for dense complex general standard eigenvalue problem
     # Solves: A*q = lambda*q where A is a general matrix
     # This is equivalent to feast_gegv! with B = I
@@ -611,9 +607,7 @@ function feast_geev!(A::Matrix{Complex{T}},
     B = Matrix{Complex{T}}(I, N, N)
 
     # Call generalized version with B = I
-    return feast_gegv!(A, B, Emid, r, M0, fpm;
-                       solver=solver, solver_tol=solver_tol,
-                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+    return feast_gegv!(A, B, Emid, r, M0, fpm)
 end
 
 function zifeast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
@@ -626,15 +620,6 @@ function zifeast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
                        solver_maxiter=solver_maxiter, solver_restart=solver_restart)
 end
 
-function zifeast_geev!(A::Matrix{Complex{T}},
-                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
-                       solver_tol::Real = 0.0,
-                       solver_maxiter::Int = 500,
-                       solver_restart::Int = 30) where T<:Real
-    return feast_geev!(A, Emid, r, M0, fpm;
-                       solver=:gmres, solver_tol=solver_tol,
-                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
-end
 
 function difeast_sygv!(A::Matrix{T}, B::Matrix{T},
                        Emin::T, Emax::T, M0::Int, fpm::Vector{Int};

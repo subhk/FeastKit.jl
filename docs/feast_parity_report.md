@@ -5,9 +5,9 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
 
 ## Coverage Summary
 
-- **Dense:** Standard/generalized/polynomial real & complex covered; GMRES-backed iterative variants exist for real symmetric and complex Hermitian cases (`difeast_sygv/syev`, `zifeast_heev/hegv`). Complex-symmetric (`zfeast_sy*`) still relies on general solvers.
+- **Dense:** Standard/generalized/polynomial real & complex covered; GMRES-backed iterative variants exist for real symmetric (`difeast_sygv/syev`), complex Hermitian (`zifeast_heev/hegv`), and general non-Hermitian (`zifeast_gegv/geev`). Complex-symmetric (`zfeast_sy*`) still relies on general solvers.
 - **Sparse:** Real/complex standard plus Hermitian generalized (`zfeast_hcsrgv/x`) routines implemented; iterative (`difeast_scsrgv/x`) variants now available for symmetric real CSR problems, while complex-symmetric specializations remain outstanding.
-- **Banded:** Real and complex Hermitian/non-Hermitian wrappers present, implemented via dense conversions.
+- **Banded:** Real and complex Hermitian/non-Hermitian wrappers present; GMRES-backed iterative options available via conversions to dense solvers (`difeast_sbgv/sbev`, `zifeast_hbev/hbgv`, `zifeast_gbgv/gbev`).
 - **RCI:** Base kernels (`feast_srci!`, `feast_hrci!`, `feast_grci!`) done; polynomial and custom-contour wrappers added; iterative variants absent.
 - **Utilities:** Contour generators, rational helpers, parameter init, distribution helper present; parallel distribution helpers beyond CSR classification not yet ported.
 - **Parallel:** Threaded helpers exist; MPI (`pd*`, `pz*`) and full distributed support not implemented.
@@ -16,7 +16,7 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
 ## Missing Feature High-Priority Items
 
 1. **Iterative FEAST (IFEAST) Variants**
-   - Dense real/complex Hermitian (`difeast_sygv/syev`, `zifeast_heev/hegv`) and sparse real CSR (`difeast_scsrgv/x`) supported via GMRES. Remaining work covers dense general non-Hermitian, banded (real/complex), sparse complex/non-Hermitian, and polynomial variants across the `difeast_*` / `zifeast_*` families.
+   - Dense real/complex Hermitian, general, and banded wrappers (`difeast_sygv/syev/sbgv/sbev`, `zifeast_heev/hegv/hbev/hbgv`, `zifeast_gegv/geev/gbgv/gbev`) plus sparse real CSR (`difeast_scsrgv/x`) are supported via GMRES. Remaining work covers sparse complex/non-Hermitian families and polynomial variants across the `difeast_*` / `zifeast_*` families.
 
 2. **MPI/Parallel Families**
    - `pdfeast_*`, `pzfeast_*`, `pdifeast_*`, `pzifeast_*`.

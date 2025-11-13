@@ -3,7 +3,11 @@
 
 
 function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
-                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                     solver::Symbol = :direct,
+                     solver_tol::Real = 0.0,
+                     solver_maxiter::Int = 500,
+                     solver_restart::Int = 30) where T<:Real
     # Feast for banded real symmetric generalized eigenvalue problem
     # Solves: A*q = lambda*B*q where A and B are symmetric banded matrices
     # kla, klb are the number of super-diagonals of A and B respectively
@@ -16,6 +20,20 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
     # Validate banded matrix dimensions
     size(A, 1) >= kla + 1 || throw(ArgumentError("A matrix storage insufficient for kla"))
     size(B, 1) >= klb + 1 || throw(ArgumentError("B matrix storage insufficient for klb"))
+
+    solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
+    solver_choice == :invalid &&
+        throw(ArgumentError("Unsupported solver '$solver'. Use :direct or :gmres."))
+
+    if solver_choice != :direct
+        A_full = banded_to_full(A, kla, N)
+        B_full = banded_to_full(B, klb, N)
+        return feast_sygv!(A_full, B_full, Emin, Emax, M0, fpm;
+                           solver=solver_choice,
+                           solver_tol=solver_tol,
+                           solver_maxiter=solver_maxiter,
+                           solver_restart=solver_restart)
+    end
 
     # Initialize workspace
     workspace = FeastWorkspaceReal{T}(N, M0)
@@ -99,9 +117,15 @@ end
 function feast_sbgvx!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
                       Zne::AbstractVector{Complex{TZ}},
-                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+                      Wne::AbstractVector{Complex{TW}};
+                      solver::Symbol = :direct,
+                      solver_tol::Real = 0.0,
+                      solver_maxiter::Int = 500,
+                      solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
-        feast_sbgv!(A, B, kla, klb, Emin, Emax, M0, fpm)
+        feast_sbgv!(A, B, kla, klb, Emin, Emax, M0, fpm;
+                    solver=solver, solver_tol=solver_tol,
+                    solver_maxiter=solver_maxiter, solver_restart=solver_restart)
     end
 end
 
@@ -158,7 +182,11 @@ function symmetric_banded_matvec!(y::AbstractVector{S}, A::Matrix{T}, k::Int, x:
 end
 
 function feast_hbev!(A::Matrix{Complex{T}}, ka::Int,
-                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                     solver::Symbol = :direct,
+                     solver_tol::Real = 0.0,
+                     solver_maxiter::Int = 500,
+                     solver_restart::Int = 30) where T<:Real
     # Feast for banded complex Hermitian eigenvalue problem
     # Solves: A*q = lambda*q where A is Hermitian banded
     
@@ -170,102 +198,75 @@ function feast_hbev!(A::Matrix{Complex{T}}, ka::Int,
     # Validate banded matrix dimensions
     size(A, 1) >= ka + 1 || throw(ArgumentError("A matrix storage insufficient for ka"))
     
-    # Initialize workspace
-    workspace = FeastWorkspaceComplex{T}(N, M0)
-    
-    # Initialize variables for RCI
-    ijob = Ref(-1)
-    Ze = Ref(zero(Complex{T}))
-    epsout = Ref(zero(T))
-    loop = Ref(0)
-    mode = Ref(0)
-    info = Ref(0)
-    
-    # Banded linear solver workspace
-    banded_factors = nothing
-    
-    while true
-        # Call Feast RCI kernel
-        feast_hrci!(ijob, N, Ze, workspace.work, workspace.workc,
-                   workspace.zAq, workspace.zSq, fpm, epsout, loop,
-                   Emin, Emax, M0, workspace.lambda, workspace.q, 
-                   mode, workspace.res, info)
-        
-        if ijob[] == Int(Feast_RCI_FACTORIZE)
-            # Factorize Ze*I - A for banded Hermitian matrix
-            z = Ze[]
-            
-            # Convert to full matrix (simplified approach)
-            A_full = banded_to_full_hermitian(A, ka, N)
-            full_matrix = z .* I .- A_full
-            
-            # LU factorization
-            try
-                banded_factors = lu(full_matrix)
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
-            end
-            
-        elseif ijob[] == Int(Feast_RCI_SOLVE)
-            # Solve linear systems
-            try
-                workspace.workc[:, 1:M0] .= banded_factors \ workspace.workc[:, 1:M0]
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
-            end
-            
-        elseif ijob[] == Int(Feast_RCI_MULT_A)
-            # Compute A * q for residual calculation
-            M = mode[]
-            A_full = banded_to_full_hermitian(A, ka, N)
-            workspace.work[:, 1:M] .= real.(A_full * workspace.q[:, 1:M])
-
-        elseif ijob[] == Int(Feast_RCI_DONE)
-            break
-        else
-            # Unexpected ijob value - error out to prevent infinite loop
-            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
-                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
-                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
-        end
-    end
-    
-    # Extract results
-    M = mode[]
-    lambda = workspace.lambda[1:M]
-    q = workspace.q[:, 1:M]
-    res = workspace.res[1:M]
-    
-    return FeastResult{T, Complex{T}}(lambda, q, M, res, info[], epsout[], loop[])
+    A_full = banded_to_full_hermitian(A, ka, N)
+    return feast_heev!(A_full, Emin, Emax, M0, fpm;
+                       solver=solver, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
 end
 
 function feast_hbevx!(A::Matrix{Complex{T}}, ka::Int,
                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
                       Zne::AbstractVector{Complex{TZ}},
-                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+                      Wne::AbstractVector{Complex{TW}};
+                      solver::Symbol = :direct,
+                      solver_tol::Real = 0.0,
+                      solver_maxiter::Int = 500,
+                      solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
-        feast_hbev!(A, ka, Emin, Emax, M0, fpm)
+        feast_hbev!(A, ka, Emin, Emax, M0, fpm;
+                    solver=solver, solver_tol=solver_tol,
+                    solver_maxiter=solver_maxiter, solver_restart=solver_restart)
     end
 end
 
+function zifeast_hbev!(A::Matrix{Complex{T}}, ka::Int,
+                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
+    return feast_hbev!(A, ka, Emin, Emax, M0, fpm;
+                       solver=:gmres, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function zifeast_hbgv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}}, ka::Int, kb::Int,
+                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
+    return feast_hbgv!(A, B, ka, kb, Emin, Emax, M0, fpm;
+                       solver=:gmres, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
 function feast_hbgv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}}, ka::Int, kb::Int,
-                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                     solver::Symbol = :direct,
+                     solver_tol::Real = 0.0,
+                     solver_maxiter::Int = 500,
+                     solver_restart::Int = 30) where T<:Real
     N = size(A, 2)
     size(B, 2) == N || throw(ArgumentError("B must have same dimensions as A"))
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
     A_full = banded_to_full_hermitian(A, ka, N)
     B_full = banded_to_full_hermitian(B, kb, N)
-    return feast_hegv!(A_full, B_full, Emin, Emax, M0, fpm)
+    return feast_hegv!(A_full, B_full, Emin, Emax, M0, fpm;
+                       solver=solver, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
 end
 
 function feast_hbgvx!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}}, ka::Int, kb::Int,
                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
                       Zne::AbstractVector{Complex{TZ}},
-                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+                      Wne::AbstractVector{Complex{TW}};
+                      solver::Symbol = :direct,
+                      solver_tol::Real = 0.0,
+                      solver_maxiter::Int = 500,
+                      solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
-        feast_hbgv!(A, B, ka, kb, Emin, Emax, M0, fpm)
+        feast_hbgv!(A, B, ka, kb, Emin, Emax, M0, fpm;
+                    solver=solver, solver_tol=solver_tol,
+                    solver_maxiter=solver_maxiter, solver_restart=solver_restart)
     end
 end
 
@@ -399,7 +400,11 @@ end
 # Standard eigenvalue problem variants (B = I)
 
 function feast_sbev!(A::Matrix{T}, ka::Int,
-                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                     solver::Symbol = :direct,
+                     solver_tol::Real = 0.0,
+                     solver_maxiter::Int = 500,
+                     solver_restart::Int = 30) where T<:Real
     # Feast for banded real symmetric standard eigenvalue problem
     # Solves: A*q = lambda*q where A is symmetric banded
     # This is equivalent to feast_sbgv! with B = I
@@ -413,50 +418,122 @@ function feast_sbev!(A::Matrix{T}, ka::Int,
     klb = 0
 
     # Call generalized version with B = I
-    return feast_sbgv!(A, B, ka, klb, Emin, Emax, M0, fpm)
+    return feast_sbgv!(A, B, ka, klb, Emin, Emax, M0, fpm;
+                       solver=solver, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
 end
 
 function feast_sbevx!(A::Matrix{T}, ka::Int,
                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
                       Zne::AbstractVector{Complex{TZ}},
-                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+                      Wne::AbstractVector{Complex{TW}};
+                      solver::Symbol = :direct,
+                      solver_tol::Real = 0.0,
+                      solver_maxiter::Int = 500,
+                      solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
-        feast_sbev!(A, ka, Emin, Emax, M0, fpm)
+        feast_sbev!(A, ka, Emin, Emax, M0, fpm;
+                    solver=solver, solver_tol=solver_tol,
+                    solver_maxiter=solver_maxiter, solver_restart=solver_restart)
     end
 end
 
+function difeast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
+                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
+    return feast_sbgv!(A, B, kla, klb, Emin, Emax, M0, fpm;
+                       solver=:gmres, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function difeast_sbev!(A::Matrix{T}, ka::Int,
+                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
+    return feast_sbev!(A, ka, Emin, Emax, M0, fpm;
+                       solver=:gmres, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
 function feast_gbgv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}}, ka::Int, kb::Int,
-                     Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                     Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                     solver::Symbol = :direct,
+                     solver_tol::Real = 0.0,
+                     solver_maxiter::Int = 500,
+                     solver_restart::Int = 30) where T<:Real
     N = size(A, 2)
     size(B, 2) == N || throw(ArgumentError("B must have same dimensions as A"))
     check_feast_grci_input(N, M0, Emid, r, fpm)
     A_full = banded_to_full(A, ka, N)
     B_full = banded_to_full(B, kb, N)
-    return feast_gegv!(A_full, B_full, Emid, r, M0, fpm)
+    return feast_gegv!(A_full, B_full, Emid, r, M0, fpm;
+                       solver=solver, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
 end
 
 function feast_gbgvx!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}}, ka::Int, kb::Int,
                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
                       Zne::AbstractVector{Complex{TZ}},
-                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+                      Wne::AbstractVector{Complex{TW}};
+                      solver::Symbol = :direct,
+                      solver_tol::Real = 0.0,
+                      solver_maxiter::Int = 500,
+                      solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
-        feast_gbgv!(A, B, ka, kb, Emid, r, M0, fpm)
+        feast_gbgv!(A, B, ka, kb, Emid, r, M0, fpm;
+                    solver=solver, solver_tol=solver_tol,
+                    solver_maxiter=solver_maxiter, solver_restart=solver_restart)
     end
 end
 
 function feast_gbev!(A::Matrix{Complex{T}}, ka::Int,
-                     Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                     Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                     solver::Symbol = :direct,
+                     solver_tol::Real = 0.0,
+                     solver_maxiter::Int = 500,
+                     solver_restart::Int = 30) where T<:Real
     N = size(A, 2)
     check_feast_grci_input(N, M0, Emid, r, fpm)
     A_full = banded_to_full(A, ka, N)
-    return feast_geev!(A_full, Emid, r, M0, fpm)
+    return feast_geev!(A_full, Emid, r, M0, fpm;
+                       solver=solver, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
 end
 
 function feast_gbevx!(A::Matrix{Complex{T}}, ka::Int,
                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int},
                       Zne::AbstractVector{Complex{TZ}},
-                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+                      Wne::AbstractVector{Complex{TW}};
+                      solver::Symbol = :direct,
+                      solver_tol::Real = 0.0,
+                      solver_maxiter::Int = 500,
+                      solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
-        feast_gbev!(A, ka, Emid, r, M0, fpm)
+        feast_gbev!(A, ka, Emid, r, M0, fpm;
+                    solver=solver, solver_tol=solver_tol,
+                    solver_maxiter=solver_maxiter, solver_restart=solver_restart)
     end
+end
+
+function zifeast_gbgv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}}, ka::Int, kb::Int,
+                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
+    return feast_gbgv!(A, B, ka, kb, Emid, r, M0, fpm;
+                       solver=:gmres, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function zifeast_gbev!(A::Matrix{Complex{T}}, ka::Int,
+                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
+    return feast_gbev!(A, ka, Emid, r, M0, fpm;
+                       solver=:gmres, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
 end

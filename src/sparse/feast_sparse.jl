@@ -4,19 +4,19 @@
 using SparseArrays
 using LinearAlgebra
 
-struct SparseShiftedOperator{T,TA<:AbstractMatrix{T},TB<:AbstractMatrix{T}}
+struct SparseShiftedOperator{TA<:AbstractMatrix,TB<:AbstractMatrix,CT<:Complex}
     A::TA
     B::TB
-    z::Complex{T}
-    tmpB::Vector{Complex{T}}
-    tmpA::Vector{Complex{T}}
+    z::CT
+    tmpB::Vector{CT}
+    tmpA::Vector{CT}
 end
 
 Base.size(op::SparseShiftedOperator) = (length(op.tmpB), length(op.tmpB))
 
-function LinearAlgebra.mul!(y::AbstractVector{Complex{T}},
-                            op::SparseShiftedOperator{T},
-                            x::AbstractVector{Complex{T}}) where T<:Real
+function LinearAlgebra.mul!(y::AbstractVector{CT},
+                            op::SparseShiftedOperator{TA,TB,CT},
+                            x::AbstractVector{CT}) where {TA,TB,CT<:Complex}
     mul!(op.tmpB, op.B, x)
     @. op.tmpB = op.z * op.tmpB
     mul!(op.tmpA, op.A, x)
@@ -24,21 +24,21 @@ function LinearAlgebra.mul!(y::AbstractVector{Complex{T}},
     return y
 end
 
-function solve_shifted_iterative!(dest::AbstractMatrix{Complex{T}},
-                                  rhs::AbstractMatrix{Complex{T}},
-                                  A::SparseMatrixCSC{T,Int},
-                                  B::SparseMatrixCSC{T,Int},
-                                  z::Complex{T}, tol::T,
-                                  maxiter::Int, restart::Int) where T<:Real
+function solve_shifted_iterative!(dest::AbstractMatrix{CT},
+                                  rhs::AbstractMatrix{CT},
+                                  A::SparseMatrixCSC,
+                                  B::SparseMatrixCSC,
+                                  z::CT, tol::TR,
+                                  maxiter::Int, restart::Int) where {CT<:Complex, TR<:Real}
     N = size(A, 1)
-    tmpB = Vector{Complex{T}}(undef, N)
-    tmpA = Vector{Complex{T}}(undef, N)
+    tmpB = Vector{CT}(undef, N)
+    tmpA = Vector{CT}(undef, N)
     op = SparseShiftedOperator(A, B, z, tmpB, tmpA)
     ncols = size(rhs, 2)
 
     for j in 1:ncols
         b = view(rhs, :, j)
-        x_initial = zeros(Complex{T}, N)
+        x_initial = zeros(CT, N)
         x_sol, stats = gmres(op, b, x_initial;
                              restart=true,
                              memory=max(restart, 2),
@@ -192,7 +192,11 @@ function feast_scsrevx!(A::SparseMatrixCSC{T,Int},
 end
 
 function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
-                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                       solver::Symbol = :direct,
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
     # Feast for sparse complex Hermitian eigenvalue problem
     # Solves: A*q = lambda*q where A is Hermitian
     
@@ -202,6 +206,17 @@ function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
     # Check inputs
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
     
+    solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
+    solver_choice == :invalid &&
+        throw(ArgumentError("Unsupported solver option '$solver'. Use :direct or :gmres."))
+    solver_is_direct = solver_choice == :direct
+    solver_is_iterative = !solver_is_direct
+    solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
+        throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Please ensure it is in the environment."))
+    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+    identity_sparse = solver_is_iterative ? sparse(I, N, N) : nothing
+    current_shift = Ref(zero(Complex{T}))
+
     # Initialize workspace
     workspace = FeastWorkspaceComplex{T}(N, M0)
     
@@ -226,24 +241,38 @@ function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             # Factorize Ze*I - A for sparse matrices
             z = Ze[]
-            I_sparse = sparse(I, N, N)
-            sparse_matrix = z * I_sparse - A
-            
-            # LU factorization for sparse matrix
-            try
-                sparse_solver = lu(sparse_matrix)
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if solver_is_direct
+                I_sparse = sparse(I, N, N)
+                sparse_matrix = z * I_sparse - A
+
+                # LU factorization for sparse matrix
+                try
+                    sparse_solver = lu(sparse_matrix)
+                catch e
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                current_shift[] = z
             end
             
         elseif ijob[] == Int(Feast_RCI_SOLVE)
             # Solve sparse linear systems
-            try
-                workspace.workc[:, 1:M0] .= sparse_solver \ workspace.workc[:, 1:M0]
-            catch e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            if solver_is_direct
+                try
+                    workspace.workc[:, 1:M0] .= sparse_solver \ workspace.workc[:, 1:M0]
+                catch e
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+            else
+                success = solve_shifted_iterative!(workspace.workc[:, 1:M0], workspace.workc[:, 1:M0],
+                                                   A, identity_sparse, current_shift[],
+                                                   tol_value, solver_maxiter, solver_restart)
+                if !success
+                    info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                    break
+                end
             end
             
         elseif ijob[] == Int(Feast_RCI_MULT_A)
@@ -275,9 +304,40 @@ end
 function feast_hcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
                         Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
                         Zne::AbstractVector{Complex{TZ}},
-                        Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+                        Wne::AbstractVector{Complex{TW}};
+                        solver::Symbol = :direct,
+                        solver_tol::Real = 0.0,
+                        solver_maxiter::Int = 500,
+                        solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
-        feast_hcsrev!(A, Emin, Emax, M0, fpm)
+        feast_hcsrev!(A, Emin, Emax, M0, fpm;
+                      solver=solver, solver_tol=solver_tol,
+                      solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+    end
+end
+
+function zifeast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
+                         Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                         solver_tol::Real = 0.0,
+                         solver_maxiter::Int = 500,
+                         solver_restart::Int = 30) where T<:Real
+    return feast_hcsrev!(A, Emin, Emax, M0, fpm;
+                         solver=:gmres, solver_tol=solver_tol,
+                         solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function zifeast_hcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
+                          Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
+                          Zne::AbstractVector{Complex{TZ}},
+                          Wne::AbstractVector{Complex{TW}};
+                          solver_tol::Real = 0.0,
+                          solver_maxiter::Int = 500,
+                          solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+    return with_custom_contour(fpm, Zne, Wne) do
+        zifeast_hcsrev!(A, Emin, Emax, M0, fpm;
+                        solver_tol=solver_tol,
+                        solver_maxiter=solver_maxiter,
+                        solver_restart=solver_restart)
     end
 end
 

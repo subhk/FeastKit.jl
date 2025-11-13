@@ -610,6 +610,26 @@ function feast_geev!(A::Matrix{Complex{T}},
     return feast_gegv!(A, B, Emid, r, M0, fpm)
 end
 
+function zifeast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
+                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
+    return feast_gegv!(A, B, Emid, r, M0, fpm;
+                       solver=:gmres, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
+function zifeast_geev!(A::Matrix{Complex{T}},
+                       Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
+    return feast_geev!(A, Emid, r, M0, fpm;
+                       solver=:gmres, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+end
+
 function difeast_sygv!(A::Matrix{T}, B::Matrix{T},
                        Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                        solver_tol::Real = 0.0,

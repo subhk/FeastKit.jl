@@ -254,6 +254,32 @@ using Distributed
         wrapper_hg = zifeast_hegv!(copy(A_complex), copy(B_complex), -1.0, 1.0, n, copy(fpm);
                                    solver_tol=1e-8, solver_maxiter=400, solver_restart=25)
         @test isapprox(sort(wrapper_hg.lambda), sort(direct_hg.lambda); atol=1e-8)
+
+        A_general = Matrix{ComplexF64}(rand(ComplexF64, n, n))
+        B_general = A_general' + I
+        Emid = complex(0.0, 0.0)
+        r = 3.0
+        direct_gen = feast_gegv!(copy(A_general), copy(B_general), Emid, r, n, copy(fpm))
+        gmres_gen = feast_gegv!(copy(A_general), copy(B_general), Emid, r, n, copy(fpm);
+                                solver=:gmres, solver_tol=1e-7,
+                                solver_maxiter=400, solver_restart=30)
+        @test gmres_gen.info == 0
+        @test gmres_gen.M == direct_gen.M
+        @test isapprox(sort(real.(gmres_gen.lambda)), sort(real.(direct_gen.lambda)); atol=1e-7)
+
+        wrapper_gen = zifeast_gegv!(copy(A_general), copy(B_general), Emid, r, n, copy(fpm);
+                                    solver_tol=1e-7, solver_maxiter=400, solver_restart=30)
+        @test isapprox(sort(real.(wrapper_gen.lambda)), sort(real.(direct_gen.lambda)); atol=1e-7)
+
+        direct_geev = feast_geev!(copy(A_general), Emid, r, n, copy(fpm))
+        gmres_geev = feast_geev!(copy(A_general), Emid, r, n, copy(fpm);
+                                 solver=:gmres, solver_tol=1e-7,
+                                 solver_maxiter=400, solver_restart=30)
+        @test isapprox(sort(real.(gmres_geev.lambda)), sort(real.(direct_geev.lambda)); atol=1e-7)
+
+        wrapper_geev = zifeast_geev!(copy(A_general), Emid, r, n, copy(fpm);
+                                     solver_tol=1e-7, solver_maxiter=400, solver_restart=30)
+        @test isapprox(sort(real.(wrapper_geev.lambda)), sort(real.(direct_geev.lambda)); atol=1e-7)
     end
     
     @testset "Sparse matrix support" begin
@@ -342,6 +368,63 @@ using Distributed
         info = feast_banded_info(A_banded, k, n)
         @test info[1] == n
         @test info[2] == 2*k + 1  # Bandwidth
+    end
+
+    @testset "Banded iterative FEAST" begin
+        n = 8
+        ka = 1
+        kb = 0
+        A_full = Matrix{Float64}(SymTridiagonal(fill(2.0, n), fill(-1.0, n-1)))
+        B_full = Matrix{Float64}(I, n, n)
+        A_band = full_to_banded(A_full, ka)
+        B_band = full_to_banded(B_full, kb)
+
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+
+        direct = feast_sbgv!(copy(A_band), copy(B_band), ka, kb, 0.5, 3.0, n, copy(fpm))
+        gmres_result = feast_sbgv!(copy(A_band), copy(B_band), ka, kb, 0.5, 3.0, n, copy(fpm);
+                                   solver=:gmres, solver_tol=1e-8,
+                                   solver_maxiter=400, solver_restart=30)
+        @test gmres_result.info == 0
+        @test isapprox(sort(gmres_result.lambda), sort(direct.lambda); atol=1e-8)
+
+        wrapper = difeast_sbgv!(copy(A_band), copy(B_band), ka, kb, 0.5, 3.0, n, copy(fpm);
+                                solver_tol=1e-8, solver_maxiter=400, solver_restart=30)
+        @test isapprox(sort(wrapper.lambda), sort(direct.lambda); atol=1e-8)
+
+        A_h_full = Matrix{ComplexF64}(Hermitian(rand(ComplexF64, n, n) + n * I))
+        B_h_full = Matrix{ComplexF64}(Hermitian(rand(ComplexF64, n, n) + n * I))
+        A_h_band = full_to_banded(A_h_full, ka)
+        B_h_band = full_to_banded(B_h_full, ka)
+
+        direct_h = feast_hbgv!(copy(A_h_band), copy(B_h_band), ka, ka, -1.0, 1.0, n, copy(fpm))
+        gmres_h = feast_hbgv!(copy(A_h_band), copy(B_h_band), ka, ka, -1.0, 1.0, n, copy(fpm);
+                              solver=:gmres, solver_tol=1e-7,
+                              solver_maxiter=400, solver_restart=30)
+        @test isapprox(sort(real.(gmres_h.lambda)), sort(real.(direct_h.lambda)); atol=1e-7)
+
+        wrapper_h = zifeast_hbgv!(copy(A_h_band), copy(B_h_band), ka, ka, -1.0, 1.0, n, copy(fpm);
+                                  solver_tol=1e-7, solver_maxiter=400, solver_restart=30)
+        @test isapprox(sort(real.(wrapper_h.lambda)), sort(real.(direct_h.lambda)); atol=1e-7)
+
+        A_g_full = Matrix{ComplexF64}(rand(ComplexF64, n, n))
+        B_g_full = Matrix{ComplexF64}(rand(ComplexF64, n, n)) + I
+        A_g_band = full_to_banded(A_g_full, ka)
+        B_g_band = full_to_banded(B_g_full, ka)
+
+        Emid = complex(0.0, 0.0)
+        r = 5.0
+        direct_g = feast_gbgv!(copy(A_g_band), copy(B_g_band), ka, ka, Emid, r, n, copy(fpm))
+        gmres_g = feast_gbgv!(copy(A_g_band), copy(B_g_band), ka, ka, Emid, r, n, copy(fpm);
+                              solver=:gmres, solver_tol=1e-6,
+                              solver_maxiter=400, solver_restart=30)
+        @test isapprox(sort(real.(gmres_g.lambda)), sort(real.(direct_g.lambda)); atol=1e-6)
+
+        wrapper_g = zifeast_gbgv!(copy(A_g_band), copy(B_g_band), ka, ka, Emid, r, n, copy(fpm);
+                                  solver_tol=1e-6, solver_maxiter=400, solver_restart=30)
+        @test isapprox(sort(real.(wrapper_g.lambda)), sort(real.(direct_g.lambda)); atol=1e-6)
     end
     
     @testset "Utility functions" begin

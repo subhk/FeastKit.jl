@@ -16,7 +16,8 @@ export feast_sygv!, feast_sygvx!, feast_syev!, feast_syevx!,
        difeast_sygv!, difeast_syev!
 export feast_heev!, feast_heevx!, feast_hegv!, feast_hegvx!,
        zifeast_heev!, zifeast_hegv!
-export feast_gegv!, feast_gegvx!, feast_geev!, feast_geevx!
+export feast_gegv!, feast_gegvx!, feast_geev!, feast_geevx!,
+       zifeast_gegv!, zifeast_geev!
 export feast_pep!, feast_gepev!, feast_gepevx!, feast_hepev!, feast_hepevx!,
        feast_sypev!, feast_sypevx!, feast_srcipev!, feast_srcipevx!,
        feast_grcipev!, feast_grcipevx!
@@ -29,9 +30,12 @@ export feast_gcsrev!, feast_gcsrevx!
 export feast_scsrpev!, feast_scsrpevx!, feast_hcsrpev!, feast_hcsrpevx!
 export feast_gcsrpev!, feast_gcsrpevx!
 # Banded matrix solver exports
-export feast_sbgv!, feast_sbgvx!, feast_sbev!, feast_sbevx!
-export feast_hbev!, feast_hbevx!, feast_hbgv!, feast_hbgvx!
-export feast_gbgv!, feast_gbgvx!, feast_gbev!, feast_gbevx!
+export feast_sbgv!, feast_sbgvx!, feast_sbev!, feast_sbevx!,
+       difeast_sbgv!, difeast_sbev!
+export feast_hbev!, feast_hbevx!, feast_hbgv!, feast_hbgvx!,
+       zifeast_hbev!, zifeast_hbgv!
+export feast_gbgv!, feast_gbgvx!, feast_gbev!, feast_gbevx!,
+       zifeast_gbgv!, zifeast_gbev!
 export Feast_SUCCESS, Feast_ERROR_N, Feast_ERROR_M0, Feast_ERROR_EMIN_EMAX,
        Feast_ERROR_EMID_R, Feast_ERROR_NO_CONVERGENCE, Feast_ERROR_MEMORY,
        Feast_ERROR_INTERNAL, Feast_ERROR_LAPACK, Feast_ERROR_FPM

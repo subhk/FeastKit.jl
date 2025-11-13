@@ -101,6 +101,8 @@ function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     feast_validate_interval(A, interval)
 
     params = _ensure_feast_parameters(fpm)
+    N = size(A, 1)
+    M0 = min(M0, N)
     backend = determine_parallel_backend(_normalize_parallel(parallel), comm)
 
     A_exec = _materialize_matrix(A)
@@ -122,6 +124,8 @@ function feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
     ishermitian(B) || throw(ArgumentError("B must be Hermitian positive definite for complex generalized problems"))
 
     params = _ensure_feast_parameters(fpm)
+    N = size(A, 1)
+    M0 = min(M0, N)
     backend = determine_parallel_backend(_normalize_parallel(parallel), comm)
 
     A_exec = _materialize_matrix(A)
@@ -165,11 +169,13 @@ function feast_general(A::AbstractMatrix, B::AbstractMatrix,
     size(A, 1) == size(A, 2) || throw(ArgumentError("A must be square"))
     size(B) == size(A) || throw(ArgumentError("B must match the size of A"))
 
-    params = _ensure_feast_parameters(fpm)
-    backend = determine_parallel_backend(_normalize_parallel(parallel), comm)
-
     A_complex = _ensure_complex_matrix(A)
     B_complex = _ensure_complex_matrix(B)
+    N = size(A_complex, 1)
+    M0 = min(M0, N)
+
+    params = _ensure_feast_parameters(fpm)
+    backend = determine_parallel_backend(_normalize_parallel(parallel), comm)
 
     real_type = promote_type(_real_component_type(eltype(A_complex)),
                              _real_component_type(eltype(B_complex)),
@@ -202,6 +208,7 @@ function feast_general(A::AbstractMatrix, center::Complex{T}, radius::T;
     else
         B = Matrix{eltype(A)}(I, N, N)
     end
+    M0 = min(M0, N)
     return feast_general(A, B, center, radius; M0=M0, fpm=fpm,
                          parallel=parallel, use_threads=use_threads, comm=comm)
 end

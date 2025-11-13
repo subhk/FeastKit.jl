@@ -3,8 +3,6 @@
 
 using Random
 using LinearAlgebra
-using Base: IdDict
-
 function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}}, 
                      work::Matrix{T}, workc::Matrix{Complex{T}},
                      Aq::Matrix{T}, Sq::Matrix{T}, fpm::Vector{Int},
@@ -18,16 +16,11 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     
     # Static variables (persistent across calls)
     @static if !@isdefined(_feast_srci_state)
-        global _feast_srci_state = IdDict{Any, Dict{Symbol, Any}}()
+        global _feast_srci_state = Dict{UInt64, Dict{Symbol, Any}}()
     end
-    
-    state = get!(() -> Dict{Symbol, Any}(), _feast_srci_state, work)
-    cleanup_state! = () -> begin
-        if haskey(_feast_srci_state, work)
-            delete!(_feast_srci_state, work)
-        end
-    end
-    
+    state_key = UInt64(objectid(work))
+    state = get!(() -> Dict{Symbol, Any}(), _feast_srci_state, state_key)
+    cleanup_state! = () -> pop!(_feast_srci_state, state_key, nothing)
     if ijob[] == -1  # Initialization
         # Initialize Feast parameters
         feastdefault!(fpm)
@@ -38,19 +31,16 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         
         if N <= 0
             info[] = Int(Feast_ERROR_N)
-            cleanup_state!()
             return
         end
         
         if M0 <= 0 || M0 > N
             info[] = Int(Feast_ERROR_M0)
-            cleanup_state!()
             return
         end
         
         if Emin >= Emax
             info[] = Int(Feast_ERROR_EMIN_EMAX)
-            cleanup_state!()
             return
         end
         
@@ -125,8 +115,13 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             state[:Zne] = copy(contour.Zne)
             state[:Wne] = copy(contour.Wne)
         end
-        state[:ne] = length(state[:Zne])
-        get!(state, :e, 1)
+        if !haskey(state, :ne)
+            state[:ne] = length(state[:Zne])
+        end
+        if !haskey(state, :e)
+            state[:e] = 1
+        end
+        current_e = state[:e]
         get!(state, :eps, feast_tolerance(fpm))
         get!(state, :maxloop, fpm[4])
         get!(state, :M, 0)
@@ -190,13 +185,12 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 if M == 0
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     ijob[] = Int(Feast_RCI_DONE)
-                    cleanup_state!()
                     return
                 end
                 
                 # Compute residuals
                 ijob[] = Int(Feast_RCI_MULT_A)
-                mode[] = 1  # Compute A*q
+                mode[] = M  # Number of eigenvectors requiring A*q
                 return
                 
             catch e
@@ -225,7 +219,6 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             feast_sort!(lambda, q, res, M)
             mode[] = M
             ijob[] = Int(Feast_RCI_DONE)
-            cleanup_state!()
             return
         else
             # Start new refinement loop
@@ -310,16 +303,12 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     # Similar structure to feast_srci! but for complex matrices
     
     @static if !@isdefined(_feast_hrci_state)
-        global _feast_hrci_state = IdDict{Any, Dict{Symbol, Any}}()
+        global _feast_hrci_state = Dict{UInt64, Dict{Symbol, Any}}()
     end
+    state_key = UInt64(objectid(fpm))
     
-    state = get!(() -> Dict{Symbol, Any}(), _feast_hrci_state, work)
-    cleanup_state! = () -> begin
-        if haskey(_feast_hrci_state, work)
-            delete!(_feast_hrci_state, work)
-        end
-    end
-    
+    state = get!(() -> Dict{Symbol, Any}(), _feast_hrci_state, state_key)
+    cleanup_state! = () -> pop!(_feast_hrci_state, state_key, nothing)
     if ijob[] == -1  # Initialization
         feastdefault!(fpm)
         empty!(state)
@@ -565,16 +554,12 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     # Feast RCI for general (non-Hermitian) eigenvalue problems
     # Uses circular contour in complex plane
     @static if !@isdefined(_feast_grci_state)
-        global _feast_grci_state = IdDict{Any, Dict{Symbol, Any}}()
+        global _feast_grci_state = Dict{UInt64, Dict{Symbol, Any}}()
     end
+    state_key = UInt64(objectid(fpm))
     
-    state = get!(() -> Dict{Symbol, Any}(), _feast_grci_state, work)
-    cleanup_state! = () -> begin
-        if haskey(_feast_grci_state, work)
-            delete!(_feast_grci_state, work)
-        end
-    end
-    
+    state = get!(() -> Dict{Symbol, Any}(), _feast_grci_state, state_key)
+    cleanup_state! = () -> pop!(_feast_grci_state, state_key, nothing)
     if ijob[] == -1  # Initialization
         feastdefault!(fpm)
         empty!(state)

@@ -34,7 +34,6 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
                    workspace.Aq, workspace.Sq, fpm, epsout, loop,
                    Emin, Emax, M0, workspace.lambda, workspace.q,
                    mode, workspace.res, info)
-
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             # Factorize Ze*B - A
             z = Ze[]

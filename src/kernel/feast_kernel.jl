@@ -23,8 +23,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     cleanup_state! = () -> pop!(_feast_srci_state, state_key, nothing)
 
     if ijob[] == -1  # Initialization
-        # NOTE: feastdefault! should have already been called by the caller (e.g., feast_sygv!)
-        # We should NOT call it again here as it may interfere with user-set parameters
+        feastdefault!(fpm)
 
         info[] = Int(Feast_SUCCESS)
 

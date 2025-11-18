@@ -195,6 +195,14 @@ function feast_general(A::AbstractMatrix, B::AbstractMatrix,
                                   backend, M0, params, comm, use_threads)
 end
 
+function feast_general(A::AbstractMatrix, B::AbstractMatrix,
+                       center::Complex{Tc}, radius::Tr; kwargs...) where {Tc<:Real, Tr<:Real}
+    T = promote_type(Tc, Tr)
+    center_promoted = Complex{T}(center)
+    radius_promoted = convert(T, radius)
+    return feast_general(A, B, center_promoted, radius_promoted; kwargs...)
+end
+
 function feast_general(A::AbstractMatrix, center::Complex{T}, radius::T;
                        M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing,
                        parallel::Union{Bool, Symbol} = false,
@@ -211,6 +219,13 @@ function feast_general(A::AbstractMatrix, center::Complex{T}, radius::T;
     M0 = min(M0, N)
     return feast_general(A, B, center, radius; M0=M0, fpm=fpm,
                          parallel=parallel, use_threads=use_threads, comm=comm)
+end
+
+function feast_general(A::AbstractMatrix, center::Complex{Tc}, radius::Tr; kwargs...) where {Tc<:Real, Tr<:Real}
+    T = promote_type(Tc, Tr)
+    center_promoted = Complex{T}(center)
+    radius_promoted = convert(T, radius)
+    return feast_general(A, center_promoted, radius_promoted; kwargs...)
 end
 
 function feast_banded(A::Matrix{T}, kla::Int, interval::Tuple{T,T};

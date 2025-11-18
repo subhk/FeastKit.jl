@@ -45,7 +45,7 @@ function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
     return true
 end
 
-function feast_sygv!(A::Matrix{T}, B::Matrix{T}, 
+function feast_sygv!(A::Matrix{T}, B::Matrix{T},
                      Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                      solver::Symbol = :direct,
                      solver_tol::Real = 0.0,
@@ -54,13 +54,19 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
     # Feast for dense real symmetric generalized eigenvalue problem
     # Solves: A*q = lambda*B*q where A is symmetric, B is symmetric positive definite
 
+    fpm[1] > 0 && println("[DEBUG] feast_sygv! called: N=$(size(A,1)), M0=$M0, Emin=$Emin, Emax=$Emax")
+
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
-    
+
+    # Apply defaults FIRST before using any fpm values
+    fpm[1] > 0 && println("[DEBUG] Calling feastdefault!")
+    feastdefault!(fpm)
+
     # Check inputs
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
-    
+
     solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
     solver_choice == :invalid &&
         throw(ArgumentError("Unsupported solver '$solver'. Use :direct or :gmres."))
@@ -92,12 +98,29 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
     LU_factorization = nothing
     temp_matrix = Matrix{Complex{T}}(undef, N, N)
 
+    # Safety counter to prevent infinite loops
+    max_rci_iterations = fpm[2] * (fpm[4] + 1) * 10  # num_points * (max_loops + 1) * safety_factor
+    rci_iteration_count = 0
+
     while true
+        rci_iteration_count += 1
+        if rci_iteration_count > max_rci_iterations
+            info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+            @warn "FEAST RCI loop exceeded maximum iterations ($max_rci_iterations). " *
+                  "This may indicate a bug in the algorithm or numerical issues. " *
+                  "Current ijob=$(ijob[]), loop=$(loop[])"
+            break
+        end
+
+        fpm[1] > 0 && println("[DEBUG] RCI iteration $rci_iteration_count, ijob=$(ijob[]), loop=$(loop[])")
+
         # Call Feast RCI kernel
+        fpm[1] > 0 && println("[DEBUG] Calling feast_srci!")
         feast_srci!(ijob, N, Ze, workspace.work, workspace.workc,
                    workspace.Aq, workspace.Sq, fpm, epsout, loop,
                    Emin, Emax, M0, workspace.lambda, workspace.q,
                    mode, workspace.res, info)
+        fpm[1] > 0 && println("[DEBUG] feast_srci! returned, ijob=$(ijob[]), info=$(info[])")
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             z = Ze[]
             temp_matrix .= z .* B .- A
@@ -176,10 +199,13 @@ function feast_heev!(A::Matrix{Complex{T}},
     
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
-    
+
+    # Apply defaults FIRST before using any fpm values
+    feastdefault!(fpm)
+
     # Check inputs
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
-    
+
     solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
     solver_choice == :invalid &&
         throw(ArgumentError("Unsupported solver '$solver'. Use :direct or :gmres."))
@@ -196,7 +222,7 @@ function feast_heev!(A::Matrix{Complex{T}},
 
     # Initialize workspace
     workspace = FeastWorkspaceComplex{T}(N, M0)
-    
+
     # Initialize variables for RCI
     ijob = Ref(-1)
     Ze = Ref(zero(Complex{T}))
@@ -204,12 +230,25 @@ function feast_heev!(A::Matrix{Complex{T}},
     loop = Ref(0)
     mode = Ref(0)
     info = Ref(0)
-    
+
     # LU factorization workspace
     LU_factorization = nothing
     temp_matrix = Matrix{Complex{T}}(undef, N, N)
 
+    # Safety counter to prevent infinite loops
+    max_rci_iterations = fpm[2] * (fpm[4] + 1) * 10  # num_points * (max_loops + 1) * safety_factor
+    rci_iteration_count = 0
+
     while true
+        rci_iteration_count += 1
+        if rci_iteration_count > max_rci_iterations
+            info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+            @warn "FEAST RCI loop exceeded maximum iterations ($max_rci_iterations). " *
+                  "This may indicate a bug in the algorithm or numerical issues. " *
+                  "Current ijob=$(ijob[]), loop=$(loop[])"
+            break
+        end
+
         # Call Feast RCI kernel
         feast_hrci!(ijob, N, Ze, workspace.work, workspace.workc,
                    workspace.zAq, workspace.zSq, fpm, epsout, loop,
@@ -218,7 +257,12 @@ function feast_heev!(A::Matrix{Complex{T}},
 
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             z = Ze[]
-            temp_matrix .= z .* I .- A
+            # Compute z*I - A (don't broadcast I, it's UniformScaling)
+            for i in 1:N
+                for j in 1:N
+                    temp_matrix[i,j] = (i == j ? z : zero(Complex{T})) - A[i,j]
+                end
+            end
 
             if use_direct
                 try
@@ -259,7 +303,7 @@ function feast_heev!(A::Matrix{Complex{T}},
         elseif ijob[] == Int(Feast_RCI_MULT_A)
             # Compute A * q for residual calculation
             M = mode[]
-            workspace.work[:, 1:M] .= real.(A * workspace.q[:, 1:M])
+            workspace.workc[:, 1:M] .= A * workspace.q[:, 1:M]
 
         elseif ijob[] == Int(Feast_RCI_DONE)
             break
@@ -292,7 +336,10 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
-    
+
+    # Apply defaults FIRST before using any fpm values
+    feastdefault!(fpm)
+
     # Check inputs
     check_feast_grci_input(N, M0, Emid, r, fpm)
     
@@ -331,7 +378,20 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
     LU_factorization = nothing
     temp_matrix = Matrix{Complex{T}}(undef, N, N)
 
+    # Safety counter to prevent infinite loops
+    max_rci_iterations = fpm[2] * (fpm[4] + 1) * 10  # num_points * (max_loops + 1) * safety_factor
+    rci_iteration_count = 0
+
     while true
+        rci_iteration_count += 1
+        if rci_iteration_count > max_rci_iterations
+            info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+            @warn "FEAST RCI loop exceeded maximum iterations ($max_rci_iterations). " *
+                  "This may indicate a bug in the algorithm or numerical issues. " *
+                  "Current ijob=$(ijob[]), loop=$(loop[])"
+            break
+        end
+
         # Call Feast RCI kernel for general problems
         feast_grci!(ijob, N, Ze, workspace.work, workspace.workc,
                    workspace.zAq, workspace.zSq, fpm, epsout, loop,
@@ -601,6 +661,9 @@ function feast_hegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
 
+    # Apply defaults FIRST before using any fpm values
+    feastdefault!(fpm)
+
     # Check inputs
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
 
@@ -635,7 +698,20 @@ function feast_hegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
     LU_factorization = nothing
     temp_matrix = Matrix{Complex{T}}(undef, N, N)
 
+    # Safety counter to prevent infinite loops
+    max_rci_iterations = fpm[2] * (fpm[4] + 1) * 10  # num_points * (max_loops + 1) * safety_factor
+    rci_iteration_count = 0
+
     while true
+        rci_iteration_count += 1
+        if rci_iteration_count > max_rci_iterations
+            info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+            @warn "FEAST RCI loop exceeded maximum iterations ($max_rci_iterations). " *
+                  "This may indicate a bug in the algorithm or numerical issues. " *
+                  "Current ijob=$(ijob[]), loop=$(loop[])"
+            break
+        end
+
         # Call Feast RCI kernel
         feast_hrci!(ijob, N, Ze, workspace.work, workspace.workc,
                    workspace.zAq, workspace.zSq, fpm, epsout, loop,

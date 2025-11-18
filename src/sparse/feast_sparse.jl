@@ -68,10 +68,13 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
-    
+
+    # Apply defaults FIRST before using any fpm values
+    feastdefault!(fpm)
+
     # Check inputs
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
-    
+
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
     solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
     solver_choice == :invalid &&
@@ -206,10 +209,13 @@ function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
     
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
-    
+
+    # Apply defaults FIRST before using any fpm values
+    feastdefault!(fpm)
+
     # Check inputs
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
-    
+
     solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
     solver_choice == :invalid &&
         throw(ArgumentError("Unsupported solver option '$solver'. Use :direct or :gmres."))
@@ -359,6 +365,9 @@ function feast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     size(B) == (N, N) || throw(ArgumentError("B must match the size of A"))
     ishermitian(A) || throw(ArgumentError("A must be Hermitian for feast_hcsrgv!"))
     ishermitian(B) || throw(ArgumentError("B must be Hermitian positive definite for feast_hcsrgv!"))
+
+    # Apply defaults FIRST before using any fpm values
+    feastdefault!(fpm)
 
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
 

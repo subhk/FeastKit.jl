@@ -14,6 +14,9 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
 
     N = size(A, 2)  # For banded storage, second dimension is the matrix size
 
+    # Apply defaults FIRST before using any fpm values
+    feastdefault!(fpm)
+
     # Check inputs
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
 
@@ -247,6 +250,10 @@ function feast_hbgv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}}, ka::Int, kb::
                      solver_restart::Int = 30) where T<:Real
     N = size(A, 2)
     size(B, 2) == N || throw(ArgumentError("B must have same dimensions as A"))
+
+    # Apply defaults FIRST before using any fpm values
+    feastdefault!(fpm)
+
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
     A_full = banded_to_full_hermitian(A, ka, N)
     B_full = banded_to_full_hermitian(B, kb, N)
@@ -466,6 +473,10 @@ function feast_gbgv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}}, ka::Int, kb::
                      solver_restart::Int = 30) where T<:Real
     N = size(A, 2)
     size(B, 2) == N || throw(ArgumentError("B must have same dimensions as A"))
+
+    # Apply defaults FIRST before using any fpm values
+    feastdefault!(fpm)
+
     check_feast_grci_input(N, M0, Emid, r, fpm)
     A_full = banded_to_full(A, ka, N)
     B_full = banded_to_full(B, kb, N)

@@ -507,10 +507,13 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
-    
+
+    # Apply defaults FIRST before using any fpm values
+    feastdefault!(fpm)
+
     # Check inputs
     check_feast_grci_input(N, M0, Emid, r, fpm)
-    
+
     solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
     solver_choice == :invalid &&
         throw(ArgumentError("Unsupported solver option '$solver'. Use :direct or :gmres."))

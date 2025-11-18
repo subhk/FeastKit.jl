@@ -68,7 +68,7 @@ function feastdefault!(fpm::Vector{Int})
     end
 
     # fpm[2]: Number of contour points (half-contour for symmetric/Hermitian)
-    if fpm[2] == FEAST_UNINITIALIZED
+    if fpm[2] == FEAST_UNINITIALIZED || fpm[2] == 0
         fpm[2] = 8  # Default half-contour
         if fpm[14] == 2
             fpm[2] = 3  # Stochastic estimate
@@ -81,14 +81,14 @@ function feastdefault!(fpm::Vector{Int})
     end
 
     # fpm[3]: Convergence tolerance (stopping criteria: 10^(-fpm[3]))
-    if fpm[3] == FEAST_UNINITIALIZED
+    if fpm[3] == FEAST_UNINITIALIZED || fpm[3] == 0
         fpm[3] = 12  # Default: 10^-12
     elseif fpm[3] < 0 || fpm[3] > 16
         throw(ArgumentError("Invalid fpm[3]=$(fpm[3]): must be between 0 and 16"))
     end
 
     # fpm[4]: Maximum number of refinement loops
-    if fpm[4] == FEAST_UNINITIALIZED
+    if fpm[4] == FEAST_UNINITIALIZED || fpm[4] == 0
         fpm[4] = 20  # Default
     elseif fpm[4] < 1
         throw(ArgumentError("Invalid fpm[4]=$(fpm[4]): must be positive"))

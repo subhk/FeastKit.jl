@@ -30,11 +30,14 @@ end
 function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:Real
     # Ensure fpm parameters are initialized
     # If fpm[2] is still -111 (uninitialized), apply defaults first
+    # NOTE: This should only happen if feastdefault! wasn't called by the caller
     if fpm[2] == FEAST_UNINITIALIZED || fpm[2] <= 0
+        @debug "feast_contour calling feastdefault! because fpm[2]=$(fpm[2])"
         feastdefault!(fpm)
     end
 
     ne = fpm[2]  # Number of integration points (half-contour)
+    fpm[1] > 0 && println("[DEBUG feast_contour] ne=$ne, fpm[16]=$(fpm[16])")
     fpm16 = get(fpm, 16, 0)  # Integration type: 0=Gauss, 1=Trapezoidal, 2=Zolotarev
     fpm18 = get(fpm, 18, 100)  # Ellipse ratio a/b * 100 (default: 100 = circle)
 

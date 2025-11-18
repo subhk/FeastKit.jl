@@ -54,14 +54,11 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
     # Feast for dense real symmetric generalized eigenvalue problem
     # Solves: A*q = lambda*B*q where A is symmetric, B is symmetric positive definite
 
-    fpm[1] > 0 && println("[DEBUG] feast_sygv! called: N=$(size(A,1)), M0=$M0, Emin=$Emin, Emax=$Emax")
-
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
 
     # Apply defaults FIRST before using any fpm values
-    fpm[1] > 0 && println("[DEBUG] Calling feastdefault!")
     feastdefault!(fpm)
 
     # Check inputs
@@ -112,15 +109,11 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
             break
         end
 
-        fpm[1] > 0 && println("[DEBUG] RCI iteration $rci_iteration_count, ijob=$(ijob[]), loop=$(loop[])")
-
         # Call Feast RCI kernel
-        fpm[1] > 0 && println("[DEBUG] Calling feast_srci!")
         feast_srci!(ijob, N, Ze, workspace.work, workspace.workc,
                    workspace.Aq, workspace.Sq, fpm, epsout, loop,
                    Emin, Emax, M0, workspace.lambda, workspace.q,
                    mode, workspace.res, info)
-        fpm[1] > 0 && println("[DEBUG] feast_srci! returned, ijob=$(ijob[]), info=$(info[])")
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             z = Ze[]
             temp_matrix .= z .* B .- A

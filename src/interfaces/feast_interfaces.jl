@@ -93,30 +93,21 @@ function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                use_threads::Bool = true,
                comm = nothing) where T<:Real
     # Main Feast interface for real symmetric generalized eigenvalue problems
-    println("[DEBUG feast] Called with N=$(size(A,1)), M0=$M0, interval=$interval")
     size(A, 1) == size(A, 2) || throw(ArgumentError("A must be square"))
     size(B) == size(A) || throw(ArgumentError("B must match the size of A"))
-    println("[DEBUG feast] Checking symmetry")
     issymmetric(A) || throw(ArgumentError("feast expects a symmetric real matrix A; use feast_general for non-symmetric problems"))
     issymmetric(B) || throw(ArgumentError("B must be symmetric positive definite for real generalized problems"))
 
-    println("[DEBUG feast] Validating interval")
     feast_validate_interval(A, interval)
 
-    println("[DEBUG feast] Ensuring feast parameters")
     params = _ensure_feast_parameters(fpm)
     N = size(A, 1)
     M0 = min(M0, N)
-    println("[DEBUG feast] Determining parallel backend")
     backend = determine_parallel_backend(_normalize_parallel(parallel), comm)
-    println("[DEBUG feast] Backend determined: $backend")
 
-    println("[DEBUG feast] Materializing matrices")
     A_exec = _materialize_matrix(A)
     B_exec = _materialize_matrix(B)
-    println("[DEBUG feast] Matrices materialized")
 
-    println("[DEBUG feast] Calling _execute_feast")
     return _execute_feast(A_exec, B_exec, interval, backend, M0, params, comm, use_threads)
 end
 

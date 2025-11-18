@@ -24,8 +24,9 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
     if ijob[] == -1  # Initialization
         fpm[1] > 0 && println("[DEBUG feast_srci!] Starting initialization")
-        feastdefault!(fpm)
-        fpm[1] > 0 && println("[DEBUG feast_srci!] feastdefault! completed")
+        # NOTE: feastdefault! should have already been called by the caller (e.g., feast_sygv!)
+        # We should NOT call it again here as it may interfere with user-set parameters
+        fpm[1] > 0 && println("[DEBUG feast_srci!] Skipping redundant feastdefault! call")
 
         info[] = Int(Feast_SUCCESS)
 
@@ -271,7 +272,8 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     cleanup_state! = () -> pop!(_feast_hrci_state, state_key, nothing)
 
     if ijob[] == -1
-        feastdefault!(fpm)
+        # NOTE: feastdefault! should have already been called by the caller
+        # We should NOT call it again here as it may interfere with user-set parameters
         empty!(state)
 
         info[] = Int(Feast_SUCCESS)
@@ -468,7 +470,8 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     cleanup_state! = () -> pop!(_feast_grci_state, state_key, nothing)
 
     if ijob[] == -1  # Initialization
-        feastdefault!(fpm)
+        # NOTE: feastdefault! should have already been called by the caller
+        # We should NOT call it again here as it may interfere with user-set parameters
 
         info[] = Int(Feast_SUCCESS)
 

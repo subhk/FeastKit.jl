@@ -44,9 +44,12 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             return
         end
 
+        fpm[1] > 0 && println("[DEBUG feast_srci!] Getting contour")
         contour = feast_get_custom_contour(fpm)
         if contour === nothing
+            fpm[1] > 0 && println("[DEBUG feast_srci!] Creating default contour for Emin=$Emin, Emax=$Emax, fpm[2]=$(fpm[2])")
             contour = feast_contour(Emin, Emax, fpm)
+            fpm[1] > 0 && println("[DEBUG feast_srci!] Contour created with $(length(contour.Zne)) points")
         end
 
         # Store state in fpm array
@@ -57,12 +60,14 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
         loop[] = 0
 
+        fpm[1] > 0 && println("[DEBUG feast_srci!] Filling workspace arrays")
         fill!(Aq, zero(T))
         fill!(Sq, zero(T))
         fill!(lambda, zero(T))
         fill!(q, zero(T))
         fill!(res, zero(T))
         fill!(workc, zero(Complex{T}))
+        fpm[1] > 0 && println("[DEBUG feast_srci!] Workspace arrays filled")
 
         if fpm[5] == 1
             for j in 1:M0

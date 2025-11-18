@@ -105,7 +105,7 @@ using Distributed
         B_real = Matrix{Float64}(I, n, n)
         fpm = zeros(Int, 64)
         feastinit!(fpm)
-        fpm[1] = 0
+        fpm[1] = 1  # Enable debug output
         result_real = feast(A_sym, B_real, (0.5, 3.5), M0=n, fpm=copy(fpm), parallel=:serial)
         @test result_real.info == 0
         @test result_real.M == n

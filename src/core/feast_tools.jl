@@ -37,7 +37,6 @@ function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:Real
     end
 
     ne = fpm[2]  # Number of integration points (half-contour)
-    fpm[1] > 0 && println("[DEBUG feast_contour] ne=$ne, fpm[16]=$(fpm[16])")
     fpm16 = get(fpm, 16, 0)  # Integration type: 0=Gauss, 1=Trapezoidal, 2=Zolotarev
     fpm18 = get(fpm, 18, 100)  # Ellipse ratio a/b * 100 (default: 100 = circle)
 

@@ -47,8 +47,7 @@ function feast_clear_custom_contour!(fpm::Vector{Int})
     return nothing
 end
 
-function with_custom_contour(fpm::Vector{Int}, contour::FeastContour{T},
-                             solver::Function) where T<:Real
+function with_custom_contour(solver::Function, fpm::Vector{Int}, contour::FeastContour{T}) where T<:Real
     old_flag = fpm[15]
     old_ne = fpm[2]
     old_contour = feast_get_custom_contour(fpm)
@@ -66,14 +65,14 @@ function with_custom_contour(fpm::Vector{Int}, contour::FeastContour{T},
     end
 end
 
-function with_custom_contour(fpm::Vector{Int},
+function with_custom_contour(solver::Function,
+                             fpm::Vector{Int},
                              Zne::AbstractVector{Complex{T1}},
-                             Wne::AbstractVector{Complex{T2}},
-                             solver::Function) where {T1<:Real, T2<:Real}
+                             Wne::AbstractVector{Complex{T2}}) where {T1<:Real, T2<:Real}
     base = promote_type(T1, T2)
     contour = FeastContour{base}(Vector{Complex{base}}(Zne),
                                  Vector{Complex{base}}(Wne))
-    return with_custom_contour(fpm, contour, solver)
+    return with_custom_contour(solver, fpm, contour)
 end
 
 function check_feast_srci_input(N::Int, M0::Int, Emin::T, Emax::T, 

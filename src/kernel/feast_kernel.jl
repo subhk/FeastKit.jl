@@ -368,14 +368,6 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         M_current = size(Q0, 2)  # Current subspace size (M0 initially, M during refinement)
         # Accumulate moments: Q0' * Y where Y is the solution
         temp = Q0' * workc[:, 1:M_current]
-        if e == 1 && loop[] == 0
-            println("DEBUG: First accumulation")
-            println("  Q0 norm: $(norm(Q0))")
-            println("  workc norm: $(norm(workc[:, 1:M_current]))")
-            println("  temp trace: $(tr(temp))")
-            println("  Wne[1]: $(Wne[1])")
-            println("  Zne[1]: $(Zne[1])")
-        end
         zAq[1:M_current, 1:M_current] .+= Wne[e] * temp
         zSq[1:M_current, 1:M_current] .+= Wne[e] * Zne[e] * temp
 
@@ -391,7 +383,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 Q0 = state[:Q0]
                 M_current = size(Q0, 2)  # Current subspace size
 
-                F = eigen(zAq[1:M_current, 1:M_current], zSq[1:M_current, 1:M_current])
+                F = eigen(zSq[1:M_current, 1:M_current], zAq[1:M_current, 1:M_current])
                 lambda_red = real.(F.values)
                 v_red = F.vectors
 

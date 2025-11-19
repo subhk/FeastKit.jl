@@ -25,6 +25,13 @@ function LinearAlgebra.mul!(y::AbstractVector{CT},
     return y
 end
 
+# For convenience, also define * operator
+function Base.:*(op::SparseShiftedOperator{TA,TB,CT}, x::AbstractVector{CT}) where {TA,TB,CT<:Complex}
+    y = similar(x)
+    mul!(y, op, x)
+    return y
+end
+
 @inline function _check_complex_symmetric(A::SparseMatrixCSC)
     issymmetric(A) || throw(ArgumentError("Matrix must be complex symmetric (equal to its transpose)"))
 end
@@ -51,7 +58,10 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                              atol=tol,
                              itmax=maxiter)
         dest[:, j] .= x_sol
-        stats.solved || return false
+        if !stats.solved
+            @warn "GMRES failed to converge" j ncols stats.niter stats.status norm(b)
+            return false
+        end
     end
 
     return true

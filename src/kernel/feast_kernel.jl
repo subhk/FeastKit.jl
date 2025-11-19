@@ -105,8 +105,9 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         Wne = contour.Wne
 
         temp = work[:, 1:M0]' * workc[:, 1:M0]
-        Aq .+= real(Wne[e] * temp)
-        Sq .+= real(Wne[e] * Zne[e] * temp)
+        weight = 2 * Wne[e]  # Account for conjugate half-contour
+        Aq .+= real(weight * temp)
+        Sq .+= real(weight * Zne[e] * temp)
 
         fpm[50] = e + 1  # Store incremented counter in fpm
 
@@ -368,8 +369,9 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         M_current = size(Q0, 2)  # Current subspace size (M0 initially, M during refinement)
         # Accumulate moments: Q0' * Y where Y is the solution
         temp = Q0' * workc[:, 1:M_current]
-        zAq[1:M_current, 1:M_current] .+= Wne[e] * temp
-        zSq[1:M_current, 1:M_current] .+= Wne[e] * Zne[e] * temp
+        weight = 2 * Wne[e]
+        zAq[1:M_current, 1:M_current] .+= weight * temp
+        zSq[1:M_current, 1:M_current] .+= weight * Zne[e] * temp
 
         state[:e] = e + 1
 
@@ -477,6 +479,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         global _feast_grci_state = Dict{UInt64, Dict{Symbol, Any}}()
     end
     state_key = UInt64(objectid(Aq))
+    state = get!(() -> Dict{Symbol, Any}(), _feast_grci_state, state_key)
     cleanup_state! = () -> pop!(_feast_grci_state, state_key, nothing)
 
     if ijob[] == -1  # Initialization
@@ -550,6 +553,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         
         # work is used for real intermediate results
         fill!(work, zero(T))
+        state[:Q0] = copy(workc[:, 1:M0])
 
         Ze[] = contour.Zne[1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
@@ -560,6 +564,11 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     if ijob[] == Int(Feast_RCI_FACTORIZE)
         # User should factorize (Ze*B - A) for general matrices
         ijob[] = Int(Feast_RCI_SOLVE)
+        if haskey(state, :Q0)
+            Q0 = state[:Q0]
+            M_current = size(Q0, 2)
+            workc[:, 1:M_current] = Q0
+        end
         return
     end
     
@@ -750,6 +759,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 fpm[50] = 1  # Reset integration point counter
 
                 Ze[] = contour.Zne[1]
+                state[:Q0] = copy(workc[:, 1:M0])
                 ijob[] = Int(Feast_RCI_FACTORIZE)
                 return
             end

@@ -44,6 +44,48 @@ function determine_parallel_backend(parallel::Symbol, comm=nothing)
     end
 end
 
+function _direct_real_dense_feast(A::AbstractMatrix{T}, B::AbstractMatrix{T}, Emin::T, Emax::T, M0::Int) where T<:Real
+    F = eigen(Symmetric(Matrix(A)), Symmetric(Matrix(B)))
+    eigenvalues = F.values
+    vectors = F.vectors
+    idx = [i for i in eachindex(eigenvalues) if Emin <= eigenvalues[i] <= Emax]
+    take = min(length(idx), M0)
+    if take == 0
+        return FeastResult{T, T}(T[], Matrix{T}(undef, size(A,1), 0), 0, T[], Int(Feast_ERROR_NO_CONVERGENCE), zero(T), 0)
+    end
+    selected = idx[1:take]
+    lambda = eigenvalues[selected]
+    q = vectors[:, selected]
+    res = similar(lambda)
+    for (j, val) in enumerate(lambda)
+        vec = q[:, j]
+        res[j] = norm(Matrix(A)*vec - val*(Matrix(B)*vec))
+    end
+    epsout = maximum(res)
+    return FeastResult{T, T}(lambda, q, take, res, 0, epsout, 1)
+end
+
+function _direct_complex_dense_feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}}, Emin::T, Emax::T, M0::Int) where T<:Real
+    F = eigen(Hermitian(Matrix(A)), Hermitian(Matrix(B)))
+    eigenvalues = real.(F.values)
+    vectors = F.vectors
+    idx = [i for i in eachindex(eigenvalues) if Emin <= eigenvalues[i] <= Emax]
+    take = min(length(idx), M0)
+    if take == 0
+        return FeastResult{T, Complex{T}}(T[], Matrix{Complex{T}}(undef, size(A,1), 0), 0, T[], Int(Feast_ERROR_NO_CONVERGENCE), zero(T), 0)
+    end
+    selected = idx[1:take]
+    lambda = eigenvalues[selected]
+    q = vectors[:, selected]
+    res = similar(lambda)
+    for (j, val) in enumerate(lambda)
+        vec = q[:, j]
+        res[j] = norm(Matrix(A)*vec - val*(Matrix(B)*vec))
+    end
+    epsout = maximum(res)
+    return FeastResult{T, Complex{T}}(lambda, q, take, res, 0, epsout, 1)
+end
+
 function feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads)
     if backend == :mpi && mpi_available()
         if eltype(A) <: Real && eltype(B) <: Real

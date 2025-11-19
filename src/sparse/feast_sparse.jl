@@ -88,7 +88,9 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
     tmpA = Vector{CT}(undef, N)
 
     op = SparseShiftedOperator(A, B, z, tmpB, tmpA)
+    residual = Vector{CT}(undef, N)
     fallback_solver = nothing
+    used_fallback = false
 
     for j in 1:ncols
         b = view(rhs, :, j)
@@ -99,13 +101,13 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                              rtol=tol,
                              atol=tol,
                              itmax=maxiter)
-        if stats.solved
-            dest[:, j] .= x_sol
-        else
-            @info "GMRES column failed" column=j residuals=stats.residuals
+        mul!(residual, op, x_sol)
+        @. residual -= b
+        res_norm = norm(residual)
+        b_norm = norm(b)
+        if !stats.solved || res_norm > tol * max(b_norm, one(b_norm))
+            @info "GMRES column failed" column=j residual=res_norm rhs_norm=b_norm
             if fallback_solver === nothing
-                # GMRES failed for this shift; build a sparse direct solver
-                # Convert to complex if needed
                 complex_B = eltype(B) <: Complex ? B : Complex{real(eltype(B))}.(B)
                 complex_A = eltype(A) <: Complex ? A : Complex{real(eltype(A))}.(A)
                 shifted_matrix = z .* complex_B .- complex_A
@@ -117,10 +119,13 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                 end
             end
             dest[:, j] .= fallback_solver \ b
+            used_fallback = true
+        else
+            dest[:, j] .= x_sol
         end
     end
 
-    return true
+    return !used_fallback
 end
 
 function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
@@ -226,9 +231,9 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             end
             
         elseif ijob[] == Int(Feast_RCI_MULT_A)
-            # Compute A * q for residual calculation
+            # Compute A * q for residual calculation (stored in complex workspace)
             M = mode[]
-            workspace.work[:, 1:M] .= A * workspace.q[:, 1:M]
+            workspace.workc[:, 1:M] .= A * workspace.q[:, 1:M]
 
         elseif ijob[] == Int(Feast_RCI_DONE)
             break
@@ -509,11 +514,13 @@ function feast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
                 end
             end
 
+        elseif ijob[] == Int(Feast_RCI_MULT_B)
+            M = mode[]
+            workspace.workc[:, 1:M] .= B * workspace.q[:, 1:M]
+
         elseif ijob[] == Int(Feast_RCI_MULT_A)
             M = mode[]
-            Aq = A * workspace.q[:, 1:M]
-            workspace.workc[:, 1:M] .= Aq
-            workspace.work[:, 1:M] .= real.(Aq)
+            workspace.workc[:, 1:M] .= A * workspace.q[:, 1:M]
 
         elseif ijob[] == Int(Feast_RCI_DONE)
             break

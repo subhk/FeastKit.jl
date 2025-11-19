@@ -58,10 +58,7 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                              atol=tol,
                              itmax=maxiter)
         dest[:, j] .= x_sol
-        if !stats.solved
-            @warn "GMRES failed to converge" j ncols stats.niter stats.status norm(b)
-            return false
-        end
+        stats.solved || return false
     end
 
     return true
@@ -148,18 +145,15 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                     break
                 end
             else
-                @info "FEAST iterative solve" Ze=Ze[] M0 norm_work=norm(workspace.work[:, 1:M0])
                 mul!(rhs_iterative, B, workspace.work[:, 1:M0])
                 success = solve_shifted_iterative!(workspace.workc[:, 1:M0],
                                                    rhs_iterative, A, B,
                                                    current_shift[], tol_value,
                                                    solver_maxiter, solver_restart)
                 if !success
-                    @warn "Iterative solve failed"
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     break
                 end
-                @info "Iterative solve succeeded"
             end
             
         elseif ijob[] == Int(Feast_RCI_MULT_A)

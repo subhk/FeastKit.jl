@@ -12,8 +12,15 @@ struct SparseShiftedOperator{TA<:AbstractMatrix,TB<:AbstractMatrix,CT<:Complex}
     tmpA::Vector{CT}
 end
 
+# Explicit constructor to ensure proper typing
+function SparseShiftedOperator(A::TA, B::TB, z::CT, tmpB::Vector{CT}, tmpA::Vector{CT}) where {TA<:AbstractMatrix, TB<:AbstractMatrix, CT<:Complex}
+    return SparseShiftedOperator{TA,TB,CT}(A, B, z, tmpB, tmpA)
+end
+
 Base.size(op::SparseShiftedOperator) = (length(op.tmpB), length(op.tmpB))
+Base.eltype(::Type{SparseShiftedOperator{TA,TB,CT}}) where {TA,TB,CT} = CT
 Base.eltype(op::SparseShiftedOperator{TA,TB,CT}) where {TA,TB,CT} = CT
+Base.eltype(op::SparseShiftedOperator) = eltype(op.tmpB)  # Fallback using field type
 
 function LinearAlgebra.mul!(y::AbstractVector{CT},
                             op::SparseShiftedOperator{TA,TB,CT},

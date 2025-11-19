@@ -86,6 +86,8 @@ Base.size(op::MatrixFreeOperator, dim::Int) = op.size[dim]
 LinearAlgebra.issymmetric(op::MatrixFreeOperator) = op.issymmetric
 LinearAlgebra.ishermitian(op::MatrixFreeOperator) = op.ishermitian
 LinearAlgebra.isposdef(op::MatrixFreeOperator) = op.isposdef
+Base.eltype(::MatrixFreeOperator{T}) where T = T
+Base.eltype(::Type{<:MatrixFreeOperator{T}}) where T = T
 
 # Matrix-vector multiplication
 function LinearAlgebra.mul!(y::AbstractVector, op::MatrixVecFunction, x::AbstractVector)

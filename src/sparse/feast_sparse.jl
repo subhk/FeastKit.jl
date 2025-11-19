@@ -588,9 +588,14 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
                     break
                 end
             end
-            
+
+        elseif ijob[] == Int(Feast_RCI_MULT_B)
+            # Compute B * q (for forming reduced matrix zBq = Q^H * B * Q)
+            M = mode[]
+            workspace.workc[:, 1:M] .= B * q_complex[:, 1:M]
+
         elseif ijob[] == Int(Feast_RCI_MULT_A)
-            # Compute A * q for residual calculation
+            # Compute A * q (for forming zAq or computing residuals)
             M = mode[]
             workspace.workc[:, 1:M] .= A * q_complex[:, 1:M]
 
@@ -600,7 +605,8 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
             # Unexpected ijob value - error out to prevent infinite loop
             error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
                   "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
-                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
+                  "MULT_B($(Int(Feast_RCI_MULT_B))), MULT_A($(Int(Feast_RCI_MULT_A))), " *
+                  "DONE($(Int(Feast_RCI_DONE)))")
         end
     end
 

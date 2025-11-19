@@ -706,15 +706,16 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 # Start new refinement loop
                 loop[] += 1
 
+                # Save current eigenvectors before clearing q
+                q_saved = copy(q[:, 1:M])
+
                 # Reset for next iteration
                 fill!(Aq, zero(Complex{T}))
                 fill!(Sq, zero(Complex{T}))
+                fill!(q, zero(Complex{T}))  # q will accumulate new subspace
 
-                # Fill q with zeros for accumulation
-                fill!(q, zero(Complex{T}))
-
-                # Use current eigenvectors as initial guess for workc
-                workc[:, 1:M] = q[:, 1:M]
+                # Use previous eigenvectors as initial guess for workc
+                workc[:, 1:M] = q_saved
                 # Fill rest with random vectors
                 for j in M+1:M0
                     for i in 1:N

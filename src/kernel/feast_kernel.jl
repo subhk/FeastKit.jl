@@ -309,26 +309,30 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
         if fpm[5] == 1
             for j in 1:M0
-                if norm(workc[:, j]) > 0
-                    workc[:, j] ./= norm(workc[:, j])
+                if norm(work[:, j]) > 0
+                    work[:, j] ./= norm(work[:, j])
                 else
                     for i in 1:N
-                        workc[i, j] = Complex{T}(randn(T), randn(T))
+                        work[i, j] = randn(T)
                     end
-                    workc[:, j] ./= norm(workc[:, j])
+                    work[:, j] ./= norm(work[:, j])
                 end
             end
         else
             for j in 1:M0
                 for i in 1:N
-                    workc[i, j] = Complex{T}(randn(T), randn(T))
+                    work[i, j] = randn(T)
                 end
-                workc[:, j] ./= norm(workc[:, j])
+                work[:, j] ./= norm(work[:, j])
             end
         end
 
-        # Save initial guess in work for use in moment accumulation
-        work[:, 1:M0] .= real.(workc[:, 1:M0])
+        # Create complex version for solving
+        for j in 1:M0
+            for i in 1:N
+                workc[i, j] = Complex{T}(work[i, j], zero(T))
+            end
+        end
 
         Ze[] = state[:Zne][1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
@@ -357,7 +361,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         Zne = state[:Zne]
         Wne = state[:Wne]
 
-        # Use saved initial guess from work (real part) and current solution in workc
+        # Use saved initial guess from work (real) and current solution in workc (complex)
         temp = work[:, 1:M0]' * workc[:, 1:M0]
         zAq .+= Wne[e] * temp
         zSq .+= Wne[e] * Zne[e] * temp
@@ -380,7 +384,13 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                     if feast_inside_contour(lambda_red[i], Emin, Emax)
                         M += 1
                         lambda[M] = lambda_red[i]
-                        q[:, M] = workc[:, 1:M0] * v_red[:, i]
+                        # Reconstruct eigenvectors using work (real initial guess)
+                        for k in 1:N
+                            q[k, M] = zero(Complex{T})
+                            for j in 1:M0
+                                q[k, M] += work[k, j] * v_red[j, i]
+                            end
+                        end
                     end
                 end
 
@@ -424,6 +434,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             loop[] += 1
             fill!(zAq, zero(Complex{T}))
             fill!(zSq, zero(Complex{T}))
+            work[:, 1:M] = real.(q[:, 1:M])
             workc[:, 1:M] = q[:, 1:M]
             Ze[] = state[:Zne][1]
             ijob[] = Int(Feast_RCI_FACTORIZE)

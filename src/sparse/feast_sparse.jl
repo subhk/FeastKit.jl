@@ -4,6 +4,27 @@
 using SparseArrays
 using LinearAlgebra
 
+# Shifted operator for (z*B - A)
+struct SparseShiftedOperator{CT<:Complex,TA<:AbstractMatrix,TB<:AbstractMatrix}
+    A::TA
+    B::TB
+    z::CT
+    tmpB::Vector{CT}
+    tmpA::Vector{CT}
+end
+
+# Define required interface for Krylov.jl
+Base.size(op::SparseShiftedOperator) = size(op.A)
+Base.eltype(::SparseShiftedOperator{CT}) where {CT} = CT
+
+function LinearAlgebra.mul!(y::AbstractVector, op::SparseShiftedOperator, x::AbstractVector)
+    mul!(op.tmpB, op.B, x)
+    @. op.tmpB = op.z * op.tmpB
+    mul!(op.tmpA, op.A, x)
+    @. y = op.tmpB - op.tmpA
+    return y
+end
+
 @inline function _check_complex_symmetric(A::SparseMatrixCSC)
     issymmetric(A) || throw(ArgumentError("Matrix must be complex symmetric (equal to its transpose)"))
 end
@@ -21,18 +42,8 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
     tmpB = Vector{CT}(undef, N)
     tmpA = Vector{CT}(undef, N)
 
-    # Define the shifted matvec operation: y = (z*B - A)*x
-    function shifted_matvec!(y::Vector{CT}, x::Vector{CT})
-        mul!(tmpB, B, x)
-        @. tmpB = z * tmpB
-        mul!(tmpA, A, x)
-        @. y = tmpB - tmpA
-        return y
-    end
-
-    # Create Krylov LinearOperator
-    # Use fully qualified name to avoid conflict with FeastKit.LinearOperator
-    op = Krylov.LinearOperator{CT}(N, N, false, false, shifted_matvec!)
+    # Create the shifted operator
+    op = SparseShiftedOperator(A, B, z, tmpB, tmpA)
 
     for j in 1:ncols
         b = view(rhs, :, j)
@@ -974,7 +985,7 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                 # Solve using GMRES (Krylov.jl if available, otherwise fallback)
                 if FEAST_KRYLOV_AVAILABLE[]
                     # Create linear operator for Krylov.jl
-                    # Use fully qualified name to avoid conflict with FeastKit.LinearOperator
+                    # Use Krylov.LinearOperator to avoid conflict with FeastKit.LinearOperator
                     op = Krylov.LinearOperator{Complex{T}}(N, N, false, false, shifted_matvec!)
                     
                     sol, stats = gmres(op, b; 

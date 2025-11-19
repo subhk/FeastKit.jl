@@ -67,6 +67,7 @@ using FastGaussQuadrature
 const FEAST_KRYLOV_AVAILABLE = Ref(false)
 try
     @eval using Krylov: gmres
+    @eval import Krylov
     FEAST_KRYLOV_AVAILABLE[] = true
 catch e
     @debug "Krylov.jl not available; iterative FEAST variants requiring GMRES will be disabled." exception=e

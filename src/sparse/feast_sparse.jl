@@ -29,12 +29,17 @@ end
     issymmetric(A) || throw(ArgumentError("Matrix must be complex symmetric (equal to its transpose)"))
 end
 
+@inline function _convert_sparse_complex(A::SparseMatrixCSC{T,Int}, ::Type{Complex{T}}) where T<:Real
+    return SparseMatrixCSC{Complex{T},Int}(A.m, A.n, copy(A.colptr), copy(A.rowval),
+                                           Complex{T}.(A.nzval))
+end
+
 function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                                   rhs::AbstractMatrix{CT},
-                                  A::SparseMatrixCSC,
-                                  B::SparseMatrixCSC,
+                                  A::SparseMatrixCSC{T,Int},
+                                  B::SparseMatrixCSC{T,Int},
                                   z::CT, tol::TR,
-                                  maxiter::Int, gmres_restart::Int) where {CT<:Complex, TR<:Real}
+                                  maxiter::Int, gmres_restart::Int) where {T<:Real, CT<:Complex, TR<:Real}
     N = size(A, 1)
     ncols = size(rhs, 2)
 
@@ -44,6 +49,7 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
 
     # Create the shifted operator
     op = SparseShiftedOperator(A, B, z, tmpB, tmpA)
+    fallback_solver = nothing
 
     for j in 1:ncols
         b = view(rhs, :, j)
@@ -54,8 +60,22 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                              rtol=tol,
                              atol=tol,
                              itmax=maxiter)
-        dest[:, j] .= x_sol
-        stats.solved || return false
+        if stats.solved
+            dest[:, j] .= x_sol
+        else
+            if fallback_solver === nothing
+                # GMRES failed for this shift; build a sparse direct solver
+                complex_B = _convert_sparse_complex(B, CT)
+                complex_A = _convert_sparse_complex(A, CT)
+                shifted_matrix = z .* complex_B .- complex_A
+                try
+                    fallback_solver = lu(shifted_matrix)
+                catch
+                    return false
+                end
+            end
+            dest[:, j] .= fallback_solver \ b
+        end
     end
 
     return true

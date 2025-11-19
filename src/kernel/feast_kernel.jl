@@ -266,6 +266,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     if ijob[] == -1
         feastdefault!(fpm)
         empty!(state)
+        state[:cleanup_state] = cleanup_state!
 
         info[] = Int(Feast_SUCCESS)
         if N <= 0

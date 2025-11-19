@@ -13,6 +13,7 @@ struct SparseShiftedOperator{TA<:AbstractMatrix,TB<:AbstractMatrix,CT<:Complex}
 end
 
 Base.size(op::SparseShiftedOperator) = (length(op.tmpB), length(op.tmpB))
+Base.eltype(op::SparseShiftedOperator{TA,TB,CT}) where {TA,TB,CT} = CT
 
 function LinearAlgebra.mul!(y::AbstractVector{CT},
                             op::SparseShiftedOperator{TA,TB,CT},

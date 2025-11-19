@@ -309,30 +309,26 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
         if fpm[5] == 1
             for j in 1:M0
-                if norm(work[:, j]) > 0
-                    work[:, j] ./= norm(work[:, j])
+                if norm(workc[:, j]) > 0
+                    workc[:, j] ./= norm(workc[:, j])
                 else
                     for i in 1:N
-                        work[i, j] = randn(T)
+                        workc[i, j] = Complex{T}(randn(T), randn(T))
                     end
-                    work[:, j] ./= norm(work[:, j])
+                    workc[:, j] ./= norm(workc[:, j])
                 end
             end
         else
             for j in 1:M0
                 for i in 1:N
-                    work[i, j] = randn(T)
+                    workc[i, j] = Complex{T}(randn(T), randn(T))
                 end
-                work[:, j] ./= norm(work[:, j])
+                workc[:, j] ./= norm(workc[:, j])
             end
         end
 
-        # Create complex version for solving
-        for j in 1:M0
-            for i in 1:N
-                workc[i, j] = Complex{T}(work[i, j], zero(T))
-            end
-        end
+        # Save initial subspace for moment accumulation
+        state[:Q0] = copy(workc[:, 1:M0])
 
         Ze[] = state[:Zne][1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
@@ -341,6 +337,12 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
     if ijob[] == Int(Feast_RCI_FACTORIZE)
         ijob[] = Int(Feast_RCI_SOLVE)
+        # Restore initial subspace for RHS before external solver acts
+        if haskey(state, :Q0)
+            Q0 = state[:Q0]
+            M_current = size(Q0, 2)
+            workc[:, 1:M_current] = Q0
+        end
         return
     end
 
@@ -361,10 +363,21 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         Zne = state[:Zne]
         Wne = state[:Wne]
 
-        # Use saved initial guess from work (real) and current solution in workc (complex)
-        temp = work[:, 1:M0]' * workc[:, 1:M0]
-        zAq .+= Wne[e] * temp
-        zSq .+= Wne[e] * Zne[e] * temp
+        # Use saved initial subspace Q0 and current solution in workc
+        Q0 = state[:Q0]
+        M_current = size(Q0, 2)  # Current subspace size (M0 initially, M during refinement)
+        # Accumulate moments: Q0' * Y where Y is the solution
+        temp = Q0' * workc[:, 1:M_current]
+        if e == 1 && loop[] == 0
+            println("DEBUG: First accumulation")
+            println("  Q0 norm: $(norm(Q0))")
+            println("  workc norm: $(norm(workc[:, 1:M_current]))")
+            println("  temp trace: $(tr(temp))")
+            println("  Wne[1]: $(Wne[1])")
+            println("  Zne[1]: $(Zne[1])")
+        end
+        zAq[1:M_current, 1:M_current] .+= Wne[e] * temp
+        zSq[1:M_current, 1:M_current] .+= Wne[e] * Zne[e] * temp
 
         state[:e] = e + 1
 
@@ -375,22 +388,19 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         else
             state[:e] = 1
             try
-                F = eigen(zAq[1:M0, 1:M0], zSq[1:M0, 1:M0])
+                Q0 = state[:Q0]
+                M_current = size(Q0, 2)  # Current subspace size
+
+                F = eigen(zAq[1:M_current, 1:M_current], zSq[1:M_current, 1:M_current])
                 lambda_red = real.(F.values)
                 v_red = F.vectors
 
                 M = 0
-                for i in 1:M0
+                for i in 1:M_current
                     if feast_inside_contour(lambda_red[i], Emin, Emax)
                         M += 1
                         lambda[M] = lambda_red[i]
-                        # Reconstruct eigenvectors using work (real initial guess)
-                        for k in 1:N
-                            q[k, M] = zero(Complex{T})
-                            for j in 1:M0
-                                q[k, M] += work[k, j] * v_red[j, i]
-                            end
-                        end
+                        q[:, M] = Q0 * v_red[:, i]
                     end
                 end
 
@@ -434,8 +444,9 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             loop[] += 1
             fill!(zAq, zero(Complex{T}))
             fill!(zSq, zero(Complex{T}))
-            work[:, 1:M] = real.(q[:, 1:M])
             workc[:, 1:M] = q[:, 1:M]
+            # Update Q0 for next refinement iteration
+            state[:Q0] = copy(q[:, 1:M])
             Ze[] = state[:Zne][1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return

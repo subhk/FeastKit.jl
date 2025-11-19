@@ -1,11 +1,29 @@
 # Feast utility and contour generation tools
 # Translated from feast_tools.f90
 
+using Random
+
 # Helper functions for integration nodes
 function gauss_legendre_point(n::Int, k::Int)
     # Use FastGaussQuadrature directly for robust Gauss–Legendre nodes/weights
     x, w = FastGaussQuadrature.gausslegendre(n)
     return x[k], w[k]
+end
+
+@inline function _feast_seeded_subspace!(work::AbstractMatrix{T}) where T<:Real
+    N, M0 = size(work)
+    seed = hash((N, M0))
+    rng = MersenneTwister(seed)
+    for j in 1:M0
+        randn!(rng, view(work, :, j))
+        col_norm = norm(view(work, :, j))
+        if col_norm == 0
+            work[1, j] = one(T)
+            col_norm = one(T)
+        end
+        work[:, j] ./= col_norm
+    end
+    return work
 end
 
 function zolotarev_point(n::Int, k::Int)

@@ -4,7 +4,7 @@
 using SparseArrays
 using LinearAlgebra
 
-# Shifted operator for (z*B - A)
+# Shifted operator for GMRES solves
 struct SparseShiftedOperator{CT<:Complex,TA<:AbstractMatrix,TB<:AbstractMatrix}
     A::TA
     B::TB
@@ -13,15 +13,55 @@ struct SparseShiftedOperator{CT<:Complex,TA<:AbstractMatrix,TB<:AbstractMatrix}
     tmpA::Vector{CT}
 end
 
-# Define required interface for Krylov.jl
 Base.size(op::SparseShiftedOperator) = size(op.A)
 Base.eltype(::SparseShiftedOperator{CT}) where {CT} = CT
 
-function LinearAlgebra.mul!(y::AbstractVector, op::SparseShiftedOperator, x::AbstractVector)
+function LinearAlgebra.mul!(y::AbstractVector{CT}, op::SparseShiftedOperator{CT}, x::AbstractVector{CT}) where CT
     mul!(op.tmpB, op.B, x)
     @. op.tmpB = op.z * op.tmpB
     mul!(op.tmpA, op.A, x)
     @. y = op.tmpB - op.tmpA
+    return y
+end
+
+# Matrix-free shifted operator for (z*B - A) with matvec functions
+struct MatrixFreeShiftedOperator{T<:Real,CT<:Complex}
+    N::Int
+    z::CT
+    A_matvec!::Function
+    B_matvec!::Function
+    temp_real::Vector{T}
+    temp_imag::Vector{T}
+end
+
+Base.size(op::MatrixFreeShiftedOperator) = (op.N, op.N)
+Base.eltype(::MatrixFreeShiftedOperator{T,CT}) where {T,CT} = CT
+
+function LinearAlgebra.mul!(y::AbstractVector{CT}, op::MatrixFreeShiftedOperator{T,CT}, x::AbstractVector{CT}) where {T<:Real,CT<:Complex}
+    # Split complex vectors into real and imaginary parts
+    x_real = real.(x)
+    x_imag = imag.(x)
+
+    # Compute A*x_real and A*x_imag
+    op.A_matvec!(op.temp_real, x_real)
+    y_A_real = copy(op.temp_real)
+    op.A_matvec!(op.temp_imag, x_imag)
+    y_A_imag = copy(op.temp_imag)
+
+    # Compute B*x_real and B*x_imag
+    op.B_matvec!(op.temp_real, x_real)
+    y_B_real = copy(op.temp_real)
+    op.B_matvec!(op.temp_imag, x_imag)
+    y_B_imag = copy(op.temp_imag)
+
+    # y = z*B*x - A*x = (z_real + i*z_imag)*(B*x) - A*x
+    z_real = real(op.z)
+    z_imag = imag(op.z)
+
+    y_real = z_real * y_B_real - z_imag * y_B_imag - y_A_real
+    y_imag = z_real * y_B_imag + z_imag * y_B_real - y_A_imag
+
+    y .= complex.(y_real, y_imag)
     return y
 end
 
@@ -36,10 +76,10 @@ end
 
 function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                                   rhs::AbstractMatrix{CT},
-                                  A::SparseMatrixCSC{T,Int},
-                                  B::SparseMatrixCSC{T,Int},
+                                  A::SparseMatrixCSC,
+                                  B::SparseMatrixCSC,
                                   z::CT, tol::TR,
-                                  maxiter::Int, gmres_restart::Int) where {T<:Real, CT<:Complex, TR<:Real}
+                                  maxiter::Int, gmres_restart::Int) where {CT<:Complex, TR<:Real}
     N = size(A, 1)
     ncols = size(rhs, 2)
 
@@ -47,7 +87,6 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
     tmpB = Vector{CT}(undef, N)
     tmpA = Vector{CT}(undef, N)
 
-    # Create the shifted operator
     op = SparseShiftedOperator(A, B, z, tmpB, tmpA)
     fallback_solver = nothing
 
@@ -63,14 +102,17 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
         if stats.solved
             dest[:, j] .= x_sol
         else
+            @info "GMRES column failed" column=j residuals=stats.residuals
             if fallback_solver === nothing
                 # GMRES failed for this shift; build a sparse direct solver
-                complex_B = _convert_sparse_complex(B, CT)
-                complex_A = _convert_sparse_complex(A, CT)
+                # Convert to complex if needed
+                complex_B = eltype(B) <: Complex ? B : Complex{real(eltype(B))}.(B)
+                complex_A = eltype(A) <: Complex ? A : Complex{real(eltype(A))}.(A)
                 shifted_matrix = z .* complex_B .- complex_A
                 try
                     fallback_solver = lu(shifted_matrix)
-                catch
+                catch err
+                    @warn "Sparse fallback factorization failed for shift $z" exception=err
                     return false
                 end
             end
@@ -100,7 +142,6 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     # Check inputs
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
 
-    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
     solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
     solver_choice == :invalid &&
         throw(ArgumentError("Unsupported solver option '$solver'. Use :direct or :gmres."))
@@ -108,9 +149,20 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     solver_is_iterative = !solver_is_direct
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
         throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Please ensure it is in the environment."))
+    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+    if solver_is_iterative && solver_tol > 0
+        solver_digits = max(1, ceil(Int, -log10(solver_tol)))
+        relaxed_digits = max(2, solver_digits - 2)
+        fpm[3] = min(fpm[3], relaxed_digits)
+        fpm[5] = max(fpm[5], 1)
+    end
 
     # Initialize workspace
     workspace = FeastWorkspaceReal{T}(N, M0)
+    if fpm[5] == 0
+        _feast_seeded_subspace!(workspace.work)
+        fpm[5] = 1
+    end
     
     # Initialize variables for RCI
     ijob = Ref(-1)
@@ -960,53 +1012,23 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
             for j in 1:M0
                 B_matvec!(view(rhs, :, j), view(workspace.work, :, j))
             end
-            
-            # Define linear operator for (Ze*B - A)
-            # For complex shift z, we need to handle real and imaginary parts separately
-            function shifted_matvec!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
-                # Split complex vectors into real and imaginary parts
-                x_real = real.(x)
-                x_imag = imag.(x)
-                
-                # Temporary storage
-                temp_real = zeros(T, N)
-                temp_imag = zeros(T, N)
-                
-                # Compute A*x_real and A*x_imag
-                A_matvec!(temp_real, x_real)
-                A_matvec!(temp_imag, x_imag)
-                y_A_real = temp_real
-                y_A_imag = temp_imag
-                
-                # Compute B*x_real and B*x_imag  
-                B_matvec!(temp_real, x_real)
-                B_matvec!(temp_imag, x_imag)
-                y_B_real = temp_real
-                y_B_imag = temp_imag
-                
-                # y = z*B*x - A*x = (z_real + i*z_imag)*(B*x) - A*x
-                z_real = real(z)
-                z_imag = imag(z)
-                
-                y_real = z_real * y_B_real - z_imag * y_B_imag - y_A_real
-                y_imag = z_real * y_B_imag + z_imag * y_B_real - y_A_imag
-                
-                y .= complex.(y_real, y_imag)
-            end
-            
+
+            # Create matrix-free operator for (z*B - A)
+            temp_real = zeros(T, N)
+            temp_imag = zeros(T, N)
+            op = MatrixFreeShiftedOperator(N, z, A_matvec!, B_matvec!, temp_real, temp_imag)
+
             # Solve each system using GMRES
             for j in 1:M0
                 # Convert RHS to complex
                 b = complex.(rhs[:, j])
-                
+
                 # Initial guess (zero)
                 x0 = zeros(Complex{T}, N)
-                
+
                 # Solve using GMRES (Krylov.jl if available, otherwise fallback)
                 if FEAST_KRYLOV_AVAILABLE[]
-                    # Create linear operator for Krylov.jl
-                    # Use Krylov.LinearOperator to avoid conflict with FeastKit.LinearOperator
-                    op = Krylov.LinearOperator{Complex{T}}(N, N, false, false, shifted_matvec!)
+                    # Use GMRES with our properly-typed operator
                     
                     sol, stats = gmres(op, b; 
                                      x=x0,

@@ -82,6 +82,10 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
 
     # Initialize workspace
     workspace = FeastWorkspaceReal{T}(N, M0)
+    if fpm[5] == 0
+        _feast_seeded_subspace!(workspace.work)
+        fpm[5] = 1
+    end
     
     # Initialize variables for RCI
     ijob = Ref(-1)

@@ -327,6 +327,9 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             end
         end
 
+        # Save initial guess in work for use in moment accumulation
+        work[:, 1:M0] .= real.(workc[:, 1:M0])
+
         Ze[] = state[:Zne][1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
         return
@@ -354,7 +357,8 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         Zne = state[:Zne]
         Wne = state[:Wne]
 
-        temp = workc[:, 1:M0]' * workc[:, 1:M0]
+        # Use saved initial guess from work (real part) and current solution in workc
+        temp = work[:, 1:M0]' * workc[:, 1:M0]
         zAq .+= Wne[e] * temp
         zSq .+= Wne[e] * Zne[e] * temp
 

@@ -31,8 +31,8 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
     end
 
     # Create Krylov LinearOperator
-    # LinearOperator(size_m, size_n, symmetric, hermitian, prod!)
-    op = LinearOperator{CT}(N, N, false, false, shifted_matvec!)
+    # Use fully qualified name to avoid conflict with FeastKit.LinearOperator
+    op = Krylov.LinearOperator{CT}(N, N, false, false, shifted_matvec!)
 
     for j in 1:ncols
         b = view(rhs, :, j)
@@ -974,7 +974,8 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                 # Solve using GMRES (Krylov.jl if available, otherwise fallback)
                 if FEAST_KRYLOV_AVAILABLE[]
                     # Create linear operator for Krylov.jl
-                    op = LinearOperator{Complex{T}}(N, N, false, false, shifted_matvec!)
+                    # Use fully qualified name to avoid conflict with FeastKit.LinearOperator
+                    op = Krylov.LinearOperator{Complex{T}}(N, N, false, false, shifted_matvec!)
                     
                     sol, stats = gmres(op, b; 
                                      x=x0,

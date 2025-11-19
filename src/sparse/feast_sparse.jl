@@ -131,9 +131,9 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             
         elseif ijob[] == Int(Feast_RCI_SOLVE)
             # Solve sparse linear systems: (Ze*B - A) * X = B * workspace.work
+            rhs = B * workspace.work[:, 1:M0]
+
             if solver_is_direct
-                rhs = B * workspace.work[:, 1:M0]
-                
                 try
                     # Solve with sparse LU factors
                     workspace.workc[:, 1:M0] .= sparse_solver \ rhs
@@ -142,7 +142,7 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                     break
                 end
             else
-                mul!(rhs_iterative, B, workspace.work[:, 1:M0])
+                rhs_iterative .= rhs
                 success = solve_shifted_iterative!(workspace.workc[:, 1:M0],
                                                    rhs_iterative, A, B,
                                                    current_shift[], tol_value,

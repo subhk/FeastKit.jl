@@ -4,41 +4,6 @@
 using SparseArrays
 using LinearAlgebra
 
-struct SparseShiftedOperator{TA<:AbstractMatrix,TB<:AbstractMatrix,CT<:Complex}
-    A::TA
-    B::TB
-    z::CT
-    tmpB::Vector{CT}
-    tmpA::Vector{CT}
-end
-
-# Explicit constructor to ensure proper typing
-function SparseShiftedOperator(A::TA, B::TB, z::CT, tmpB::Vector{CT}, tmpA::Vector{CT}) where {TA<:AbstractMatrix, TB<:AbstractMatrix, CT<:Complex}
-    return SparseShiftedOperator{TA,TB,CT}(A, B, z, tmpB, tmpA)
-end
-
-Base.size(op::SparseShiftedOperator) = (length(op.tmpB), length(op.tmpB))
-Base.eltype(::Type{SparseShiftedOperator{TA,TB,CT}}) where {TA,TB,CT} = CT
-Base.eltype(op::SparseShiftedOperator{TA,TB,CT}) where {TA,TB,CT} = CT
-Base.eltype(op::SparseShiftedOperator) = eltype(op.tmpB)  # Fallback using field type
-
-function LinearAlgebra.mul!(y::AbstractVector{CT},
-                            op::SparseShiftedOperator{TA,TB,CT},
-                            x::AbstractVector{CT}) where {TA,TB,CT<:Complex}
-    mul!(op.tmpB, op.B, x)
-    @. op.tmpB = op.z * op.tmpB
-    mul!(op.tmpA, op.A, x)
-    @. y = op.tmpB - op.tmpA
-    return y
-end
-
-# For convenience, also define * operator
-function Base.:*(op::SparseShiftedOperator{TA,TB,CT}, x::AbstractVector{CT}) where {TA,TB,CT<:Complex}
-    y = similar(x)
-    mul!(y, op, x)
-    return y
-end
-
 @inline function _check_complex_symmetric(A::SparseMatrixCSC)
     issymmetric(A) || throw(ArgumentError("Matrix must be complex symmetric (equal to its transpose)"))
 end
@@ -50,10 +15,24 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                                   z::CT, tol::TR,
                                   maxiter::Int, gmres_restart::Int) where {CT<:Complex, TR<:Real}
     N = size(A, 1)
+    ncols = size(rhs, 2)
+
+    # Create temporary vectors for the operator
     tmpB = Vector{CT}(undef, N)
     tmpA = Vector{CT}(undef, N)
-    op = SparseShiftedOperator(A, B, z, tmpB, tmpA)
-    ncols = size(rhs, 2)
+
+    # Define the shifted matvec operation: y = (z*B - A)*x
+    function shifted_matvec!(y::Vector{CT}, x::Vector{CT})
+        mul!(tmpB, B, x)
+        @. tmpB = z * tmpB
+        mul!(tmpA, A, x)
+        @. y = tmpB - tmpA
+        return y
+    end
+
+    # Create Krylov LinearOperator
+    # LinearOperator(size_m, size_n, symmetric, hermitian, prod!)
+    op = LinearOperator{CT}(N, N, false, false, shifted_matvec!)
 
     for j in 1:ncols
         b = view(rhs, :, j)

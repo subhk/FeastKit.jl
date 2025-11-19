@@ -325,9 +325,9 @@ using Distributed
 
     @testset "Sparse complex iterative" begin
         n = 6
-        diag = ComplexF64[2.5, 3.0, 3.4, 3.9, 4.4, 4.9]
+        main_diag = ComplexF64[2.5, 3.0, 3.4, 3.9, 4.4, 4.9]
         off = ComplexF64[0.2 + 0.05im, 0.1 - 0.02im, 0.15 + 0.03im, 0.05 - 0.01im, 0.08 + 0.02im]
-        A = spdiagm(-1 => conj.(off), 0 => diag, 1 => off)
+        A = spdiagm(-1 => conj.(off), 0 => main_diag, 1 => off)
 
         fpm = zeros(Int, 64)
         feastinit!(fpm)

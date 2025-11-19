@@ -31,10 +31,10 @@ end
 
 function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                                   rhs::AbstractMatrix{CT},
-                                  A::SparseMatrixCSC,
-                                  B::SparseMatrixCSC,
+                                  A::SparseMatrixCSC{CT,Int},
+                                  B::SparseMatrixCSC{CT,Int},
                                   z::CT, tol::TR,
-                                  maxiter::Int, restart::Int) where {CT<:Complex, TR<:Real}
+                                  maxiter::Int, gmres_restart::Int) where {CT<:Complex, TR<:Real}
     N = size(A, 1)
     tmpB = Vector{CT}(undef, N)
     tmpA = Vector{CT}(undef, N)
@@ -44,9 +44,10 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
     for j in 1:ncols
         b = view(rhs, :, j)
         x_initial = zeros(CT, N)
-        x_sol, stats = gmres(op, b, x_initial;
+        x_sol, stats = gmres(op, b;
+                             x=x_initial,
                              restart=true,
-                             memory=max(restart, 2),
+                             memory=max(gmres_restart, 2),
                              rtol=tol,
                              atol=tol,
                              itmax=maxiter)

@@ -43,9 +43,7 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
 
     for j in 1:ncols
         b = view(rhs, :, j)
-        x_initial = zeros(CT, N)
         x_sol, stats = gmres(op, b;
-                             x=x_initial,
                              restart=true,
                              memory=max(gmres_restart, 2),
                              rtol=tol,

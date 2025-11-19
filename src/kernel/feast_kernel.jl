@@ -546,7 +546,8 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     end
     
     if ijob[] == Int(Feast_RCI_SOLVE)
-        # User has solved linear systems
+        # User has solved linear systems (Ze*B - A)*workc = rhs
+        # For general eigenvalue problems: accumulate subspace Q (not moment matrices!)
         e = fpm[50]  # Get current integration point from fpm
         ne = fpm[51]  # Get total integration points from fpm
 
@@ -558,11 +559,14 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         Zne = contour.Zne
         Wne = contour.Wne
 
-        # Update reduced matrices Aq and Sq (complex accumulation)
-        # Compute: Aq += w_e * workc^H * workc, Sq += w_e * z_e * workc^H * workc
-        temp = workc[:, 1:M0]' * workc[:, 1:M0]  # M0 x M0 matrix
-        Aq .+= Wne[e] * temp
-        Sq .+= Wne[e] * Zne[e] * temp
+        # CORRECT ALGORITHM FOR GENERAL PROBLEMS:
+        # Accumulate subspace vectors Q (not moment matrices!)
+        # Q += Wne[e] * workc
+        for j in 1:M0
+            for i in 1:N
+                q[i, j] += Wne[e] * workc[i, j]
+            end
+        end
 
         # Move to next integration point
         fpm[50] = e + 1  # Store incremented counter in fpm
@@ -573,33 +577,53 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return
         else
-            # All integration points processed, solve reduced eigenvalue problem
+            # All integration points processed
+            # Now form reduced matrices zBq = Q^H * B * Q and zAq = Q^H * A * Q
             fpm[50] = 1  # Reset for next refinement loop
-            
-            # Solve generalized eigenvalue problem: Aq*v = lambda*Sq*v (complex case)
+
+            # First, ask user to compute work = B*Q
+            # (For standard problems B=I, this is just Q)
+            fill!(work, zero(T))  # Will receive real(B*Q)
+            ijob[] = Int(Feast_RCI_MULT_B)
+            mode[] = M0  # Process all M0 columns
+            return
+        end
+    end
+
+    if ijob[] == Int(Feast_RCI_MULT_B)
+        # User has computed workc = B*Q
+        # Form zBq = Q^H * (B*Q) = Q^H * workc
+        Sq[1:M0, 1:M0] = q[:, 1:M0]' * workc[:, 1:M0]
+
+        # Now ask user to compute work = A*Q
+        fill!(workc, zero(Complex{T}))  # Will receive A*Q
+        ijob[] = Int(Feast_RCI_MULT_A)
+        mode[] = M0  # Process all M0 columns (for forming zAq)
+        fpm[54] = 1  # Flag: computing A*Q for projection (not residual)
+        return
+    end
+
+    if ijob[] == Int(Feast_RCI_MULT_A)
+        # Check if this is for projection or residual
+        if get(fpm, 54, 0) == 1
+            # Computing zAq = Q^H * A * Q
+            Aq[1:M0, 1:M0] = q[:, 1:M0]' * workc[:, 1:M0]
+            fpm[54] = 0  # Clear flag
+
+            # Now solve reduced eigenvalue problem: zAq*v = lambda*zBq*v
             try
                 F = eigen(Aq[1:M0, 1:M0], Sq[1:M0, 1:M0])
-                lambda_red = F.values  # Keep complex eigenvalues
+                lambda_red = F.values  # Complex eigenvalues
                 v_red = F.vectors
-                
-                # Count eigenvalues in circular region |lambda - Emid| <= r
+
+                # Count eigenvalues inside circular region |lambda - Emid| <= r
                 M = 0
+                indices = Int[]
                 for i in 1:M0
                     if feast_inside_gcontour(lambda_red[i], Emid, r)
                         M += 1
+                        push!(indices, i)
                         lambda[M] = lambda_red[i]
-                        # Compute eigenvectors: q = workc * v_red (complex matrix-vector product)
-                        for k in 1:N
-                            q[k, M] = zero(Complex{T})
-                            for j in 1:M0
-                                q[k, M] += workc[k, j] * v_red[j, i]
-                            end
-                        end
-                        # Normalize the computed eigenvector
-                        q_norm = norm(q[:, M])
-                        if q_norm > 0
-                            q[:, M] ./= q_norm
-                        end
                     end
                 end
 
@@ -614,9 +638,30 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                     return
                 end
 
-                # Compute residuals - need A*q
+                # Compute eigenvectors: q_new = Q * v_red
+                # Store in workc temporarily
+                fill!(workc, zero(Complex{T}))
+                for (idx, i) in enumerate(indices)
+                    for k in 1:N
+                        for j in 1:M0
+                            workc[k, idx] += q[k, j] * v_red[j, i]
+                        end
+                    end
+                    # Normalize
+                    q_norm = norm(view(workc, :, idx))
+                    if q_norm > 0
+                        workc[:, idx] ./= q_norm
+                    end
+                end
+
+                # Copy back to q
+                q[:, 1:M] = workc[:, 1:M]
+
+                # Now compute residuals: need A*q_new
+                fill!(workc, zero(Complex{T}))  # Will receive A*q
                 ijob[] = Int(Feast_RCI_MULT_A)
-                mode[] = M  # Number of eigenvectors to multiply
+                mode[] = M  # Number of eigenvectors
+                fpm[54] = 0  # Flag: computing for residual
                 return
 
             catch e
@@ -626,73 +671,81 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 cleanup_state!()
                 return
             end
-        end
-    end
-
-    if ijob[] == Int(Feast_RCI_MULT_A)
-        # User has computed A*q, now compute residuals
-        M = fpm[52]  # Get M from fpm
-
-        for j in 1:M
-            # Residual: r = A*q - lambda*B*q
-            # For general eigenvalue problems, we assume B = I for simplicity
-            # workc contains A*q (complex result from user computation)
-            residual = zeros(Complex{T}, N)
-            for i in 1:N
-                # workc[i,j] contains (A*q)[i] for j-th eigenvector
-                residual[i] = workc[i, j] - lambda[j] * q[i, j]
-            end
-            res[j] = norm(residual)
-        end
-
-        # Check convergence
-        epsout[] = maximum(res[1:M])
-
-        eps_tolerance = feast_tolerance(fpm)
-        maxloop = fpm[4]
-
-        if epsout[] <= eps_tolerance || loop[] >= maxloop
-            # Converged or maximum iterations reached
-            # Sort by eigenvalue magnitude (for complex eigenvalues)
-            feast_sort_general!(lambda, q, res, M)
-            mode[] = M
-            ijob[] = Int(Feast_RCI_DONE)
-            fpm[53] = 0  # Clear initialization flag
-            cleanup_state!()
-            return
         else
-            # Start new refinement loop
-            loop[] += 1
+            # Computing residuals
+            M = fpm[52]  # Get M from fpm
 
-            # Reset for next iteration
-            fill!(Aq, zero(Complex{T}))
-            fill!(Sq, zero(Complex{T}))
-
-            # Use current eigenvectors as initial guess
-            workc[:, 1:M] = q[:, 1:M]
-
-            # Get contour for next refinement loop
-            contour = feast_get_custom_contour(fpm)
-            if contour === nothing
-                contour = feast_gcontour(Emid, r, fpm)
+            for j in 1:M
+                # Residual: r = A*q - lambda*B*q
+                # For standard problems (B=I): r = A*q - lambda*q
+                # workc contains A*q (complex result from user computation)
+                residual = zeros(Complex{T}, N)
+                for i in 1:N
+                    # workc[i,j] contains (A*q)[i] for j-th eigenvector
+                    residual[i] = workc[i, j] - lambda[j] * q[i, j]
+                end
+                res[j] = norm(residual)
             end
-            fpm[50] = 1  # Reset integration point counter
 
-            Ze[] = contour.Zne[1]
-            ijob[] = Int(Feast_RCI_FACTORIZE)
-            return
+            # Check convergence
+            epsout[] = maximum(res[1:M])
+
+            eps_tolerance = feast_tolerance(fpm)
+            maxloop = fpm[4]
+
+            if epsout[] <= eps_tolerance || loop[] >= maxloop
+                # Converged or maximum iterations reached
+                # Sort by eigenvalue magnitude (for complex eigenvalues)
+                feast_sort_general!(lambda, q, res, M)
+                mode[] = M
+                ijob[] = Int(Feast_RCI_DONE)
+                fpm[53] = 0  # Clear initialization flag
+                cleanup_state!()
+                return
+            else
+                # Start new refinement loop
+                loop[] += 1
+
+                # Reset for next iteration
+                fill!(Aq, zero(Complex{T}))
+                fill!(Sq, zero(Complex{T}))
+
+                # Fill q with zeros for accumulation
+                fill!(q, zero(Complex{T}))
+
+                # Use current eigenvectors as initial guess for workc
+                workc[:, 1:M] = q[:, 1:M]
+                # Fill rest with random vectors
+                for j in M+1:M0
+                    for i in 1:N
+                        workc[i, j] = Complex{T}(randn(T), randn(T))
+                    end
+                    workc[:, j] ./= norm(workc[:, j])
+                end
+
+                # Get contour for next refinement loop
+                contour = feast_get_custom_contour(fpm)
+                if contour === nothing
+                    contour = feast_gcontour(Emid, r, fpm)
+                end
+                fpm[50] = 1  # Reset integration point counter
+
+                Ze[] = contour.Zne[1]
+                ijob[] = Int(Feast_RCI_FACTORIZE)
+                return
+            end
         end
     end
 
     # Safety check: if we reach here, ijob has an invalid value
     if ijob[] != -1 && ijob[] != Int(Feast_RCI_FACTORIZE) &&
        ijob[] != Int(Feast_RCI_SOLVE) && ijob[] != Int(Feast_RCI_MULT_A) &&
-       ijob[] != Int(Feast_RCI_DONE)
+       ijob[] != Int(Feast_RCI_MULT_B) && ijob[] != Int(Feast_RCI_DONE)
         cleanup_state!()
-       error("FEAST RCI kernel (General): Invalid job code ijob=$(ijob[]). " *
-             "Expected: -1 (init), $(Int(Feast_RCI_FACTORIZE)) (factorize), " *
-             "$(Int(Feast_RCI_SOLVE)) (solve), $(Int(Feast_RCI_MULT_A)) (mult_a), " *
-             "or $(Int(Feast_RCI_DONE)) (done)")
+        error("FEAST RCI kernel (General): Invalid job code ijob=$(ijob[]). " *
+              "Expected: -1 (init), $(Int(Feast_RCI_FACTORIZE)) (factorize), " *
+              "$(Int(Feast_RCI_SOLVE)) (solve), $(Int(Feast_RCI_MULT_B)) (mult_b), " *
+              "$(Int(Feast_RCI_MULT_A)) (mult_a), or $(Int(Feast_RCI_DONE)) (done)")
     end
 end
 

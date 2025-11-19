@@ -31,8 +31,8 @@ end
 
 function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                                   rhs::AbstractMatrix{CT},
-                                  A::SparseMatrixCSC{CT,Int},
-                                  B::SparseMatrixCSC{CT,Int},
+                                  A::SparseMatrixCSC,
+                                  B::SparseMatrixCSC,
                                   z::CT, tol::TR,
                                   maxiter::Int, gmres_restart::Int) where {CT<:Complex, TR<:Real}
     N = size(A, 1)

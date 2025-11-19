@@ -122,6 +122,8 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 lambda_red = real.(F.values)
                 v_red = real.(F.vectors)
 
+                @info "Reduced eigenvalue problem" Emin Emax lambda_red loop=fpm[50]
+
                 M = 0
                 for i in 1:M0
                     if feast_inside_contour(lambda_red[i], Emin, Emax)
@@ -132,6 +134,8 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 end
 
                 fpm[52] = M  # Store M in fpm
+
+                @info "Found M=$M eigenvalues in contour"
 
                 if M == 0
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)

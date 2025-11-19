@@ -32,8 +32,7 @@ function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
     for j in 1:size(rhs, 2)
         b = view(rhs, :, j)
         x0 = zeros(Complex{T}, N)
-        x_sol, stats = gmres(op, b;
-                             x=x0,
+        x_sol, stats = gmres(op, b, x0;
                              restart=true,
                              memory=max(restart, 2),
                              rtol=tol,

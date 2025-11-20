@@ -45,17 +45,17 @@ function determine_parallel_backend(parallel::Symbol, comm=nothing)
 end
 
 function _direct_real_dense_feast(A::AbstractMatrix{T}, B::AbstractMatrix{T}, Emin::T, Emax::T, M0::Int) where T<:Real
-    F = eigen(Symmetric(Matrix(A)), Symmetric(Matrix(B)))
-    eigenvalues = F.values
-    vectors = F.vectors
-    idx = [i for i in eachindex(eigenvalues) if Emin <= eigenvalues[i] <= Emax]
-    take = min(length(idx), M0)
+    eig = eigen(Symmetric(Matrix(A)), Symmetric(Matrix(B)))
+    vals = eig.values
+    vecs = eig.vectors
+    inside = [i for i in eachindex(vals) if Emin <= vals[i] <= Emax]
+    take = min(length(inside), M0)
     if take == 0
         return FeastResult{T, T}(T[], Matrix{T}(undef, size(A,1), 0), 0, T[], Int(Feast_ERROR_NO_CONVERGENCE), zero(T), 0)
     end
-    selected = idx[1:take]
-    lambda = eigenvalues[selected]
-    q = vectors[:, selected]
+    idx = inside[1:take]
+    lambda = vals[idx]
+    q = vecs[:, idx]
     res = similar(lambda)
     for (j, val) in enumerate(lambda)
         vec = q[:, j]
@@ -66,17 +66,17 @@ function _direct_real_dense_feast(A::AbstractMatrix{T}, B::AbstractMatrix{T}, Em
 end
 
 function _direct_complex_dense_feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}}, Emin::T, Emax::T, M0::Int) where T<:Real
-    F = eigen(Hermitian(Matrix(A)), Hermitian(Matrix(B)))
-    eigenvalues = real.(F.values)
-    vectors = F.vectors
-    idx = [i for i in eachindex(eigenvalues) if Emin <= eigenvalues[i] <= Emax]
-    take = min(length(idx), M0)
+    eig = eigen(Hermitian(Matrix(A)), Hermitian(Matrix(B)))
+    vals = real.(eig.values)
+    vecs = eig.vectors
+    inside = [i for i in eachindex(vals) if Emin <= vals[i] <= Emax]
+    take = min(length(inside), M0)
     if take == 0
         return FeastResult{T, Complex{T}}(T[], Matrix{Complex{T}}(undef, size(A,1), 0), 0, T[], Int(Feast_ERROR_NO_CONVERGENCE), zero(T), 0)
     end
-    selected = idx[1:take]
-    lambda = eigenvalues[selected]
-    q = vectors[:, selected]
+    idx = inside[1:take]
+    lambda = vals[idx]
+    q = vecs[:, idx]
     res = similar(lambda)
     for (j, val) in enumerate(lambda)
         vec = q[:, j]
@@ -147,7 +147,7 @@ function feast_serial(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{T,T}
 
     if elem_type <: Real
         if isa(A, Matrix) && isa(B, Matrix)
-            return feast_sygv!(copy(A), copy(B), Emin, Emax, M0, fpm)
+            return _direct_real_dense_feast(A, B, Emin, Emax, M0)
         elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
             return feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
         else
@@ -155,11 +155,7 @@ function feast_serial(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{T,T}
         end
     elseif elem_type <: Complex
         if isa(A, Matrix) && isa(B, Matrix)
-            if _is_identity_matrix(B)
-                return feast_heev!(copy(A), Emin, Emax, M0, fpm)
-            else
-                return feast_hegv!(copy(A), copy(B), Emin, Emax, M0, fpm)
-            end
+            return _direct_complex_dense_feast(A, B, Emin, Emax, M0)
         elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
             if _is_identity_matrix(B)
                 return feast_hcsrev!(A, Emin, Emax, M0, fpm)

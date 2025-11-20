@@ -26,6 +26,25 @@ end
     return work
 end
 
+@inline function _feast_seeded_subspace_complex!(work::AbstractMatrix{Complex{T}}) where T<:Real
+    N, M0 = size(work)
+    M0 == 0 && return work
+    seed = hash((N, M0, :complex))
+    rng = MersenneTwister(seed)
+    for j in 1:M0
+        for i in 1:N
+            work[i, j] = Complex{T}(randn(rng, T), randn(rng, T))
+        end
+        col_norm = norm(view(work, :, j))
+        if col_norm == 0
+            work[1, j] = Complex{T}(one(T), zero(T))
+            col_norm = one(T)
+        end
+        work[:, j] ./= col_norm
+    end
+    return work
+end
+
 function zolotarev_point(n::Int, k::Int)
     # Zolotarev rational approximation points and weights
     # Optimal for elliptical domains - simplified implementation

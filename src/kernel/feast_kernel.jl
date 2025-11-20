@@ -1,7 +1,3 @@
-@static if !@isdefined(_feast_srci_state)
-    global _feast_srci_state = Dict{UInt64, Dict{Symbol, Any}}()
-end
-
 function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                      work::Matrix{T}, workc::Matrix{Complex{T}},
                      Aq::Matrix{T}, Sq::Matrix{T}, fpm::Vector{Int},
@@ -9,18 +5,13 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                      Emin::T, Emax::T, M0::Int,
                      lambda::Vector{T}, q::Matrix{T}, mode::Ref{Int},
                      res::Vector{T}, info::Ref{Int}) where T<:Real
-
-    # Use fpm slots 50-64 for internal state storage
-    # fpm[50] = current integration point e
-    # fpm[51] = total integration points ne
-    # fpm[52] = stored M value
-    # fpm[53] = initialization flag (1 = initialized, 0 = not initialized)
-
     @static if !@isdefined(_feast_srci_state)
         global _feast_srci_state = Dict{UInt64, Dict{Symbol, Any}}()
     end
     state_key = UInt64(objectid(Aq))
+    state = get!(() -> Dict{Symbol, Any}(), _feast_srci_state, state_key)
     cleanup_state! = () -> pop!(_feast_srci_state, state_key, nothing)
+    state[:cleanup_state] = cleanup_state!
 
     if ijob[] == -1  # Initialization
         feastdefault!(fpm)
@@ -46,6 +37,11 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         if contour === nothing
             contour = feast_contour(Emin, Emax, fpm)
         end
+
+        state[:Zne] = copy(contour.Zne)
+        state[:Wne] = copy(contour.Wne)
+        state[:ne] = length(contour.Zne)
+        state[:e] = 1
 
         # Store state in fpm array
         fpm[50] = 1
@@ -82,6 +78,8 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             end
         end
 
+        state[:Q0] = copy(work[:, 1:M0])
+
         Ze[] = contour.Zne[1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
         return
@@ -89,27 +87,42 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
     if ijob[] == Int(Feast_RCI_FACTORIZE)
         ijob[] = Int(Feast_RCI_SOLVE)
+        Q0 = get(state, :Q0, nothing)
+        if Q0 === nothing
+            Q0 = copy(work[:, 1:M0])
+            state[:Q0] = Q0
+        end
+        work[:, 1:size(Q0, 2)] = Q0
         return
     end
 
     if ijob[] == Int(Feast_RCI_SOLVE)
-        e = fpm[50]  # Get current integration point from fpm
-        ne = fpm[51]  # Get total integration points from fpm
-
-        # Get contour points
-        contour = feast_get_custom_contour(fpm)
-        if contour === nothing
-            contour = feast_contour(Emin, Emax, fpm)
+        if !haskey(state, :Zne)
+            contour = feast_get_custom_contour(fpm)
+            if contour === nothing
+                contour = feast_contour(Emin, Emax, fpm)
+            end
+            state[:Zne] = copy(contour.Zne)
+            state[:Wne] = copy(contour.Wne)
+            state[:ne] = length(contour.Zne)
+            state[:e] = 1
         end
-        Zne = contour.Zne
-        Wne = contour.Wne
+        Zne = state[:Zne]
+        Wne = state[:Wne]
+        e = get(state, :e, 1)
+        ne = state[:ne]
 
-        temp = work[:, 1:M0]' * workc[:, 1:M0]
+        Q0 = get!(state, :Q0) do
+            copy(work[:, 1:M0])
+        end
+        M_current = size(Q0, 2)
+        temp = Q0' * workc[:, 1:M_current]
         weight = 2 * Wne[e]  # Account for conjugate half-contour
-        Aq .+= real(weight * temp)
-        Sq .+= real(weight * Zne[e] * temp)
+        Aq[1:M_current, 1:M_current] .+= real(weight * temp)
+        Sq[1:M_current, 1:M_current] .+= real(weight * Zne[e] * temp)
 
         fpm[50] = e + 1  # Store incremented counter in fpm
+        state[:e] = e + 1
 
         if e < ne
             Ze[] = Zne[e+1]
@@ -117,28 +130,30 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             return
         else
             fpm[50] = 1  # Reset for next refinement loop
+            state[:e] = 1
 
             try
-                F = eigen(Aq[1:M0, 1:M0], Sq[1:M0, 1:M0])
+                F = eigen(Aq[1:M_current, 1:M_current], Sq[1:M_current, 1:M_current])
                 lambda_red = real.(F.values)
                 v_red = real.(F.vectors)
 
                 M = 0
-                for i in 1:M0
+                for i in 1:M_current
                     if feast_inside_contour(lambda_red[i], Emin, Emax)
                         M += 1
                         lambda[M] = lambda_red[i]
-                        q[:, M] = work[:, 1:M0] * v_red[:, i]
+                        q[:, M] = Q0 * v_red[:, i]
                     end
                 end
 
                 fpm[52] = M  # Store M in fpm
+                state[:M] = M
 
                 if M == 0
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     ijob[] = Int(Feast_RCI_DONE)
                     fpm[53] = 0  # Clear initialization flag
-                    cleanup_state!()
+                    state[:cleanup_state]()
                     return
                 end
 
@@ -149,7 +164,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 info[] = Int(Feast_ERROR_LAPACK)
                 ijob[] = Int(Feast_RCI_DONE)
                 fpm[53] = 0  # Clear initialization flag
-                cleanup_state!()
+                state[:cleanup_state]()
                 return
             end
         end
@@ -171,7 +186,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             mode[] = M
             ijob[] = Int(Feast_RCI_DONE)
             fpm[53] = 0  # Clear initialization flag
-            cleanup_state!()
+            state[:cleanup_state]()
             return
         else
             loop[] += 1
@@ -184,8 +199,13 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             if contour === nothing
                 contour = feast_contour(Emin, Emax, fpm)
             end
+            state[:Zne] = copy(contour.Zne)
+            state[:Wne] = copy(contour.Wne)
+            state[:ne] = length(contour.Zne)
+            state[:e] = 1
             fpm[50] = 1  # Reset integration point counter
 
+            state[:Q0] = copy(work[:, 1:M0])
             Ze[] = contour.Zne[1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return
@@ -193,11 +213,11 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     end
 
     if ijob[] == Int(Feast_RCI_DONE)
-        cleanup_state!()
+        state[:cleanup_state]()
         return
     end
 
-    cleanup_state!()
+    state[:cleanup_state]()
     error("FEAST RCI kernel: Invalid job code ijob=$(ijob[]). " *
           "Expected: -1 (init), $(Int(Feast_RCI_FACTORIZE)) (factorize), " *
           "$(Int(Feast_RCI_SOLVE)) (solve), $(Int(Feast_RCI_MULT_A)) (mult_a), " *
@@ -338,12 +358,13 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
     if ijob[] == Int(Feast_RCI_FACTORIZE)
         ijob[] = Int(Feast_RCI_SOLVE)
-        # Restore initial subspace for RHS before external solver acts
-        if haskey(state, :Q0)
-            Q0 = state[:Q0]
-            M_current = size(Q0, 2)
-            workc[:, 1:M_current] = Q0
+        Q0 = get(state, :Q0, nothing)
+        if Q0 === nothing
+            Q0 = copy(workc[:, 1:M0])
+            state[:Q0] = Q0
         end
+        M_current = size(Q0, 2)
+        workc[:, 1:M_current] = Q0
         return
     end
 
@@ -365,7 +386,9 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         Wne = state[:Wne]
 
         # Use saved initial subspace Q0 and current solution in workc
-        Q0 = state[:Q0]
+        Q0 = get!(state, :Q0) do
+            copy(workc[:, 1:M0])
+        end
         M_current = size(Q0, 2)  # Current subspace size (M0 initially, M during refinement)
         # Accumulate moments: Q0' * Y where Y is the solution
         temp = Q0' * workc[:, 1:M_current]
@@ -382,7 +405,9 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         else
             state[:e] = 1
             try
-                Q0 = state[:Q0]
+                Q0 = get!(state, :Q0) do
+                    copy(workc[:, 1:M0])
+                end
                 M_current = size(Q0, 2)  # Current subspace size
 
                 F = eigen(zSq[1:M_current, 1:M_current], zAq[1:M_current, 1:M_current])
@@ -564,11 +589,13 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     if ijob[] == Int(Feast_RCI_FACTORIZE)
         # User should factorize (Ze*B - A) for general matrices
         ijob[] = Int(Feast_RCI_SOLVE)
-        if haskey(state, :Q0)
-            Q0 = state[:Q0]
-            M_current = size(Q0, 2)
-            workc[:, 1:M_current] = Q0
+        Q0 = get(state, :Q0, nothing)
+        if Q0 === nothing
+            Q0 = copy(workc[:, 1:M0])
+            state[:Q0] = Q0
         end
+        M_current = size(Q0, 2)
+        workc[:, 1:M_current] = Q0
         return
     end
     

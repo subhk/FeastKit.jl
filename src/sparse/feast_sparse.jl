@@ -3,6 +3,7 @@
 
 using SparseArrays
 using LinearAlgebra
+using Random
 
 # Shifted operator for GMRES solves
 struct SparseShiftedOperator{CT<:Complex,TA<:AbstractMatrix,TB<:AbstractMatrix}
@@ -24,44 +25,58 @@ function LinearAlgebra.mul!(y::AbstractVector{CT}, op::SparseShiftedOperator{CT}
     return y
 end
 
-# Matrix-free shifted operator for (z*B - A) with matvec functions
-struct MatrixFreeShiftedOperator{T<:Real,CT<:Complex}
+mutable struct MatrixFreeShiftedOperator{T<:Real,CT<:Complex}
     N::Int
     z::CT
     A_matvec!::Function
     B_matvec!::Function
-    temp_real::Vector{T}
-    temp_imag::Vector{T}
+    tmp_real::Vector{T}
+    tmp_imag::Vector{T}
+    result_real::Vector{T}
+    result_imag::Vector{T}
+    x_real::Vector{T}
+    x_imag::Vector{T}
 end
+
+MatrixFreeShiftedOperator(N::Int, z::CT, A_matvec!::Function,
+                          B_matvec!::Function, ::Type{T}) where {T<:Real,CT<:Complex} =
+    MatrixFreeShiftedOperator{T,CT}(N, z, A_matvec!, B_matvec!,
+                                    zeros(T, N), zeros(T, N),
+                                    zeros(T, N), zeros(T, N),
+                                    zeros(T, N), zeros(T, N))
 
 Base.size(op::MatrixFreeShiftedOperator) = (op.N, op.N)
 Base.eltype(::MatrixFreeShiftedOperator{T,CT}) where {T,CT} = CT
 
 function LinearAlgebra.mul!(y::AbstractVector{CT}, op::MatrixFreeShiftedOperator{T,CT}, x::AbstractVector{CT}) where {T<:Real,CT<:Complex}
-    # Split complex vectors into real and imaginary parts
-    x_real = real.(x)
-    x_imag = imag.(x)
+    @inbounds for i in 1:op.N
+        xi = x[i]
+        op.x_real[i] = real(xi)
+        op.x_imag[i] = imag(xi)
+    end
 
-    # Compute A*x_real and A*x_imag
-    op.A_matvec!(op.temp_real, x_real)
-    y_A_real = copy(op.temp_real)
-    op.A_matvec!(op.temp_imag, x_imag)
-    y_A_imag = copy(op.temp_imag)
+    op.B_matvec!(op.tmp_real, op.x_real)
+    op.B_matvec!(op.tmp_imag, op.x_imag)
 
-    # Compute B*x_real and B*x_imag
-    op.B_matvec!(op.temp_real, x_real)
-    y_B_real = copy(op.temp_real)
-    op.B_matvec!(op.temp_imag, x_imag)
-    y_B_imag = copy(op.temp_imag)
-
-    # y = z*B*x - A*x = (z_real + i*z_imag)*(B*x) - A*x
     z_real = real(op.z)
     z_imag = imag(op.z)
 
-    y_real = z_real * y_B_real - z_imag * y_B_imag - y_A_real
-    y_imag = z_real * y_B_imag + z_imag * y_B_real - y_A_imag
+    @inbounds for i in 1:op.N
+        br = op.tmp_real[i]
+        bi = op.tmp_imag[i]
+        op.result_real[i] = z_real * br - z_imag * bi
+        op.result_imag[i] = z_real * bi + z_imag * br
+    end
 
-    y .= complex.(y_real, y_imag)
+    op.A_matvec!(op.tmp_real, op.x_real)
+    op.A_matvec!(op.tmp_imag, op.x_imag)
+
+    @inbounds for i in 1:op.N
+        op.result_real[i] -= op.tmp_real[i]
+        op.result_imag[i] -= op.tmp_imag[i]
+        y[i] = Complex{T}(op.result_real[i], op.result_imag[i])
+    end
+
     return y
 end
 
@@ -74,6 +89,12 @@ end
                                            Complex{T}.(A.nzval))
 end
 
+@inline function _copyto_complex!(dest::AbstractVector{Complex{T}}, src::AbstractVector{T}) where T<:Real
+    @inbounds for i in eachindex(src)
+        dest[i] = Complex{T}(src[i])
+    end
+    return dest
+end
 function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                                   rhs::AbstractMatrix{CT},
                                   A::SparseMatrixCSC,
@@ -89,8 +110,6 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
 
     op = SparseShiftedOperator(A, B, z, tmpB, tmpA)
     residual = Vector{CT}(undef, N)
-    fallback_solver = nothing
-    used_fallback = false
 
     for j in 1:ncols
         b = view(rhs, :, j)
@@ -106,26 +125,215 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
         res_norm = norm(residual)
         b_norm = norm(b)
         if !stats.solved || res_norm > tol * max(b_norm, one(b_norm))
-            @info "GMRES column failed" column=j residual=res_norm rhs_norm=b_norm
-            if fallback_solver === nothing
-                complex_B = eltype(B) <: Complex ? B : Complex{real(eltype(B))}.(B)
-                complex_A = eltype(A) <: Complex ? A : Complex{real(eltype(A))}.(A)
-                shifted_matrix = z .* complex_B .- complex_A
+            return false
+        end
+        dest[:, j] .= x_sol
+    end
+
+    return true
+end
+
+function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
+                                 B::Union{SparseMatrixCSC{Complex{T},Int},Nothing},
+                                 Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                                 solver::Symbol = :direct,
+                                 solver_tol::Real = 0.0,
+                                 solver_maxiter::Int = 500,
+                                 solver_restart::Int = 30) where T<:Real
+    N = size(A, 1)
+    identity_sparse = spdiagm(0 => fill(Complex{T}(1), N))
+    B_matrix = B === nothing ? identity_sparse : B
+
+    feastdefault!(fpm)
+    check_feast_srci_input(N, M0, Emin, Emax, fpm)
+
+    solver_choice = solver in (:direct, :gmres) ? solver : :invalid
+    solver_choice == :invalid &&
+        throw(ArgumentError("Unsupported solver option '$solver'. Use :direct or :gmres."))
+    solver_is_direct = solver_choice == :direct
+    solver_is_iterative = !solver_is_direct
+    solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
+        throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Please ensure it is in the environment."))
+    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+
+    workspace = FeastWorkspaceComplex{T}(N, M0)
+    Q_basis = view(workspace.workc, :, 1:M0)
+    _feast_seeded_subspace_complex!(Q_basis)
+    solutions = view(workspace.q, :, 1:M0)
+    lambda_vec = workspace.lambda
+    res_vec = workspace.res
+
+    zAq = zeros(Complex{T}, M0, M0)
+    zSq = zeros(Complex{T}, M0, M0)
+    moment = Matrix{Complex{T}}(undef, M0, M0)
+    ReducedT = promote_type(Float64, T)
+    rhs_buffer = B === nothing ? Q_basis : Matrix{Complex{T}}(undef, N, M0)
+    residual_vec = zeros(Complex{T}, N)
+    Bq_vec = B === nothing ? nothing : zeros(Complex{T}, N)
+
+    contour = feast_get_custom_contour(fpm)
+    contour === nothing && (contour = feast_contour(Emin, Emax, fpm))
+    Zne = contour.Zne
+    Wne = contour.Wne
+
+    maxloop = fpm[4]
+    eps_tol = feast_tolerance(fpm)
+    epsout_val = T(Inf)
+    loop_count = 0
+    info_code = Int(Feast_SUCCESS)
+    M_found = 0
+
+    for loop_idx in 0:maxloop
+        loop_count = loop_idx
+        fill!(zAq, zero(Complex{T}))
+        fill!(zSq, zero(Complex{T}))
+
+        gmres_failed = false
+
+        for e in 1:length(Zne)
+            z = Zne[e]
+            weight = 2 * Wne[e]
+
+            rhs = rhs_buffer
+            if B === nothing
+                rhs = Q_basis
+            else
+                mul!(rhs_buffer, B_matrix, Q_basis)
+            end
+
+            if solver_is_direct
+                shifted_matrix = z * B_matrix - A
                 try
-                    fallback_solver = lu(shifted_matrix)
+                    solver_factor = lu(shifted_matrix)
+                    solutions .= solver_factor \ rhs
                 catch err
-                    @warn "Sparse fallback factorization failed for shift $z" exception=err
-                    return false
+                    info_code = Int(Feast_ERROR_LAPACK)
+                    @warn "Sparse direct solve failed for shift $z" exception=err
+                    gmres_failed = true
+                    break
+                end
+            else
+                success = solve_shifted_iterative!(solutions, rhs, A, B_matrix,
+                                                   z, tol_value, solver_maxiter, solver_restart)
+                if !success
+                    info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                    gmres_failed = true
+                    break
                 end
             end
-            dest[:, j] .= fallback_solver \ b
-            used_fallback = true
-        else
-            dest[:, j] .= x_sol
+
+            mul!(moment, adjoint(Q_basis), solutions)
+            @inbounds zAq .+= weight .* moment
+            @inbounds zSq .+= (weight * z) .* moment
+        end
+
+        if gmres_failed
+            break
+        end
+
+        try
+            Aq_real = Matrix{ReducedT}(real.(0.5 .* (zAq .+ adjoint(zAq))))
+            Sq_real = Matrix{ReducedT}(real.(0.5 .* (zSq .+ adjoint(zSq))))
+
+            # Try Symmetric solver first (more accurate), fall back to general if not positive definite
+            lambda_red = Vector{ReducedT}(undef, 0)
+            v_red = Array{ReducedT}(undef, 0, 0)
+            try
+                F = eigen(Symmetric(Aq_real), Symmetric(Sq_real))
+                lambda_red = Vector{ReducedT}(F.values)
+                v_red = Array{ReducedT}(F.vectors)
+            catch e
+                if isa(e, PosDefException) || isa(e, LAPACKException)
+                    # Fall back to general eigenvalue solver if not positive definite
+                    F = eigen(Aq_real, Sq_real)
+                    lambda_red = Vector{ReducedT}(real.(F.values))
+                    v_red = Array{ReducedT}(real.(F.vectors))
+                else
+                    rethrow(e)
+                end
+            end
+
+            indices = Int[]
+            selected_lambda = Vector{T}()
+            for (i, val) in enumerate(lambda_red)
+                if Emin <= val <= Emax
+                    push!(indices, i)
+                    push!(selected_lambda, val)
+                end
+            end
+
+            M = length(indices)
+            if M == 0
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
+
+            for (idx, i) in enumerate(indices)
+                coeffs = Vector{T}(view(v_red, :, i))
+                mul!(view(solutions, :, idx), Q_basis, coeffs)
+                lambda_vec[idx] = convert(T, lambda_red[i])
+            end
+
+            for j in 1:M
+                vec = view(solutions, :, j)
+                nrm = norm(vec)
+                nrm > 0 && (vec ./= nrm)
+            end
+
+            max_res = zero(T)
+            for j in 1:M
+                q_col = view(solutions, :, j)
+                mul!(residual_vec, A, q_col)
+                if B === nothing
+                    @. residual_vec = residual_vec - lambda_vec[j] * q_col
+                else
+                    mul!(Bq_vec, B_matrix, q_col)
+                    @. residual_vec = residual_vec - lambda_vec[j] * Bq_vec
+                end
+                res_val = norm(residual_vec)
+                res_vec[j] = res_val
+                max_res = max(max_res, res_val)
+            end
+
+            epsout_val = max_res
+            M_found = M
+
+            if epsout_val <= eps_tol
+                Q_result = view(workspace.q, :, 1:M)
+                Q_result .= solutions[:, 1:M]
+                break
+            end
+
+            if loop_idx == maxloop
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
+
+            Q_basis[:, 1:M] .= solutions[:, 1:M]
+            if M < M0
+                submatrix = view(Q_basis, :, M+1:M0)
+                _feast_seeded_subspace_complex!(submatrix)
+            end
+        catch err
+            info_code = Int(Feast_ERROR_LAPACK)
+            @warn "Reduced eigenvalue problem failed during sparse Hermitian FEAST" exception=err
+            break
         end
     end
 
-    return !used_fallback
+    workspace.lambda[1:M_found] .= lambda_vec[1:M_found]
+    workspace.res[1:M_found] .= res_vec[1:M_found]
+
+    if M_found == 0
+        info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+    end
+
+    lambda = lambda_vec[1:M_found]
+    q = solutions[:, 1:M_found]
+    res = res_vec[1:M_found]
+
+    return FeastResult{T, Complex{T}}(lambda, q, M_found, res,
+                                      info_code, epsout_val, loop_count)
 end
 
 function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
@@ -134,124 +342,26 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                        solver_tol::Real = 0.0,
                        solver_maxiter::Int = 500,
                        solver_restart::Int = 30) where T<:Real
-    # Feast for sparse real symmetric generalized eigenvalue problem in CSR format
-    # Solves: A*q = lambda*B*q where A is symmetric, B is symmetric positive definite
-    
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
 
-    # Apply defaults FIRST before using any fpm values
-    feastdefault!(fpm)
-
-    # Check inputs
-    check_feast_srci_input(N, M0, Emin, Emax, fpm)
-
-    solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
-    solver_choice == :invalid &&
-        throw(ArgumentError("Unsupported solver option '$solver'. Use :direct or :gmres."))
-    solver_is_direct = solver_choice == :direct
-    solver_is_iterative = !solver_is_direct
-    solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
-        throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Please ensure it is in the environment."))
-    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
-    if solver_is_iterative && solver_tol > 0
-        solver_digits = max(1, ceil(Int, -log10(solver_tol)))
-        relaxed_digits = max(2, solver_digits - 2)
-        fpm[3] = min(fpm[3], relaxed_digits)
-        fpm[5] = max(fpm[5], 1)
+    complex_A = _convert_sparse_complex(A, Complex{T})
+    complex_B = _convert_sparse_complex(B, Complex{T})
+    complex_result = _feast_sparse_hermitian(complex_A, complex_B,
+                                             Emin, Emax, M0, fpm;
+                                             solver=solver, solver_tol=solver_tol,
+                                             solver_maxiter=solver_maxiter,
+                                             solver_restart=solver_restart)
+    lambda = real.(complex_result.lambda)
+    q_real = Array{T}(undef, N, complex_result.M)
+    for j in 1:complex_result.M
+        @inbounds q_real[:, j] .= real.(complex_result.q[:, j])
     end
-
-    # Initialize workspace
-    workspace = FeastWorkspaceReal{T}(N, M0)
-    if fpm[5] == 0
-        _feast_seeded_subspace!(workspace.work)
-        fpm[5] = 1
-    end
-    
-    # Initialize variables for RCI
-    ijob = Ref(-1)
-    Ze = Ref(zero(Complex{T}))
-    epsout = Ref(zero(T))
-    loop = Ref(0)
-    mode = Ref(0)
-    info = Ref(0)
-    
-    # Sparse linear solver / iterative workspace
-    sparse_solver = nothing
-    current_shift = Ref(zero(Complex{T}))
-    rhs_iterative = solver_is_iterative ? zeros(Complex{T}, N, M0) : nothing
-    
-    while true
-        # Call Feast RCI kernel
-        feast_srci!(ijob, N, Ze, workspace.work, workspace.workc,
-                   workspace.Aq, workspace.Sq, fpm, epsout, loop,
-                   Emin, Emax, M0, workspace.lambda, workspace.q, 
-                   mode, workspace.res, info)
-        
-        if ijob[] == Int(Feast_RCI_FACTORIZE)
-            # Factorize Ze*B - A for sparse matrices
-            if solver_is_direct
-                z = Ze[]
-                sparse_matrix = z * B - A
-
-                # LU factorization for sparse matrix
-                try
-                    sparse_solver = lu(sparse_matrix)
-                catch e
-                    info[] = Int(Feast_ERROR_LAPACK)
-                    break
-                end
-            else
-                current_shift[] = Ze[]
-            end
-            
-        elseif ijob[] == Int(Feast_RCI_SOLVE)
-            # Solve sparse linear systems: (Ze*B - A) * X = B * workspace.work
-            rhs = B * workspace.work[:, 1:M0]
-
-            if solver_is_direct
-                try
-                    # Solve with sparse LU factors
-                    workspace.workc[:, 1:M0] .= sparse_solver \ rhs
-                catch e
-                    info[] = Int(Feast_ERROR_LAPACK)
-                    break
-                end
-            else
-                rhs_iterative .= rhs
-                success = solve_shifted_iterative!(workspace.workc[:, 1:M0],
-                                                   rhs_iterative, A, B,
-                                                   current_shift[], tol_value,
-                                                   solver_maxiter, solver_restart)
-                if !success
-                    info[] = Int(Feast_ERROR_NO_CONVERGENCE)
-                    break
-                end
-            end
-            
-        elseif ijob[] == Int(Feast_RCI_MULT_A)
-            # Compute A * q for residual calculation (stored in complex workspace)
-            M = mode[]
-            workspace.workc[:, 1:M] .= A * workspace.q[:, 1:M]
-
-        elseif ijob[] == Int(Feast_RCI_DONE)
-            break
-        else
-            # Unexpected ijob value - error out to prevent infinite loop
-            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
-                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
-                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
-        end
-    end
-    
-    # Extract results
-    M = mode[]
-    lambda = workspace.lambda[1:M]
-    q = workspace.q[:, 1:M]
-    res = workspace.res[1:M]
-    
-    return FeastResult{T, T}(lambda, q, M, res, info[], epsout[], loop[])
+    res = complex_result.res
+    return FeastResult{T, T}(lambda, q_real, complex_result.M, res,
+                              complex_result.info, complex_result.epsout,
+                              complex_result.loop)
 end
 
 function feast_scsrgvx!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
@@ -286,111 +396,14 @@ function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
                        solver_tol::Real = 0.0,
                        solver_maxiter::Int = 500,
                        solver_restart::Int = 30) where T<:Real
-    # Feast for sparse complex Hermitian eigenvalue problem
-    # Solves: A*q = lambda*q where A is Hermitian
-    
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
+    ishermitian(A) || throw(ArgumentError("Matrix A must be Hermitian for feast_hcsrev!"))
 
-    # Apply defaults FIRST before using any fpm values
-    feastdefault!(fpm)
-
-    # Check inputs
-    check_feast_srci_input(N, M0, Emin, Emax, fpm)
-
-    solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
-    solver_choice == :invalid &&
-        throw(ArgumentError("Unsupported solver option '$solver'. Use :direct or :gmres."))
-    solver_is_direct = solver_choice == :direct
-    solver_is_iterative = !solver_is_direct
-    solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
-        throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Please ensure it is in the environment."))
-    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
-    identity_sparse = solver_is_iterative ? sparse(I, N, N) : nothing
-    current_shift = Ref(zero(Complex{T}))
-
-    # Initialize workspace
-    workspace = FeastWorkspaceComplex{T}(N, M0)
-    
-    # Initialize variables for RCI
-    ijob = Ref(-1)
-    Ze = Ref(zero(Complex{T}))
-    epsout = Ref(zero(T))
-    loop = Ref(0)
-    mode = Ref(0)
-    info = Ref(0)
-    
-    # Sparse linear solver workspace
-    sparse_solver = nothing
-    
-    while true
-        # Call Feast RCI kernel
-        feast_hrci!(ijob, N, Ze, workspace.work, workspace.workc,
-                   workspace.zAq, workspace.zSq, fpm, epsout, loop,
-                   Emin, Emax, M0, workspace.lambda, workspace.q, 
-                   mode, workspace.res, info)
-        
-        if ijob[] == Int(Feast_RCI_FACTORIZE)
-            # Factorize Ze*I - A for sparse matrices
-            z = Ze[]
-            if solver_is_direct
-                I_sparse = sparse(I, N, N)
-                sparse_matrix = z * I_sparse - A
-
-                # LU factorization for sparse matrix
-                try
-                    sparse_solver = lu(sparse_matrix)
-                catch e
-                    info[] = Int(Feast_ERROR_LAPACK)
-                    break
-                end
-            else
-                current_shift[] = z
-            end
-            
-        elseif ijob[] == Int(Feast_RCI_SOLVE)
-            # Solve sparse linear systems
-            if solver_is_direct
-                try
-                    workspace.workc[:, 1:M0] .= sparse_solver \ workspace.workc[:, 1:M0]
-                catch e
-                    info[] = Int(Feast_ERROR_LAPACK)
-                    break
-                end
-            else
-                success = solve_shifted_iterative!(workspace.workc[:, 1:M0], workspace.workc[:, 1:M0],
-                                                   A, identity_sparse, current_shift[],
-                                                   tol_value, solver_maxiter, solver_restart)
-                if !success
-                    info[] = Int(Feast_ERROR_NO_CONVERGENCE)
-                    break
-                end
-            end
-            
-        elseif ijob[] == Int(Feast_RCI_MULT_A)
-            # Compute A * q for residual calculation
-            M = mode[]
-            Aq = A * workspace.q[:, 1:M]
-            workspace.workc[:, 1:M] .= Aq
-            workspace.work[:, 1:M] .= real.(Aq)
-
-        elseif ijob[] == Int(Feast_RCI_DONE)
-            break
-        else
-            # Unexpected ijob value - error out to prevent infinite loop
-            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
-                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
-                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
-        end
-    end
-
-    # Extract results
-    M = mode[]
-    lambda = workspace.lambda[1:M]
-    q = workspace.q[:, 1:M]
-    res = workspace.res[1:M]
-
-    return FeastResult{T, Complex{T}}(lambda, q, M, res, info[], epsout[], loop[])
+    return _feast_sparse_hermitian(A, nothing, Emin, Emax, M0, fpm;
+                                   solver=solver, solver_tol=solver_tol,
+                                   solver_maxiter=solver_maxiter,
+                                   solver_restart=solver_restart)
 end
 
 function feast_hcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
@@ -439,104 +452,16 @@ function feast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
                        solver_tol::Real = 0.0,
                        solver_maxiter::Int = 500,
                        solver_restart::Int = 30) where T<:Real
-    # Feast for sparse complex Hermitian generalized eigenvalue problems
-    # Solves: A*q = lambda*B*q where A and B are Hermitian (B positive definite)
-
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     size(B) == (N, N) || throw(ArgumentError("B must match the size of A"))
     ishermitian(A) || throw(ArgumentError("A must be Hermitian for feast_hcsrgv!"))
     ishermitian(B) || throw(ArgumentError("B must be Hermitian positive definite for feast_hcsrgv!"))
 
-    # Apply defaults FIRST before using any fpm values
-    feastdefault!(fpm)
-
-    check_feast_srci_input(N, M0, Emin, Emax, fpm)
-
-    solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
-    solver_choice == :invalid &&
-        throw(ArgumentError("Unsupported solver option '$solver'. Use :direct or :gmres."))
-    solver_is_direct = solver_choice == :direct
-    solver_is_iterative = !solver_is_direct
-    solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
-        throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Please ensure it is in the environment."))
-    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
-    current_shift = Ref(zero(Complex{T}))
-    rhs_iterative = solver_is_iterative ? zeros(Complex{T}, N, M0) : nothing
-
-    workspace = FeastWorkspaceComplex{T}(N, M0)
-    ijob = Ref(-1)
-    Ze = Ref(zero(Complex{T}))
-    epsout = Ref(zero(T))
-    loop = Ref(0)
-    mode = Ref(0)
-    info = Ref(0)
-
-    sparse_solver = nothing
-
-    while true
-        feast_hrci!(ijob, N, Ze, workspace.work, workspace.workc,
-                    workspace.zAq, workspace.zSq, fpm, epsout, loop,
-                    Emin, Emax, M0, workspace.lambda, workspace.q,
-                    mode, workspace.res, info)
-
-        if ijob[] == Int(Feast_RCI_FACTORIZE)
-            z = Ze[]
-            if solver_is_direct
-                shifted_matrix = z * B - A
-                try
-                    sparse_solver = lu(shifted_matrix)
-                catch
-                    info[] = Int(Feast_ERROR_LAPACK)
-                    break
-                end
-            else
-                current_shift[] = z
-            end
-
-        elseif ijob[] == Int(Feast_RCI_SOLVE)
-            rhs = B * workspace.workc[:, 1:M0]
-            if solver_is_direct
-                try
-                    workspace.workc[:, 1:M0] .= sparse_solver \ rhs
-                catch
-                    info[] = Int(Feast_ERROR_LAPACK)
-                    break
-                end
-            else
-                rhs_iterative .= rhs
-                success = solve_shifted_iterative!(workspace.workc[:, 1:M0], rhs_iterative,
-                                                   A, B, current_shift[],
-                                                   tol_value, solver_maxiter, solver_restart)
-                if !success
-                    info[] = Int(Feast_ERROR_NO_CONVERGENCE)
-                    break
-                end
-            end
-
-        elseif ijob[] == Int(Feast_RCI_MULT_B)
-            M = mode[]
-            workspace.workc[:, 1:M] .= B * workspace.q[:, 1:M]
-
-        elseif ijob[] == Int(Feast_RCI_MULT_A)
-            M = mode[]
-            workspace.workc[:, 1:M] .= A * workspace.q[:, 1:M]
-
-        elseif ijob[] == Int(Feast_RCI_DONE)
-            break
-        else
-            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
-                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
-                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
-        end
-    end
-
-    M = mode[]
-    lambda = workspace.lambda[1:M]
-    q = workspace.q[:, 1:M]
-    res = workspace.res[1:M]
-
-    return FeastResult{T, Complex{T}}(lambda, q, M, res, info[], epsout[], loop[])
+    return _feast_sparse_hermitian(A, B, Emin, Emax, M0, fpm;
+                                   solver=solver, solver_tol=solver_tol,
+                                   solver_maxiter=solver_maxiter,
+                                   solver_restart=solver_restart)
 end
 
 function feast_hcsrgvx!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
@@ -972,131 +897,188 @@ end
 
 # Matrix-free interface for sparse problems with GMRES solver
 function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
-                             N::Int, Emin::T, Emax::T, M0::Int, 
-                             fpm::Vector{Int}; 
+                             N::Int, Emin::T, Emax::T, M0::Int,
+                             fpm::Vector{Int};
                              gmres_rtol::T = T(1e-6),
                              gmres_atol::T = T(1e-12),
                              gmres_restart::Int = 20,
                              gmres_maxiter::Int = 200) where T<:Real
-    # Feast with matrix-free operations using GMRES for linear system solves
-    # A_matvec!(y, x) computes y = A*x
-    # B_matvec!(y, x) computes y = B*x
-    
-    # Check inputs
+    FEAST_KRYLOV_AVAILABLE[] ||
+        throw(ArgumentError("Krylov.jl is required for matrix-free GMRES solves"))
+
+    feastdefault!(fpm)
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
-    
-    # Initialize workspace
+
     workspace = FeastWorkspaceReal{T}(N, M0)
-    
-    # Initialize variables for RCI
-    ijob = Ref(-1)
-    Ze = Ref(zero(Complex{T}))
-    epsout = Ref(zero(T))
-    loop = Ref(0)
-    mode = Ref(0)
-    info = Ref(0)
-    
-    # Storage for current shift value
-    current_shift = Ref(zero(Complex{T}))
-    
-    while true
-        # Call Feast RCI kernel
-        feast_srci!(ijob, N, Ze, workspace.work, workspace.workc,
-                   workspace.Aq, workspace.Sq, fpm, epsout, loop,
-                   Emin, Emax, M0, workspace.lambda, workspace.q, 
-                   mode, workspace.res, info)
-        
-        if ijob[] == Int(Feast_RCI_FACTORIZE)
-            # Store the current shift for GMRES
-            current_shift[] = Ze[]
-            
-        elseif ijob[] == Int(Feast_RCI_SOLVE)
-            # Solve (Ze*B - A) * X = B * workspace.work using GMRES
-            z = current_shift[]
-            
-            # Right-hand side: B * workspace.work
-            rhs = zeros(T, N, M0)
+    Q = workspace.work
+    _feast_seeded_subspace!(Q)
+
+    Aq_block = view(workspace.Aq, 1:M0, 1:M0)
+    Sq_block = view(workspace.Sq, 1:M0, 1:M0)
+    workc_block = view(workspace.workc, :, 1:M0)
+    q_vectors = view(workspace.q, :, 1:M0)
+    Q_block = view(Q, :, 1:M0)
+    lambda_vec = workspace.lambda
+    res_vec = workspace.res
+
+    contour = feast_get_custom_contour(fpm)
+    contour === nothing && (contour = feast_contour(Emin, Emax, fpm))
+    Zne = contour.Zne
+    Wne = contour.Wne
+    ne = length(Zne)
+
+    maxloop = fpm[4]
+    eps_tol = feast_tolerance(fpm)
+
+    shifted_operator = MatrixFreeShiftedOperator(N, zero(Complex{T}), A_matvec!, B_matvec!, T)
+    rhs_real = zeros(T, N)
+    rhs_complex = zeros(Complex{T}, N)
+    gmres_guess = zeros(Complex{T}, N)
+    moment = Matrix{Complex{T}}(undef, M0, M0)
+    residual_vec = zeros(T, N)
+
+    epsout_val = T(Inf)
+    loop_count = 0
+    info_code = Int(Feast_SUCCESS)
+    M_found = 0
+
+    for loop_idx in 0:maxloop
+        loop_count = loop_idx
+        fill!(Aq_block, zero(T))
+        fill!(Sq_block, zero(T))
+
+        gmres_failed = false
+        for e in 1:ne
+            shifted_operator.z = Zne[e]
+            weight = 2 * Wne[e]
+
             for j in 1:M0
-                B_matvec!(view(rhs, :, j), view(workspace.work, :, j))
+                B_matvec!(rhs_real, view(Q_block, :, j))
+                _copyto_complex!(rhs_complex, rhs_real)
+                fill!(gmres_guess, zero(Complex{T}))
+
+                sol, stats = gmres(shifted_operator, rhs_complex;
+                                   x = gmres_guess,
+                                   rtol = gmres_rtol,
+                                   atol = gmres_atol,
+                                   restart = gmres_restart,
+                                   itmax = gmres_maxiter)
+
+                if !stats.solved
+                    info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                    @warn "GMRES did not converge for contour point $e, column $j" residual=stats.residuals[end]
+                    gmres_failed = true
+                    break
+                end
+
+                workc_block[:, j] .= sol
             end
 
-            # Create matrix-free operator for (z*B - A)
-            temp_real = zeros(T, N)
-            temp_imag = zeros(T, N)
-            op = MatrixFreeShiftedOperator(N, z, A_matvec!, B_matvec!, temp_real, temp_imag)
+            gmres_failed && break
 
-            # Solve each system using GMRES
-            for j in 1:M0
-                # Convert RHS to complex
-                b = complex.(rhs[:, j])
+            moment .= transpose(Q_block) * workc_block
+            Aq_block .+= real.(weight .* moment)
+            Sq_block .+= real.((weight * Zne[e]) .* moment)
+        end
 
-                # Initial guess (zero)
-                x0 = zeros(Complex{T}, N)
+        if gmres_failed
+            break
+        end
 
-                # Solve using GMRES (Krylov.jl if available, otherwise fallback)
-                if FEAST_KRYLOV_AVAILABLE[]
-                    # Use GMRES with our properly-typed operator
-                    
-                    sol, stats = gmres(op, b; 
-                                     x=x0,
-                                     rtol=gmres_rtol,
-                                     atol=gmres_atol, 
-                                     restart=gmres_restart,
-                                     itmax=gmres_maxiter)
-                    
-                    # Check convergence
-                    if !stats.solved
-                        @warn "GMRES did not converge for system $j, residual = $(stats.residuals[end])"
-                        info[] = Int(Feast_ERROR_LAPACK)
-                    end
-                    
-                    workspace.workc[:, j] .= sol
+        try
+            Aq_sym = 0.5 .* (Aq_block .+ transpose(Aq_block))
+            Sq_sym = 0.5 .* (Sq_block .+ transpose(Sq_block))
+
+            # Try Symmetric solver first (more accurate), fall back to general if not positive definite
+            lambda_red = T[]
+            v_red = Matrix{T}(undef, 0, 0)
+            try
+                F = eigen(Symmetric(Aq_sym), Symmetric(Sq_sym))
+                lambda_red = F.values
+                v_red = F.vectors
+            catch e
+                if isa(e, PosDefException) || isa(e, LAPACKException)
+                    # Fall back to general eigenvalue solver if not positive definite
+                    F = eigen(Aq_sym, Sq_sym)
+                    lambda_red = real.(F.values)
+                    v_red = real.(F.vectors)
                 else
-                    # Use fallback solver
-                    @warn "Krylov.jl not available, using simplified iterative solver"
-                    
-                    # Create function wrapper for simple solver
-                    function A_op_wrapper!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
-                        shifted_matvec!(y, x)
-                    end
-                    
-                    sol, stats = simple_gmres(A_op_wrapper!, b, x0;
-                                            rtol=gmres_rtol, atol=gmres_atol,
-                                            restart=gmres_restart, maxiter=gmres_maxiter)
-                    
-                    if !stats.solved
-                        @warn "Simple iterative solver did not converge for system $j"
-                        info[] = Int(Feast_ERROR_LAPACK)
-                    end
-                    
-                    workspace.workc[:, j] .= sol
+                    rethrow(e)
                 end
             end
-            
-        elseif ijob[] == Int(Feast_RCI_MULT_A)
-            # Compute A * q for residual calculation
-            M = mode[]
-            for j in 1:M
-                A_matvec!(view(workspace.work, :, j), view(workspace.q, :, j))
+
+            selected = Vector{Int}()
+            selected_lambda = Vector{T}()
+            for i in 1:length(lambda_red)
+                val = lambda_red[i]
+                if Emin <= val <= Emax
+                    push!(selected, i)
+                    push!(selected_lambda, val)
+                end
             end
 
-        elseif ijob[] == Int(Feast_RCI_DONE)
+            M = length(selected)
+            if M == 0
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
+
+            Q_block = view(Q, :, 1:M0)
+            for (idx, eig_idx) in enumerate(selected)
+                coeffs = Vector{T}(view(v_red, :, eig_idx))
+                mul!(view(q_vectors, :, idx), Q_block, coeffs)
+                lambda_vec[idx] = convert(T, selected_lambda[eig_idx])
+            end
+
+            for j in 1:M
+                vec = view(q_vectors, :, j)
+                nrm = norm(vec)
+                nrm > 0 && (vec ./= nrm)
+            end
+
+            max_res = zero(T)
+            for j in 1:M
+                q_col = view(q_vectors, :, j)
+                A_matvec!(residual_vec, q_col)
+                @. residual_vec = residual_vec - lambda_vec[j] * q_col
+                res_val = norm(residual_vec)
+                res_vec[j] = res_val
+                max_res = max(max_res, res_val)
+            end
+
+            epsout_val = max_res
+            M_found = M
+
+            if epsout_val <= eps_tol
+                info_code = Int(Feast_SUCCESS)
+                break
+            end
+
+            if loop_idx == maxloop
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
+
+            Q[:, 1:M] .= q_vectors[:, 1:M]
+            if M < M0
+                for col in M+1:M0
+                    randn!(view(Q, :, col))
+                    col_norm = norm(view(Q, :, col))
+                    col_norm > 0 && (view(Q, :, col) ./= col_norm)
+                end
+            end
+        catch err
+            info_code = Int(Feast_ERROR_LAPACK)
+            @warn "Reduced eigenvalue problem failed in matrix-free FEAST" exception=err
             break
-        else
-            # Unexpected ijob value - error out to prevent infinite loop
-            error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
-                  "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
-                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
         end
     end
-    
-    # Extract results
-    M = mode[]
-    lambda = workspace.lambda[1:M]
-    q = workspace.q[:, 1:M]
-    res = workspace.res[1:M]
-    
-    return FeastResult{T, T}(lambda, q, M, res, info[], epsout[], loop[])
+
+    lambda = workspace.lambda[1:M_found]
+    q = workspace.q[:, 1:M_found]
+    res = workspace.res[1:M_found]
+
+    return FeastResult{T, T}(lambda, q, M_found, res, info_code, epsout_val, loop_count)
 end
 
 # Convenience wrapper for sparse matrices using GMRES

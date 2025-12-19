@@ -1,8 +1,4 @@
-# Polynomial Eigenvalue Problems {#polynomial_problems}
-
-```@id polynomial_problems
-```
-
+# Polynomial Eigenvalue Problems
 
 Solve P(λ) x = 0 where P(λ) = A0 + λ A1 + λ² A2 + ...
 

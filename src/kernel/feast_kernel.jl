@@ -86,7 +86,8 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     end
 
     if ijob[] == Int(Feast_RCI_FACTORIZE)
-        ijob[] = Int(Feast_RCI_SOLVE)
+        # After factorization, request linear solve
+        ijob[] = Int(Feast_RCI_SOLVE)  # Fortran uses ijob=11 for solve
         Q0 = get(state, :Q0, nothing)
         if Q0 === nothing
             Q0 = copy(work[:, 1:M0])

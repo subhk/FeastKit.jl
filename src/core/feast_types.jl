@@ -86,16 +86,33 @@ struct FeastContour{T<:Real}
     end
 end
 
-# Feast RCI job identifiers
+# Feast RCI job identifiers (matches Fortran FEAST ijob values)
+# See FEAST documentation for details on each operation
 @enum FeastRCIJob begin
-    Feast_RCI_INIT = -1
-    Feast_RCI_DONE = 0
-    Feast_RCI_FACTORIZE = 10
-    Feast_RCI_SOLVE = 20
-    Feast_RCI_SOLVE_TRANSPOSE = 21
-    Feast_RCI_MULT_A = 30
-    Feast_RCI_MULT_B = 40
+    Feast_RCI_INIT = -1              # Initialize RCI loop
+    Feast_RCI_DONE = 0               # Convergence achieved, exit
+
+    # Factorization and linear solve operations
+    Feast_RCI_FACTORIZE = 10         # Factorize (Ze*B - A)
+    Feast_RCI_SOLVE = 11             # Solve linear system using existing factorization
+
+    # Inner product operations (for moment accumulation)
+    Feast_RCI_INNER_PRODUCT = 20     # Compute Q^H * Y
+    Feast_RCI_INNER_PRODUCT_T = 21   # Compute Q^H * Y (transpose variant)
+
+    # Matrix-vector products
+    Feast_RCI_MULT_A = 30            # Compute A * X
+    Feast_RCI_MULT_A_H = 31          # Compute A^H * X (conjugate transpose)
+    Feast_RCI_MULT_B = 40            # Compute B * X
+    Feast_RCI_MULT_B_H = 41          # Compute B^H * X (conjugate transpose)
+
+    # Advanced operations for non-Hermitian problems
+    Feast_RCI_BIORTHOG = 50          # Bi-orthogonalization step
+    Feast_RCI_REDUCED_SYSTEM = 60    # Solve reduced eigenvalue system
 end
+
+# Provide backward compatibility aliases (deprecated, for transition)
+const Feast_RCI_SOLVE_TRANSPOSE = Feast_RCI_INNER_PRODUCT_T
 
 # Error codes
 @enum FeastError begin

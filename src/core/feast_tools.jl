@@ -306,94 +306,140 @@ function feast_contour_custom_weights!(Zne::Vector{Complex{T}},
 end
 
 """
-    feast_rational_expert(Zne, Wne, lambda)
+    feast_rationalx(Zne, Wne, lambda)
 
 Compute rational function values using custom integration nodes and weights.
 Direct translation of dfeast_rationalx from Fortran.
 
-# Arguments
-- `Zne`: Integration nodes  
-- `Wne`: Integration weights
-- `lambda`: Eigenvalues to evaluate
+For eigenvalues inside the contour, the rational function returns ≈1.
+For eigenvalues outside, it returns ≈0.
 
-# Returns  
+# Arguments
+- `Zne`: Integration nodes (half-contour)
+- `Wne`: Integration weights (half-contour)
+- `lambda`: Real eigenvalues to evaluate
+
+# Returns
 - Vector of rational function values
 """
-function feast_rational_expert(Zne::Vector{Complex{T}}, 
-                             Wne::Vector{Complex{T}},
-                             lambda::Vector{T}) where T<:Real
+function feast_rationalx(Zne::Vector{Complex{T}},
+                         Wne::Vector{Complex{T}},
+                         lambda::Vector{T}) where T<:Real
     ne = length(Zne)
-    M = length(lambda) 
+    M = length(lambda)
     f = zeros(T, M)
-    
-    # Compute rational function: f(λ) = (1/2πi) ∫ w(z)/(z-λ) dz
+
+    # Compute rational function (matches dfeast_rationalx exactly)
+    # f(λ) = 2 * Re(Σ Wne[e] / (Zne[e] - λ))
+    # Factor of 2 accounts for symmetric half-contour
     for j in 1:M
-        sum_val = zero(Complex{T})
-        for i in 1:ne
-            z = Zne[i] 
-            w = Wne[i]
-            sum_val += w / (z - lambda[j])
+        for e in 1:ne
+            f[j] += 2 * real(Wne[e] / (Zne[e] - lambda[j]))
         end
-        # Factor of 2 accounts for symmetry (half-contour integration) 
-        f[j] = 2 * real(sum_val)
     end
-    
+
     return f
 end
 
-function feast_rational(lambda::Vector{T}, Emin::T, Emax::T, 
-                       fpm::Vector{Int}) where T<:Real
-    # Compute rational function values for eigenvalue filtering
-    M = length(lambda)
-    rational_values = Vector{T}(undef, M)
-    
+"""
+    feast_rational(Emin, Emax, fpm, lambda)
+
+Compute rational function values for real eigenvalues using default ellipsoid contour.
+Direct translation of dfeast_rational from Fortran.
+
+# Arguments
+- `Emin, Emax`: Search interval bounds
+- `fpm`: FEAST parameters (fpm[2]=nodes, fpm[16]=integration type, fpm[18]=aspect ratio)
+- `lambda`: Real eigenvalues to evaluate
+
+# Returns
+- Vector of rational function values
+"""
+function feast_rational(lambda::Vector{T}, Emin::T, Emax::T,
+                        fpm::Vector{Int}) where T<:Real
+    # Generate contour (matches dfeast_rational calling zfeast_contour)
     contour = feast_contour(Emin, Emax, fpm)
-    ne = length(contour.Zne)
-    
-    for j in 1:M
-        sum_val = zero(Complex{T})
-        for i in 1:ne
-            z = contour.Zne[i]
-            w = contour.Wne[i]
-            sum_val += w / (z - lambda[j])
-        end
-        rational_values[j] = real(sum_val) / (2π * im)
+
+    # Compute rational using feast_rationalx
+    f = feast_rationalx(contour.Zne, contour.Wne, lambda)
+
+    # Add Zolotarev initialization if needed (matches Fortran)
+    if fpm[16] == 2  # Zolotarev
+        _, zwe = zolotarev_point(fpm[2], 0)
+        f .+= real(zwe)
     end
-    
-    return rational_values
+
+    return f
 end
 
-function feast_grational(lambda::Vector{Complex{T}}, Emid::Complex{T}, 
-                        r::T, fpm::Vector{Int}) where T<:Real
-    # Compute rational function values for complex eigenvalues
+"""
+    feast_grationalx(Zne, Wne, lambda)
+
+Compute rational function values for complex eigenvalues using custom contour.
+Direct translation of zfeast_grationalx from Fortran.
+
+# Arguments
+- `Zne`: Integration nodes (full contour)
+- `Wne`: Integration weights (full contour)
+- `lambda`: Complex eigenvalues to evaluate
+
+# Returns
+- Vector of complex rational function values
+"""
+function feast_grationalx(Zne::Vector{Complex{T}},
+                          Wne::Vector{Complex{T}},
+                          lambda::Vector{Complex{T}}) where T<:Real
+    ne = length(Zne)
     M = length(lambda)
-    rational_values = Vector{T}(undef, M)
-    
-    contour = feast_gcontour(Emid, r, fpm)
-    ne = length(contour.Zne)
-    
+    f = Vector{Complex{T}}(undef, M)
+
+    # Compute rational function (matches zfeast_grationalx exactly)
+    # f(λ) = Σ Wne[e] / (Zne[e] - λ)  (full contour, no factor of 2)
     for j in 1:M
-        sum_val = zero(Complex{T})
-        for i in 1:ne
-            z = contour.Zne[i]
-            w = contour.Wne[i]
-            sum_val += w / (z - lambda[j])
+        f[j] = zero(Complex{T})
+        for e in 1:ne
+            f[j] += Wne[e] / (Zne[e] - lambda[j])
         end
-        rational_values[j] = abs(sum_val) / (2π)
     end
-    
-    return rational_values
+
+    return f
 end
 
+"""
+    feast_grational(Emid, r, fpm, lambda)
+
+Compute rational function values for complex eigenvalues using default ellipsoid contour.
+Direct translation of zfeast_grational from Fortran.
+
+# Arguments
+- `Emid`: Center of search region (complex)
+- `r`: Radius of search region
+- `fpm`: FEAST parameters (fpm[8]=nodes, fpm[16]=integration type, etc.)
+- `lambda`: Complex eigenvalues to evaluate
+
+# Returns
+- Vector of complex rational function values
+"""
+function feast_grational(lambda::Vector{Complex{T}}, Emid::Complex{T},
+                         r::T, fpm::Vector{Int}) where T<:Real
+    # Generate contour (matches zfeast_grational calling zfeast_gcontour)
+    contour = feast_gcontour(Emid, r, fpm)
+
+    # Compute rational using feast_grationalx
+    return feast_grationalx(contour.Zne, contour.Wne, lambda)
+end
+
+# Convenience overloads for type flexibility
 function feast_rationalx(lambda::Vector{T},
                          Zne::AbstractVector{Complex{TZ}},
                          Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
     ne = length(Zne)
     ne == length(Wne) || throw(ArgumentError("Zne and Wne must have the same length"))
-    contour = FeastContour{promote_type(TZ, TW)}(
-        Vector{Complex{promote_type(TZ, TW)}}(Zne),
-        Vector{Complex{promote_type(TZ, TW)}}(Wne))
-    return feast_rational_expert(contour.Zne, contour.Wne, lambda)
+    base = promote_type(T, TZ, TW)
+    return feast_rationalx(
+        Vector{Complex{base}}(Zne),
+        Vector{Complex{base}}(Wne),
+        Vector{base}(lambda))
 end
 
 function feast_grationalx(lambda::Vector{Complex{T}},
@@ -401,19 +447,15 @@ function feast_grationalx(lambda::Vector{Complex{T}},
                           Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
     ne = length(Zne)
     ne == length(Wne) || throw(ArgumentError("Zne and Wne must have the same length"))
-    base = promote_type(TZ, TW)
-    Zvec = Vector{Complex{base}}(Zne)
-    Wvec = Vector{Complex{base}}(Wne)
-    values = Vector{T}(undef, length(lambda))
-    for j in eachindex(lambda)
-        sum_val = zero(Complex{base})
-        for i in 1:ne
-            sum_val += Wvec[i] / (Zvec[i] - lambda[j])
-        end
-        values[j] = abs(sum_val) / (2π)
-    end
-    return values
+    base = promote_type(T, TZ, TW)
+    return feast_grationalx(
+        Vector{Complex{base}}(Zne),
+        Vector{Complex{base}}(Wne),
+        Vector{Complex{base}}(lambda))
 end
+
+# Legacy alias for backward compatibility
+const feast_rational_expert = feast_rationalx
 
 # Check if eigenvalue is inside contour
 function feast_inside_contour(lambda::T, Emin::T, Emax::T) where T<:Real

@@ -1,8 +1,4 @@
-# Performance Guide {#performance_guide}
-
-```@id performance_guide
-```
-
+# Performance Guide
 
 Optimize FeastKit.jl for maximum performance in your eigenvalue calculations.
 

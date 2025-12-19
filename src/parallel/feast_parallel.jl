@@ -75,12 +75,13 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
             Aq_sym = Symmetric(Aq)
             Sq_sym = Symmetric(Sq)
 
-            # Use symmetric eigenvalue solver
+            # IMPORTANT: Solve Sq*x = lambda*Aq*x (not Aq*x = lambda*Sq*x)
+            # This is because zAq ≈ Q'*P*Q and zSq ≈ Q'*A*P*Q where P is the spectral projector
             F = try
-                eigen(Aq_sym, Sq_sym)
+                eigen(Sq_sym, Aq_sym)
             catch e
                 # Fall back to general solver if not positive definite
-                eigen(Aq, Sq)
+                eigen(Sq, Aq)
             end
 
             lambda_red = real.(F.values)

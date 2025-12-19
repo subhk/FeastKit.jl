@@ -39,12 +39,16 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
     eps_tolerance = feast_tolerance(fpm)
     max_loops = fpm[4]
     
+    # Complex moment matrices for accumulation
+    zAq = zeros(Complex{T}, M0, M0)
+    zSq = zeros(Complex{T}, M0, M0)
+
     # Main Feast refinement loop
     for loop in 1:max_loops
-        # Reset moment matrices
-        fill!(Aq, zero(T))
-        fill!(Sq, zero(T))
-        
+        # Reset complex moment matrices
+        fill!(zAq, zero(Complex{T}))
+        fill!(zSq, zero(Complex{T}))
+
         # Parallel computation of moments for each contour point
         if use_threads && Threads.nthreads() > 1
             # Use threading for shared memory parallelism
@@ -53,18 +57,23 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
             # Use distributed computing for multiple processes
             moments = pfeast_compute_moments_distributed(A, B, workspace.work, contour, M0)
         end
-        
-        # Accumulate moments
+
+        # Accumulate complex moments
         for (aq_contrib, sq_contrib) in moments
-            Aq .+= aq_contrib
-            Sq .+= sq_contrib
+            zAq .+= aq_contrib
+            zSq .+= sq_contrib
         end
-        
+
         # Solve reduced eigenvalue problem
         try
-            # Symmetrize reduced matrices (matches dense solver approach)
-            Aq_sym = Symmetric(0.5 .* (Aq .+ Aq'))
-            Sq_sym = Symmetric(0.5 .* (Sq .+ Sq'))
+            # Extract real symmetric part (matches dense solver approach)
+            # Aq_real = real(0.5 * (zAq + zAq'))
+            Aq .= real.(0.5 .* (zAq .+ adjoint(zAq)))
+            Sq .= real.(0.5 .* (zSq .+ adjoint(zSq)))
+
+            # Symmetrize reduced matrices
+            Aq_sym = Symmetric(Aq)
+            Sq_sym = Symmetric(Sq)
 
             # Use symmetric eigenvalue solver
             F = try
@@ -182,32 +191,32 @@ function pfeast_compute_moments_threaded(A::Matrix{T}, B::Matrix{T},
     return moments
 end
 
-# Distributed computation of moments
-function pfeast_compute_moments_distributed(A::Matrix{T}, B::Matrix{T}, 
-                                           work::Matrix{T}, contour::FeastContour{T}, 
+# Distributed computation of moments (returns complex moments)
+function pfeast_compute_moments_distributed(A::Matrix{T}, B::Matrix{T},
+                                           work::Matrix{T}, contour::FeastContour{T},
                                            M0::Int) where T<:Real
     ne = length(contour.Zne)
-    
+
     # Distribute work across available workers
     if nworkers() == 1
         @warn "No worker processes available, falling back to serial computation"
         return pfeast_compute_moments_serial(A, B, work, contour, M0)
     end
-    
+
     # Split contour points among workers
     work_chunks = distribute_contour_points(ne, nworkers())
-    
+
     # Compute moments in parallel using @distributed
     moment_futures = Vector{Future}(undef, length(work_chunks))
-    
+
     for (i, chunk) in enumerate(work_chunks)
         moment_futures[i] = @spawnat workers()[i] begin
             pfeast_solve_contour_chunk(A, B, work, contour.Zne, contour.Wne, chunk, M0)
         end
     end
-    
-    # Collect results
-    moments = Vector{Tuple{Matrix{T}, Matrix{T}}}(undef, ne)
+
+    # Collect results (complex moments)
+    moments = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, ne)
     for (i, future) in enumerate(moment_futures)
         chunk_moments = fetch(future)
         chunk = work_chunks[i]
@@ -215,7 +224,7 @@ function pfeast_compute_moments_distributed(A::Matrix{T}, B::Matrix{T},
             moments[e] = chunk_moments[j]
         end
     end
-    
+
     return moments
 end
 

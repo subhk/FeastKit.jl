@@ -3,7 +3,7 @@ module FeastKit
 export feastinit, feastinit!, feastinit_driver, feastdefault!
 export feast_srci!, feast_srcix!, feast_hrci!, feast_hrcix!, feast_grci!, feast_grcix!
 export feast_contour, feast_gcontour, feast_customcontour
-export feast, feast_general, feast_matvec
+export feast, feast_general, feast_matvec, feast_banded, feast_set_defaults!
 export feast_parallel, pfeast_srci!, ParallelFeastState
 export pfeast_sygv!, pfeast_scsrgv!, pfeast_compute_all_contour_points!, pfeast_show_distribution
 export mpi_feast, feast_hybrid, MPIFeastState

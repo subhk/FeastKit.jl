@@ -107,57 +107,54 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
 end
 
 # Threaded computation of moments
-function pfeast_compute_moments_threaded(A::Matrix{T}, B::Matrix{T}, 
-                                        work::Matrix{T}, contour::FeastContour{T}, 
+function pfeast_compute_moments_threaded(A::Matrix{T}, B::Matrix{T},
+                                        work::Matrix{T}, contour::FeastContour{T},
                                         M0::Int) where T<:Real
     ne = length(contour.Zne)
     N = size(A, 1)
-    
+
     # Pre-allocate thread-local storage
     moments = Vector{Tuple{Matrix{T}, Matrix{T}}}(undef, ne)
-    
+
     # Parallel loop over integration points
     Threads.@threads for e in 1:ne
         z = contour.Zne[e]
         w = contour.Wne[e]
-        
+
         # Local moment matrices for this thread
         Aq_local = zeros(T, M0, M0)
         Sq_local = zeros(T, M0, M0)
-        
+
         # Form and factorize (z*B - A)
         system_matrix = z * B - A
-        
+
         try
             # LU factorization
             F = lu(system_matrix)
-            
-            # Solve linear systems for each column of work
-            workc_local = zeros(Complex{T}, N, M0)
+
+            # Right-hand side: B * Q0
             rhs = B * work[:, 1:M0]
-            
-            for j in 1:M0
-                workc_local[:, j] = F \ rhs[:, j]
-            end
-            
-            # Compute moment contribution
-            for j in 1:M0
-                for i in 1:M0
-                    moment_val = real(w * dot(work[:, i], workc_local[:, j]))
-                    Aq_local[i, j] = moment_val
-                    Sq_local[i, j] = moment_val * real(z)
-                end
-            end
-            
+
+            # Solve all linear systems at once: Y = (z*B - A) \ (B*Q0)
+            workc_local = F \ rhs
+
+            # Compute moment contribution with factor of 2 for half-contour symmetry
+            # Matches Fortran: Aq += (2 * Wne[e]) * (Q0' * Y)
+            #                  Sq += (2 * Wne[e] * Zne[e]) * (Q0' * Y)
+            temp = work[:, 1:M0]' * workc_local
+            weight = 2 * w  # Factor of 2 for conjugate half-contour
+            Aq_local .= real.(weight .* temp)
+            Sq_local .= real.(weight * z .* temp)
+
             moments[e] = (Aq_local, Sq_local)
-            
+
         catch err
             # Handle factorization failure
             @warn "Factorization failed for contour point $e: $err"
             moments[e] = (zeros(T, M0, M0), zeros(T, M0, M0))
         end
     end
-    
+
     return moments
 end
 
@@ -372,51 +369,50 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
 end
 
 # Threaded sparse moment computation
-function pfeast_compute_sparse_moments_threaded(A::SparseMatrixCSC{T,Int}, 
+function pfeast_compute_sparse_moments_threaded(A::SparseMatrixCSC{T,Int},
                                                B::SparseMatrixCSC{T,Int},
-                                               work::Matrix{T}, contour::FeastContour{T}, 
+                                               work::Matrix{T}, contour::FeastContour{T},
                                                M0::Int) where T<:Real
     ne = length(contour.Zne)
     moments = Vector{Tuple{Matrix{T}, Matrix{T}}}(undef, ne)
-    
+
     Threads.@threads for e in 1:ne
         z = contour.Zne[e]
         w = contour.Wne[e]
-        
+
         # Local moment matrices
         Aq_local = zeros(T, M0, M0)
         Sq_local = zeros(T, M0, M0)
-        
+
         try
             # Form sparse system matrix
             system_matrix = z * B - A
-            
+
             # Sparse LU factorization
             F = lu(system_matrix)
-            
-            # Right-hand side
+
+            # Right-hand side: B * Q0
             rhs = B * work[:, 1:M0]
-            
-            # Solve sparse linear systems
+
+            # Solve sparse linear systems: Y = (z*B - A) \ (B*Q0)
             workc_local = F \ rhs
-            
-            # Compute moment contribution
-            for j in 1:M0
-                for i in 1:M0
-                    moment_val = real(w * dot(work[:, i], workc_local[:, j]))
-                    Aq_local[i, j] = moment_val
-                    Sq_local[i, j] = moment_val * real(z)
-                end
-            end
-            
+
+            # Compute moment contribution with factor of 2 for half-contour symmetry
+            # Matches Fortran: Aq += (2 * Wne[e]) * (Q0' * Y)
+            #                  Sq += (2 * Wne[e] * Zne[e]) * (Q0' * Y)
+            temp = work[:, 1:M0]' * workc_local
+            weight = 2 * w  # Factor of 2 for conjugate half-contour
+            Aq_local .= real.(weight .* temp)
+            Sq_local .= real.(weight * z .* temp)
+
             moments[e] = (Aq_local, Sq_local)
-            
+
         catch err
             @warn "Sparse solve failed for contour point $e: $err"
             moments[e] = (zeros(T, M0, M0), zeros(T, M0, M0))
         end
     end
-    
+
     return moments
 end
 
@@ -491,33 +487,34 @@ function pfeast_solve_sparse_chunk(A::SparseMatrixCSC{T,Int},
 end
 
 # Solve single sparse point
-function pfeast_solve_sparse_single_point(A::SparseMatrixCSC{T,Int}, 
+function pfeast_solve_sparse_single_point(A::SparseMatrixCSC{T,Int},
                                          B::SparseMatrixCSC{T,Int},
-                                         work::Matrix{T}, z::Complex{T}, w::Complex{T}, 
+                                         work::Matrix{T}, z::Complex{T}, w::Complex{T},
                                          M0::Int) where T<:Real
     Aq_local = zeros(T, M0, M0)
     Sq_local = zeros(T, M0, M0)
-    
+
     try
         # Form and solve sparse system
         system_matrix = z * B - A
         F = lu(system_matrix)
+
+        # Right-hand side: B * Q0
         rhs = B * work[:, 1:M0]
+
+        # Solve: Y = (z*B - A) \ (B*Q0)
         workc_local = F \ rhs
-        
-        # Compute moments
-        for j in 1:M0
-            for i in 1:M0
-                moment_val = real(w * dot(work[:, i], workc_local[:, j]))
-                Aq_local[i, j] = moment_val
-                Sq_local[i, j] = moment_val * real(z)
-            end
-        end
-        
+
+        # Compute moment contribution with factor of 2 for half-contour symmetry
+        temp = work[:, 1:M0]' * workc_local
+        weight = 2 * w  # Factor of 2 for conjugate half-contour
+        Aq_local .= real.(weight .* temp)
+        Sq_local .= real.(weight * z .* temp)
+
     catch err
         @warn "Sparse linear solve failed: $err"
     end
-    
+
     return (Aq_local, Sq_local)
 end
 

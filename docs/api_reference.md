@@ -1,8 +1,4 @@
-# API Reference {#api_reference}
-
-```@id api_reference
-```
-
+# API Reference
 
 Complete reference for all FeastKit.jl functions, types, and interfaces.
 
@@ -150,6 +146,7 @@ FeastKit.feast_matfree_grci!
 FeastKit.allocate_matfree_workspace
 FeastKit.create_iterative_solver
 FeastKit.create_direct_solver
+FeastKit.validate_companion_matrices
 ```
 
 ### MatrixVecFunction
@@ -248,6 +245,10 @@ contour = feast_contour_expert(-1.0, 1.0, 10, 0, 50)
 FeastKit.feast_contour_expert
 FeastKit.feast_contour_custom_weights!
 FeastKit.feast_rational_expert
+FeastKit.feast_rational
+FeastKit.feast_rationalx
+FeastKit.feast_grational
+FeastKit.feast_grationalx
 ```
 
 ### feast_gcontour

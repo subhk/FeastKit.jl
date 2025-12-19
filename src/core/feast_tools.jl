@@ -73,19 +73,23 @@ function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:Real
         feastdefault!(fpm)
     end
 
-    ne = fpm[2]  # Number of integration points (half-contour)
-    fpm16 = get(fpm, 16, 0)  # Integration type: 0=Gauss, 1=Trapezoidal, 2=Zolotarev
-    fpm18 = get(fpm, 18, 100)  # Ellipse ratio a/b * 100 (default: 100 = circle)
+    ne = fpm[2]   # Number of integration points (half-contour)
+    fpm16 = fpm[16]  # Integration type: 0=Gauss, 1=Trapezoidal, 2=Zolotarev
+    fpm18 = fpm[18]  # Ellipse ratio a/b * 100 (default: 100 = circle)
 
-    # Parameters from Fortran implementation
-    r = (Emax - Emin) / 2  # Semi-major axis
-    Emid = Emin + r        # Center point
-    aspect_ratio = fpm18 * 0.01  # Convert percentage to ratio
+    # Parameters from Fortran implementation (matches zfeast_contour)
+    r = (Emax - Emin) / T(2)  # Semi-major axis (horizontal)
+    Emid = Emin + r           # Center point
+    aspect_ratio = fpm18 * T(0.01)  # a/b ratio (vertical/horizontal)
+
+    # Integration limits for parametrization (matches Fortran ba, ab)
+    ba = -T(π) / 2
+    ab = T(π) / 2
 
     # Generate half-contour (symmetric about real axis)
     Zne = Vector{Complex{T}}(undef, ne)
     Wne = Vector{Complex{T}}(undef, ne)
-    
+
     # Precompute Gauss–Legendre nodes/weights if needed
     x_gl = nothing
     w_gl = nothing
@@ -94,67 +98,136 @@ function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:Real
     end
 
     for e in 1:ne
-        if fpm16 == 0  # Gauss-Legendre integration on θ ∈ [0, π]
+        if fpm16 == 0  # Gauss-Legendre integration (matches Fortran exactly)
             xe = x_gl[e]
             we = w_gl[e]
-            # Map x ∈ [-1, 1] to θ ∈ [0, π]
-            theta = (π/2) * (xe + 1)
 
-            # Elliptical contour point: z(θ) = Emid + r cosθ + i r a sinθ
+            # Map x ∈ [-1, 1] to θ: theta = ba*xe + ab = -π/2*xe + π/2
+            # This gives θ ∈ [π, 0] as xe goes from -1 to 1 (Fortran convention)
+            theta = ba * xe + ab
+
+            # Elliptical contour point: z(θ) = Emid + r*cos(θ) + i*r*aspect*sin(θ)
             Zne[e] = Emid + r * cos(theta) + im * r * aspect_ratio * sin(theta)
 
-            # Jacobian dz/dθ = -r sinθ + i r a cosθ
-            jac = -r * sin(theta) + im * r * aspect_ratio * cos(theta)
+            # Jacobian (Fortran formula): jac = r*i*sin(θ) + r*aspect*cos(θ)
+            jac = r * im * sin(theta) + r * aspect_ratio * cos(theta)
 
-            # Include dθ/dx = π/2 for the change of variables
-            Wne[e] = (π/2) * we * jac
+            # Weight: Wne = (1/4) * we * jac (matches Fortran exactly)
+            Wne[e] = T(0.25) * we * jac
 
         elseif fpm16 == 2  # Zolotarev integration (optimal for ellipses)
             zxe, zwe = zolotarev_point(ne, e)
             Zne[e] = zxe * r + Emid
             Wne[e] = zwe * r
-            
+
         else  # Trapezoidal integration (fpm16 == 1)
-            theta = π - (π/ne)/2 - (π/ne) * (e-1)
-            
+            # Fortran: theta = π - (π/ne)/2 - (π/ne)*(e-1)
+            theta = T(π) - (T(π)/ne)/2 - (T(π)/ne) * (e-1)
+
             # Elliptical contour point
-            Zne[e] = Emid + r * cos(theta) + im * r * aspect_ratio * sin(theta) 
-            
-            # Jacobian and weight
+            Zne[e] = Emid + r * cos(theta) + im * r * aspect_ratio * sin(theta)
+
+            # Jacobian (Fortran formula)
             jac = r * im * sin(theta) + r * aspect_ratio * cos(theta)
-            Wne[e] = (1.0 / (2 * ne)) * jac
+
+            # Weight: Wne = (1/(2*ne)) * jac (matches Fortran)
+            Wne[e] = (one(T) / (2 * ne)) * jac
         end
     end
-    
+
     return FeastContour{T}(Zne, Wne)
 end
 
 function feast_gcontour(Emid::Complex{T}, r::T, fpm::Vector{Int}) where T<:Real
     # Ensure fpm parameters are initialized
-    # If fpm[2] is still -111 (uninitialized), apply defaults first
-    if fpm[2] == FEAST_UNINITIALIZED || fpm[2] <= 0
+    if fpm[8] == FEAST_UNINITIALIZED || fpm[8] <= 0
         feastdefault!(fpm)
     end
 
-    ne = fpm[2]  # Number of integration points
+    # For non-Hermitian problems, use fpm[8] for full-contour point count
+    ne = fpm[8]      # Number of integration points (full contour)
+    fpm16 = fpm[16]  # Integration type: 0=Gauss, 1=Trapezoidal
+    fpm18 = fpm[18]  # Ellipse ratio a/b * 100 (100 = circle)
+    fpm19 = fpm[19]  # Rotation angle in degrees [-180, 180]
 
-    # Generate circular contour in complex plane
+    aspect_ratio = fpm18 * T(0.01)  # a/b ratio
+
+    # Ellipse axis rotation (convert degrees to radians)
+    rotation_theta = (fpm19 / T(180)) * T(π)
+    nr = r * (cos(rotation_theta) + im * sin(rotation_theta))
+
+    # Integration limits (matches Fortran ba, ab for half-contour)
+    ba = -T(π) / 2
+    ab = T(π) / 2
+
+    # Generate full contour in complex plane (matches zfeast_gcontour)
     Zne = Vector{Complex{T}}(undef, ne)
     Wne = Vector{Complex{T}}(undef, ne)
-    
-    # Generate integration points on circle
-    for i in 1:ne
-        theta = 2π * (i - 1) / ne
-        z = Emid + r * exp(im * theta)
-        
-        # Integration node
-        Zne[i] = z
-        
-        # Integration weight  
-        Wne[i] = r * im * exp(im * theta) * 2π / ne
+
+    if fpm16 == 0  # Gauss-Legendre integration
+        # Fortran: uses two half-contours (upper and lower)
+        x_gl_upper, w_gl_upper = FastGaussQuadrature.gausslegendre(ne ÷ 2)
+        x_gl_lower, w_gl_lower = FastGaussQuadrature.gausslegendre(ne - ne ÷ 2)
+
+        # Upper half (e = 1 to ne/2)
+        for e in 1:(ne ÷ 2)
+            xe = x_gl_upper[e]
+            we = w_gl_upper[e]
+
+            # theta = ba*xe + ab = -π/2*xe + π/2 (upper half: θ ∈ [π, 0])
+            theta = ba * xe + ab
+
+            # Elliptical contour with rotation
+            Zne[e] = Emid + nr * cos(theta) + nr * im * aspect_ratio * sin(theta)
+
+            # Jacobian
+            jac = nr * im * sin(theta) + nr * aspect_ratio * cos(theta)
+
+            # Weight: (1/4) * we * jac
+            Wne[e] = T(0.25) * we * jac
+        end
+
+        # Lower half (e = ne/2+1 to ne)
+        for e in (ne ÷ 2 + 1):ne
+            idx = e - ne ÷ 2
+            xe = x_gl_lower[idx]
+            we = w_gl_lower[idx]
+
+            # theta = -ba*xe - ab = π/2*xe - π/2 (lower half: θ ∈ [0, -π] -> [-π, 0])
+            theta = -ba * xe - ab
+
+            # Elliptical contour with rotation
+            Zne[e] = Emid + nr * cos(theta) + nr * im * aspect_ratio * sin(theta)
+
+            # Jacobian (same formula)
+            jac = nr * im * sin(theta) + nr * aspect_ratio * cos(theta)
+
+            # Weight: (1/4) * we * jac
+            Wne[e] = T(0.25) * we * jac
+        end
+
+    else  # Trapezoidal integration (fpm16 == 1)
+        # Fortran: theta = π - (2π/ne)/2 - (2π/ne)*(e-1)
+        for e in 1:ne
+            theta = T(π) - (2 * T(π) / ne) / 2 - (2 * T(π) / ne) * (e - 1)
+
+            # Elliptical contour with rotation
+            Zne[e] = Emid + nr * cos(theta) + nr * im * aspect_ratio * sin(theta)
+
+            # Jacobian
+            jac = nr * im * sin(theta) + nr * aspect_ratio * cos(theta)
+
+            # Weight: (1/ne) * jac (full contour trapezoidal)
+            Wne[e] = (one(T) / ne) * jac
+        end
     end
-    
+
     return FeastContour{T}(Zne, Wne)
+end
+
+# Overload for real Emid (convenience function)
+function feast_gcontour(Emid::T, r::T, fpm::Vector{Int}) where T<:Real
+    return feast_gcontour(Complex{T}(Emid, zero(T)), r, fpm)
 end
 
 function feast_customcontour(Zne::Vector{Complex{T}}, 

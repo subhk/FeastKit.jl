@@ -1,7 +1,8 @@
 # FeastKit.jl
 
 [![CI](https://github.com/subhk/FeastKit.jl/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/subhk/FeastKit.jl/actions/workflows/ci.yml?query=branch%3Amain)
-[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://subhk.github.io/FeastKit.jl/)
+[![Stable Docs](https://img.shields.io/badge/docs-stable-blue.svg)](https://subhk.github.io/FeastKit.jl/stable/)
+[![Dev Docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://subhk.github.io/FeastKit.jl/dev/)
 
 A Julia implementation of the FeastKit eigenvalue solver for finding eigenvalues and eigenvectors of large-scale eigenvalue problems within a specified region.
 

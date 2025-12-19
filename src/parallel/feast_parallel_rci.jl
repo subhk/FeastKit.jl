@@ -172,14 +172,25 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
     end
     
     if state.ijob == Int(Feast_RCI_MULT_A)
-        # User has computed A*q, now compute residuals
+        # User has computed A*q in work, now compute residuals
+        # For generalized eigenvalue problem A*x = lambda*B*x:
+        # Residual r_j = ||A*q_j - lambda_j*B*q_j|| / ||A*q_j||
+        # work[:, j] contains A*q[:, j]
         M = state.mode
-        
+
         for j in 1:M
-            # Residual: r = A*q - lambda*q (assuming B = I)
-            res[j] = norm(work[:, j] - lambda[j] * q[:, j])
+            # Compute relative residual: ||A*q - lambda*B*q|| / ||A*q||
+            # Note: For standard eigenvalue (B=I), this reduces to ||A*q - lambda*q|| / ||A*q||
+            Aq_norm = norm(work[:, j])
+            if Aq_norm > 0
+                # work[:, j] = A*q[:, j], so residual = ||work - lambda*B*q||
+                # For now, approximate with B=I assumption (user should provide B*q if needed)
+                res[j] = norm(work[:, j] - lambda[j] * q[:, j]) / Aq_norm
+            else
+                res[j] = zero(eltype(res))
+            end
         end
-        
+
         # Check convergence
         state.epsout = maximum(res[1:M])
         eps_tolerance = feast_tolerance(fpm)

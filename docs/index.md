@@ -1,8 +1,4 @@
-# FeastKit.jl Documentation {#home_page}
-
-```@id home_page
-```
-
+# FeastKit.jl Documentation
 
 <div align="center">
   <h1>FeastKit.jl</h1>

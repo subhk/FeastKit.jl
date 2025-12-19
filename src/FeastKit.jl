@@ -5,6 +5,7 @@ export feast_srci!, feast_srcix!, feast_hrci!, feast_hrcix!, feast_grci!, feast_
 export feast_contour, feast_gcontour, feast_customcontour
 export feast, feast_general, feast_matvec
 export feast_parallel, pfeast_srci!, ParallelFeastState
+export pfeast_sygv!, pfeast_scsrgv!, pfeast_compute_all_contour_points!
 export mpi_feast, feast_hybrid, MPIFeastState
 export feast_summary, feast_validate_interval
 export check_feast_srci_input, feast_inside_contour, feast_inside_gcontour

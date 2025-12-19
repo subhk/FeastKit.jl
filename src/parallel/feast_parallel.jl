@@ -62,10 +62,21 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
         
         # Solve reduced eigenvalue problem
         try
-            F = eigen(Aq, Sq)
+            # Symmetrize reduced matrices (matches dense solver approach)
+            Aq_sym = Symmetric(0.5 .* (Aq .+ Aq'))
+            Sq_sym = Symmetric(0.5 .* (Sq .+ Sq'))
+
+            # Use symmetric eigenvalue solver
+            F = try
+                eigen(Aq_sym, Sq_sym)
+            catch e
+                # Fall back to general solver if not positive definite
+                eigen(Aq, Sq)
+            end
+
             lambda_red = real.(F.values)
             v_red = real.(F.vectors)
-            
+
             # Filter eigenvalues in the search interval
             M = 0
             valid_indices = Int[]
@@ -75,16 +86,24 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
                     push!(valid_indices, i)
                 end
             end
-            
+
             if M == 0
-                return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
+                return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[],
                                        Int(Feast_ERROR_NO_CONVERGENCE), zero(T), loop)
             end
-            
+
             # Update eigenvectors
             workspace.lambda[1:M] = lambda_red[valid_indices]
             workspace.q[:, 1:M] = workspace.work * v_red[:, valid_indices]
-            
+
+            # Normalize eigenvectors (matches dense solver)
+            for j in 1:M
+                q_norm = norm(view(workspace.q, :, j))
+                if q_norm > 0
+                    workspace.q[:, j] ./= q_norm
+                end
+            end
+
             # Compute residuals
             feast_residual!(A, B, workspace.lambda, workspace.q, workspace.res, M)
             epsout = maximum(workspace.res[1:M])
@@ -332,10 +351,21 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
         
         # Solve reduced eigenvalue problem and check convergence
         try
-            F = eigen(Aq, Sq)
+            # Symmetrize reduced matrices (matches dense solver approach)
+            Aq_sym = Symmetric(0.5 .* (Aq .+ Aq'))
+            Sq_sym = Symmetric(0.5 .* (Sq .+ Sq'))
+
+            # Use symmetric eigenvalue solver
+            F = try
+                eigen(Aq_sym, Sq_sym)
+            catch e
+                # Fall back to general solver if not positive definite
+                eigen(Aq, Sq)
+            end
+
             lambda_red = real.(F.values)
             v_red = real.(F.vectors)
-            
+
             # Filter and extract eigenvalues
             M = 0
             valid_indices = Int[]
@@ -345,16 +375,24 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                     push!(valid_indices, i)
                 end
             end
-            
+
             if M == 0
-                return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
+                return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[],
                                        Int(Feast_ERROR_NO_CONVERGENCE), zero(T), loop)
             end
-            
+
             # Update solution
             workspace.lambda[1:M] = lambda_red[valid_indices]
             workspace.q[:, 1:M] = workspace.work * v_red[:, valid_indices]
-            
+
+            # Normalize eigenvectors (matches dense solver)
+            for j in 1:M
+                q_norm = norm(view(workspace.q, :, j))
+                if q_norm > 0
+                    workspace.q[:, j] ./= q_norm
+                end
+            end
+
             # Check convergence
             feast_residual!(A, B, workspace.lambda, workspace.q, workspace.res, M)
             epsout = maximum(workspace.res[1:M])

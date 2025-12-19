@@ -1,8 +1,4 @@
-# Custom Contour Integration {#custom_contours}
-
-```@id custom_contours
-```
-
+# Custom Contour Integration
 
 Advanced guide to customizing FeastKit's contour integration for optimal performance and accuracy.
 

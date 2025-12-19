@@ -311,12 +311,15 @@ end
 ## Error Codes
 
 - `info = 0`: Successful convergence
-- `info = 1`: Invalid matrix size
-- `info = 2`: Invalid search subspace size  
-- `info = 3`: Invalid search interval
+- `info = 1`: Invalid matrix size N
+- `info = 2`: Invalid search subspace size M0
+- `info = 3`: Invalid search interval (Emin >= Emax)
+- `info = 4`: Invalid center/radius for complex problems
 - `info = 5`: No convergence achieved
 - `info = 6`: Memory allocation error
+- `info = 7`: Internal error
 - `info = 8`: LAPACK error
+- `info = 9`: Invalid FeastKit parameters
 
 ## Performance Tips
 

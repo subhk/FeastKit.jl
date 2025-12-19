@@ -131,24 +131,24 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
                            maximum(workspace.res[1:M]), max_loops)
 end
 
-# Threaded computation of moments
+# Threaded computation of moments (returns complex moments for proper symmetrization)
 function pfeast_compute_moments_threaded(A::Matrix{T}, B::Matrix{T},
                                         work::Matrix{T}, contour::FeastContour{T},
                                         M0::Int) where T<:Real
     ne = length(contour.Zne)
     N = size(A, 1)
 
-    # Pre-allocate thread-local storage
-    moments = Vector{Tuple{Matrix{T}, Matrix{T}}}(undef, ne)
+    # Pre-allocate thread-local storage for complex moments
+    moments = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, ne)
 
     # Parallel loop over integration points
     Threads.@threads for e in 1:ne
         z = contour.Zne[e]
         w = contour.Wne[e]
 
-        # Local moment matrices for this thread
-        Aq_local = zeros(T, M0, M0)
-        Sq_local = zeros(T, M0, M0)
+        # Local complex moment matrices for this thread
+        Aq_local = zeros(Complex{T}, M0, M0)
+        Sq_local = zeros(Complex{T}, M0, M0)
 
         # Form and factorize (z*B - A)
         system_matrix = z * B - A
@@ -158,25 +158,24 @@ function pfeast_compute_moments_threaded(A::Matrix{T}, B::Matrix{T},
             F = lu(system_matrix)
 
             # Right-hand side: B * Q0
-            rhs = B * work[:, 1:M0]
+            rhs = Complex{T}.(B * work[:, 1:M0])
 
             # Solve all linear systems at once: Y = (z*B - A) \ (B*Q0)
             workc_local = F \ rhs
 
-            # Compute moment contribution with factor of 2 for half-contour symmetry
-            # Matches Fortran: Aq += (2 * Wne[e]) * (Q0' * Y)
-            #                  Sq += (2 * Wne[e] * Zne[e]) * (Q0' * Y)
+            # Compute complex moment contribution with factor of 2 for half-contour symmetry
+            # Keep as complex - symmetrization happens when accumulating
             temp = work[:, 1:M0]' * workc_local
             weight = 2 * w  # Factor of 2 for conjugate half-contour
-            Aq_local .= real.(weight .* temp)
-            Sq_local .= real.(weight * z .* temp)
+            Aq_local .= weight .* temp
+            Sq_local .= weight * z .* temp
 
             moments[e] = (Aq_local, Sq_local)
 
         catch err
             # Handle factorization failure
             @warn "Factorization failed for contour point $e: $err"
-            moments[e] = (zeros(T, M0, M0), zeros(T, M0, M0))
+            moments[e] = (zeros(Complex{T}, M0, M0), zeros(Complex{T}, M0, M0))
         end
     end
 

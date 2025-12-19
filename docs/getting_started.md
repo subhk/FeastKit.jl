@@ -1,8 +1,4 @@
-# Getting Started with FeastKit.jl {#getting_started}
-
-```@id getting_started
-```
-
+# Getting Started with FeastKit.jl
 
 This guide will get you up and running with FeastKit.jl in minutes. Whether you're new to eigenvalue problems or an experienced user, this tutorial covers everything you need to know.
 

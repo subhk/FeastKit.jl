@@ -108,32 +108,6 @@ A_banded = zeros(k+1, n)
 result = feast_banded(A_banded, k, (0.5, 1.5), M0=10)
 ```
 
-### MPI Acceleration (optional)
-
-MPI wrappers mirror the `pdfeast_*` routines in the original FEAST library.
-They are only loaded when `MPI.jl` is available **and** `FEASTKIT_ENABLE_MPI=true`
-is set in the environment:
-
-```bash
-export FEASTKIT_ENABLE_MPI=true
-mpiexec -n 4 julia --project -e 'using FeastKit; println(FeastKit.mpi_available())'
-```
-
-Once enabled you can call the MPI interfaces directly:
-
-```julia
-if FeastKit.mpi_available()
-    using MPI
-    MPI.Init()
-    A = Matrix{Float64}(I, 50, 50)
-    B = Matrix{Float64}(I, 50, 50)
-    fpm = zeros(Int, 64)
-    feastinit!(fpm)
-    FeastKit.mpi_feast_sygv!(A, B, 0.0, 2.0, 16, fpm)
-    MPI.Finalize()
-end
-```
-
 ### Matrix-Free Operations
 
 ```julia

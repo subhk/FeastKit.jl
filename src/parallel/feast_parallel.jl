@@ -362,12 +362,12 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             Aq_sym = Symmetric(0.5 .* (Aq .+ Aq'))
             Sq_sym = Symmetric(0.5 .* (Sq .+ Sq'))
 
-            # Use symmetric eigenvalue solver
+            # IMPORTANT: Solve Sq*x = lambda*Aq*x (not Aq*x = lambda*Sq*x)
             F = try
-                eigen(Aq_sym, Sq_sym)
+                eigen(Sq_sym, Aq_sym)
             catch e
                 # Fall back to general solver if not positive definite
-                eigen(Aq, Sq)
+                eigen(Sq, Aq)
             end
 
             lambda_red = real.(F.values)

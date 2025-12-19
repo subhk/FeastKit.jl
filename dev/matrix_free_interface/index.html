@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Matrix-Free Interface · FeastKit.jl</title><meta name="title" content="Matrix-Free Interface · FeastKit.jl"/><meta property="og:title" content="Matrix-Free Interface · FeastKit.jl"/><meta property="twitter:title" content="Matrix-Free Interface · FeastKit.jl"/><meta name="description" content="Documentation for FeastKit.jl."/><meta property="og:description" content="Documentation for FeastKit.jl."/><meta property="twitter:description" content="Documentation for FeastKit.jl."/><meta property="og:url" content="https://subhk.github.io/FeastKit.jl/stable/matrix_free_interface/"/><meta property="twitter:url" content="https://subhk.github.io/FeastKit.jl/stable/matrix_free_interface/"/><link rel="canonical" href="https://subhk.github.io/FeastKit.jl/stable/matrix_free_interface/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">FeastKit.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../zero_to_feast/">Zero to FeastKit</a></li><li><a class="tocitem" href="../getting_started/">Getting Started</a></li><li><span class="tocitem">User Guide</span><ul><li><a class="tocitem" href="../examples/">Examples</a></li><li class="is-active"><a class="tocitem" href>Matrix-Free Interface</a><ul class="internal"><li><a class="tocitem" href="#Overview"><span>Overview</span></a></li><li><a class="tocitem" href="#Matrix-Free-Operator-Types"><span>Matrix-Free Operator Types</span></a></li><li><a class="tocitem" href="#Basic-Usage"><span>Basic Usage</span></a></li><li><a class="tocitem" href="#Linear-Solvers"><span>Linear Solvers</span></a></li><li><a class="tocitem" href="#Advanced-Features"><span>Advanced Features</span></a></li><li><a class="tocitem" href="#Complete-Examples"><span>Complete Examples</span></a></li><li><a class="tocitem" href="#Performance-Tips"><span>Performance Tips</span></a></li><li><a class="tocitem" href="#Error-Handling"><span>Error Handling</span></a></li><li><a class="tocitem" href="#Integration-with-Other-Packages"><span>Integration with Other Packages</span></a></li></ul></li><li><a class="tocitem" href="../performance/">Performance Tips</a></li><li><a class="tocitem" href="../custom_contours/">Custom Contours</a></li><li><a class="tocitem" href="../complex_eigenvalues/">Complex Eigenvalues</a></li><li><a class="tocitem" href="../polynomial_problems/">Polynomial Problems</a></li><li><a class="tocitem" href="../parallel_computing/">Parallel Computing</a></li></ul></li><li><a class="tocitem" href="../api_reference/">API Reference</a></li><li><span class="tocitem">Project</span><ul><li><a class="tocitem" href="../contributing/">Contributing</a></li><li><a class="tocitem" href="../developer_guide/">Developer Guide</a></li><li><a class="tocitem" href="../testing/">Testing</a></li><li><a class="tocitem" href="../license/">License</a></li><li><a class="tocitem" href="../changelog/">Changelog</a></li><li><a class="tocitem" href="../bibliography/">Bibliography</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">User Guide</a></li><li class="is-active"><a href>Matrix-Free Interface</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Matrix-Free Interface</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl/blob/main/docs/src/matrix_free_interface.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Matrix-Free-FeastKit-Interface"><a class="docs-heading-anchor" href="#Matrix-Free-FeastKit-Interface">Matrix-Free FeastKit Interface</a><a id="Matrix-Free-FeastKit-Interface-1"></a><a class="docs-heading-anchor-permalink" href="#Matrix-Free-FeastKit-Interface" title="Permalink"></a></h1><p>The matrix-free interface allows you to use FeastKit without explicitly storing matrices, making it ideal for large-scale problems where memory is limited or when matrices are too expensive to construct.</p><h2 id="Overview"><a class="docs-heading-anchor" href="#Overview">Overview</a><a id="Overview-1"></a><a class="docs-heading-anchor-permalink" href="#Overview" title="Permalink"></a></h2><p>Instead of providing explicit matrices <code>A</code> and <code>B</code>, you provide functions that compute matrix-vector products:</p><ul><li><code>A_mul!(y, x)</code> computes <code>y = A*x</code></li><li><code>B_mul!(y, x)</code> computes <code>y = B*x</code></li><li><code>linear_solver(Y, z, X)</code> solves <code>(z*B - A)*Y = X</code></li></ul><h2 id="Matrix-Free-Operator-Types"><a class="docs-heading-anchor" href="#Matrix-Free-Operator-Types">Matrix-Free Operator Types</a><a id="Matrix-Free-Operator-Types-1"></a><a class="docs-heading-anchor-permalink" href="#Matrix-Free-Operator-Types" title="Permalink"></a></h2><h3 id="LinearOperator"><a class="docs-heading-anchor" href="#LinearOperator">LinearOperator</a><a id="LinearOperator-1"></a><a class="docs-heading-anchor-permalink" href="#LinearOperator" title="Permalink"></a></h3><p>The main interface for defining matrix-free operators:</p><pre><code class="language-julia hljs">using FeastKit
+
+# Define matrix-vector multiplication function
+function A_mul!(y, x)
+    # Your custom matrix-vector product code here
+    # Example: y = A*x for some implicit matrix A
+end
+
+# Create operator
+n = 1000  # Matrix size
+A_op = LinearOperator{Float64}(A_mul!, (n, n), issymmetric=true)</code></pre><p><strong>Properties you can specify:</strong></p><ul><li><code>issymmetric=true/false</code>: Matrix is symmetric</li><li><code>ishermitian=true/false</code>: Matrix is Hermitian  </li><li><code>isposdef=true/false</code>: Matrix is positive definite</li></ul><h3 id="MatrixVecFunction"><a class="docs-heading-anchor" href="#MatrixVecFunction">MatrixVecFunction</a><a id="MatrixVecFunction-1"></a><a class="docs-heading-anchor-permalink" href="#MatrixVecFunction" title="Permalink"></a></h3><p>Alternative interface for operators that need additional data:</p><pre><code class="language-julia hljs">function A_mul!(y, op, x)
+    # Access operator data via op.data
+    mul!(y, op.data, x)
+end
+
+A_op = MatrixVecFunction{Float64}(A_mul!, (n, n), issymmetric=true)</code></pre><h2 id="Basic-Usage"><a class="docs-heading-anchor" href="#Basic-Usage">Basic Usage</a><a id="Basic-Usage-1"></a><a class="docs-heading-anchor-permalink" href="#Basic-Usage" title="Permalink"></a></h2><h3 id="Standard-Eigenvalue-Problem-(A*x-λ*x)"><a class="docs-heading-anchor" href="#Standard-Eigenvalue-Problem-(A*x-λ*x)">Standard Eigenvalue Problem (A<em>x = λ</em>x)</a><a id="Standard-Eigenvalue-Problem-(A*x-λ*x)-1"></a><a class="docs-heading-anchor-permalink" href="#Standard-Eigenvalue-Problem-(A*x-λ*x)" title="Permalink"></a></h3><pre><code class="language-julia hljs">using FeastKit
+
+n = 10000
+
+# Define A*x operation
+function laplacian_1d!(y, x)
+    # 1D discrete Laplacian: [-1 2 -1] stencil
+    y[1] = 2*x[1] - x[2]
+    for i in 2:n-1
+        y[i] = -x[i-1] + 2*x[i] - x[i+1]
+    end  
+    y[n] = -x[n-1] + 2*x[n]
+end
+
+# Create operator
+A_op = LinearOperator{Float64}(laplacian_1d!, (n, n), issymmetric=true)
+
+# Solve eigenvalue problem
+result = feast(A_op, (0.1, 1.0), M0=10, solver=:cg)
+
+println(&quot;Found $(result.M) eigenvalues&quot;)
+println(&quot;Eigenvalues: $(result.lambda[1:result.M])&quot;)</code></pre><h3 id="Generalized-Eigenvalue-Problem-(A*x-λ*B*x)"><a class="docs-heading-anchor" href="#Generalized-Eigenvalue-Problem-(A*x-λ*B*x)">Generalized Eigenvalue Problem (A<em>x = λ</em>B*x)</a><a id="Generalized-Eigenvalue-Problem-(A*x-λ*B*x)-1"></a><a class="docs-heading-anchor-permalink" href="#Generalized-Eigenvalue-Problem-(A*x-λ*B*x)" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Define both A and B operations
+function A_mul!(y, x)
+    # Your A*x computation
+end
+
+function B_mul!(y, x) 
+    # Your B*x computation
+end
+
+A_op = LinearOperator{Float64}(A_mul!, (n, n), issymmetric=true)
+B_op = LinearOperator{Float64}(B_mul!, (n, n), issymmetric=true, isposdef=true)
+
+result = feast(A_op, B_op, (emin, emax), M0=10)</code></pre><h2 id="Linear-Solvers"><a class="docs-heading-anchor" href="#Linear-Solvers">Linear Solvers</a><a id="Linear-Solvers-1"></a><a class="docs-heading-anchor-permalink" href="#Linear-Solvers" title="Permalink"></a></h2><p>FeastKit requires solving linear systems <code>(z*B - A)*Y = X</code> for various values of <code>z</code>. You have several options:</p><h3 id="Built-in-Iterative-Solvers"><a class="docs-heading-anchor" href="#Built-in-Iterative-Solvers">Built-in Iterative Solvers</a><a id="Built-in-Iterative-Solvers-1"></a><a class="docs-heading-anchor-permalink" href="#Built-in-Iterative-Solvers" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Use GMRES (default, works for general problems)
+result = feast(A_op, B_op, interval, solver=:gmres, 
+              solver_opts=(rtol=1e-6, restart=30, maxiter=1000))
+
+# Use CG (for symmetric positive definite systems)
+result = feast(A_op, B_op, interval, solver=:cg,
+              solver_opts=(rtol=1e-8, maxiter=500))
+
+# Use BiCGSTAB(l) 
+result = feast(A_op, B_op, interval, solver=:bicgstab,
+              solver_opts=(l=2, rtol=1e-6, maxiter=800))</code></pre><h3 id="Custom-Linear-Solver"><a class="docs-heading-anchor" href="#Custom-Linear-Solver">Custom Linear Solver</a><a id="Custom-Linear-Solver-1"></a><a class="docs-heading-anchor-permalink" href="#Custom-Linear-Solver" title="Permalink"></a></h3><p>For specialized problems, provide your own solver:</p><pre><code class="language-julia hljs">function my_custom_solver(Y::AbstractMatrix, z::Number, X::AbstractMatrix)
+    # Solve (z*B - A)*Y = X for each column of X
+    # Store results in corresponding columns of Y
+    
+    M0 = size(X, 2)
+    for j in 1:M0
+        # Your custom solution method for column j
+        Y[:, j] = solve_linear_system(z, X[:, j])
+    end
+end
+
+result = feast(A_op, B_op, interval, solver=my_custom_solver)</code></pre><h2 id="Advanced-Features"><a class="docs-heading-anchor" href="#Advanced-Features">Advanced Features</a><a id="Advanced-Features-1"></a><a class="docs-heading-anchor-permalink" href="#Advanced-Features" title="Permalink"></a></h2><h3 id="Custom-Contour-Integration"><a class="docs-heading-anchor" href="#Custom-Contour-Integration">Custom Contour Integration</a><a id="Custom-Contour-Integration-1"></a><a class="docs-heading-anchor-permalink" href="#Custom-Contour-Integration" title="Permalink"></a></h3><p>Use advanced contour integration methods from the original Fortran FEAST:</p><pre><code class="language-julia hljs"># Gauss-Legendre integration (high accuracy)
+contour = feast_contour_expert(emin, emax, 8, 0, 100)
+
+# Zolotarev integration (optimal for ellipses) 
+contour = feast_contour_expert(emin, emax, 12, 2, 100)
+
+# Custom ellipse aspect ratio (a/b = 0.5, flatter ellipse)
+contour = feast_contour_expert(emin, emax, 10, 0, 50)</code></pre><h3 id="General-(Non-Hermitian)-Problems"><a class="docs-heading-anchor" href="#General-(Non-Hermitian)-Problems">General (Non-Hermitian) Problems</a><a id="General-(Non-Hermitian)-Problems-1"></a><a class="docs-heading-anchor-permalink" href="#General-(Non-Hermitian)-Problems" title="Permalink"></a></h3><p>For non-symmetric matrices with complex eigenvalues:</p><pre><code class="language-julia hljs"># Complex operators
+A_op = LinearOperator{ComplexF64}(A_mul!, (n, n))
+B_op = LinearOperator{ComplexF64}(B_mul!, (n, n))
+
+# Circular search region in complex plane
+center = 1.0 + 0.5im
+radius = 2.0
+
+result = feast_general(A_op, B_op, center, radius, M0=10)</code></pre><h3 id="Polynomial-Eigenvalue-Problems"><a class="docs-heading-anchor" href="#Polynomial-Eigenvalue-Problems">Polynomial Eigenvalue Problems</a><a id="Polynomial-Eigenvalue-Problems-1"></a><a class="docs-heading-anchor-permalink" href="#Polynomial-Eigenvalue-Problems" title="Permalink"></a></h3><p>For polynomial eigenvalue problems P(λ)x = 0:</p><pre><code class="language-julia hljs"># Define coefficient operators for P(λ) = A₀ + λ*A₁ + λ²*A₂
+A0_op = LinearOperator{ComplexF64}(A0_mul!, (n, n))
+A1_op = LinearOperator{ComplexF64}(A1_mul!, (n, n))  
+A2_op = LinearOperator{ComplexF64}(A2_mul!, (n, n))
+
+coeffs = [A0_op, A1_op, A2_op]
+
+result = feast_polynomial(coeffs, center, radius, M0=15)</code></pre><h2 id="Complete-Examples"><a class="docs-heading-anchor" href="#Complete-Examples">Complete Examples</a><a id="Complete-Examples-1"></a><a class="docs-heading-anchor-permalink" href="#Complete-Examples" title="Permalink"></a></h2><h3 id="2D-Discrete-Laplacian"><a class="docs-heading-anchor" href="#2D-Discrete-Laplacian">2D Discrete Laplacian</a><a id="2D-Discrete-Laplacian-1"></a><a class="docs-heading-anchor-permalink" href="#2D-Discrete-Laplacian" title="Permalink"></a></h3><pre><code class="language-julia hljs">using FeastKit
+
+# Parameters
+nx, ny = 200, 200
+n = nx * ny
+h = 1.0 / (nx + 1)
+
+# Index mapping
+idx(i, j) = (j-1) * nx + i
+
+# Matrix-free 2D Laplacian
+function laplacian_2d!(y, x)
+    fill!(y, 0)
+    for j in 1:ny, i in 1:nx
+        k = idx(i, j)
+        y[k] += 4 * x[k] / h^2
+        
+        # Neighbors
+        i &gt; 1  &amp;&amp; (y[k] -= x[idx(i-1, j)] / h^2)
+        i &lt; nx &amp;&amp; (y[k] -= x[idx(i+1, j)] / h^2)
+        j &gt; 1  &amp;&amp; (y[k] -= x[idx(i, j-1)] / h^2)
+        j &lt; ny &amp;&amp; (y[k] -= x[idx(i, j+1)] / h^2)
+    end
+end
+
+A_op = LinearOperator{Float64}(laplacian_2d!, (n, n), 
+                              issymmetric=true, isposdef=true)
+
+# Find smallest eigenvalues
+λ_min_approx = 2π^2 * (1/nx^2 + 1/ny^2)
+result = feast(A_op, (0.5*λ_min_approx, 2.0*λ_min_approx), 
+              M0=20, solver=:cg)
+
+println(&quot;Found $(result.M) eigenvalues:&quot;)
+for i in 1:result.M
+    println(&quot;  λ[$i] = $(result.lambda[i])&quot;)
+end</code></pre><h3 id="Large-Sparse-Matrix-as-Matrix-Free"><a class="docs-heading-anchor" href="#Large-Sparse-Matrix-as-Matrix-Free">Large Sparse Matrix as Matrix-Free</a><a id="Large-Sparse-Matrix-as-Matrix-Free-1"></a><a class="docs-heading-anchor-permalink" href="#Large-Sparse-Matrix-as-Matrix-Free" title="Permalink"></a></h3><p>Even when you have a sparse matrix, using the matrix-free interface can save memory for very large problems:</p><pre><code class="language-julia hljs">using SparseArrays
+
+# Create large sparse matrix (don&#39;t store factorizations)
+n = 100000
+A_sparse = sprand(n, n, 0.0001)  # Very sparse
+A_sparse = A_sparse + A_sparse&#39; + 5*I  # Symmetric positive definite
+
+# Matrix-free wrapper
+A_mul!(y, x) = mul!(y, A_sparse, x)
+A_op = LinearOperator{Float64}(A_mul!, (n, n), issymmetric=true, isposdef=true)
+
+# Find largest eigenvalues
+result = feast(A_op, (4.8, 5.2), M0=8, solver=:cg)</code></pre><h2 id="Performance-Tips"><a class="docs-heading-anchor" href="#Performance-Tips">Performance Tips</a><a id="Performance-Tips-1"></a><a class="docs-heading-anchor-permalink" href="#Performance-Tips" title="Permalink"></a></h2><ol><li><p><strong>Choose appropriate solver</strong>: Use <code>:cg</code> for symmetric positive definite systems, <code>:gmres</code> for general problems.</p></li><li><p><strong>Tune solver parameters</strong>: Adjust <code>rtol</code>, <code>maxiter</code>, and <code>restart</code> based on your problem.</p></li><li><p><strong>Optimize matrix-vector products</strong>: Make your <code>A_mul!</code> and <code>B_mul!</code> functions as efficient as possible.</p></li><li><p><strong>Use workspace reuse</strong>: For repeated solves, pre-allocate workspace:</p><pre><code class="language-julia hljs">workspace = allocate_matfree_workspace(Float64, n, M0)
+result = feast_matfree_srci!(A_op, B_op, interval, M0; workspace=workspace)</code></pre></li><li><p><strong>Consider integration method</strong>: Zolotarev integration often requires fewer points than Gauss-Legendre.</p></li></ol><h2 id="Error-Handling"><a class="docs-heading-anchor" href="#Error-Handling">Error Handling</a><a id="Error-Handling-1"></a><a class="docs-heading-anchor-permalink" href="#Error-Handling" title="Permalink"></a></h2><p>Common issues and solutions:</p><ul><li><strong>Linear solver convergence</strong>: Increase <code>maxiter</code>, decrease <code>rtol</code>, or try different solver</li><li><strong>FeastKit not converging</strong>: Increase <code>maxiter</code> in FeastKit parameters, adjust <code>tol</code> </li><li><strong>No eigenvalues found</strong>: Check that search interval/region contains eigenvalues</li><li><strong>Memory issues</strong>: Use iterative solvers, increase sparsity, consider domain decomposition</li></ul><h2 id="Integration-with-Other-Packages"><a class="docs-heading-anchor" href="#Integration-with-Other-Packages">Integration with Other Packages</a><a id="Integration-with-Other-Packages-1"></a><a class="docs-heading-anchor-permalink" href="#Integration-with-Other-Packages" title="Permalink"></a></h2><p>The matrix-free interface works well with:</p><ul><li><strong>IterativeSolvers.jl</strong>: For advanced iterative methods</li><li><strong>LinearMaps.jl</strong>: Alternative operator interface</li><li><strong>KrylovKit.jl</strong>: High-performance Krylov methods  </li><li><strong>Preconditioners.jl</strong>: For preconditioning</li><li><strong>CUDA.jl</strong>: For GPU-accelerated operations</li></ul><p>Example with LinearMaps.jl:</p><pre><code class="language-julia hljs">using LinearMaps, FeastKit
+
+# Convert LinearMap to FeastKit operator
+lmap = LinearMap(your_function!, n)
+A_op = LinearOperator{Float64}((y,x) -&gt; mul!(y, lmap, x), (n, n))
+
+result = feast(A_op, interval)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../examples/">« Examples</a><a class="docs-footer-nextpage" href="../performance/">Performance Tips »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Friday 19 December 2025 17:59">Friday 19 December 2025</span>. Using Julia version 1.12.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

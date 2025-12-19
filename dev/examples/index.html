@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Examples · FeastKit.jl</title><meta name="title" content="Examples · FeastKit.jl"/><meta property="og:title" content="Examples · FeastKit.jl"/><meta property="twitter:title" content="Examples · FeastKit.jl"/><meta name="description" content="Documentation for FeastKit.jl."/><meta property="og:description" content="Documentation for FeastKit.jl."/><meta property="twitter:description" content="Documentation for FeastKit.jl."/><meta property="og:url" content="https://subhk.github.io/FeastKit.jl/stable/examples/"/><meta property="twitter:url" content="https://subhk.github.io/FeastKit.jl/stable/examples/"/><link rel="canonical" href="https://subhk.github.io/FeastKit.jl/stable/examples/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">FeastKit.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../zero_to_feast/">Zero to FeastKit</a></li><li><a class="tocitem" href="../getting_started/">Getting Started</a></li><li><span class="tocitem">User Guide</span><ul><li class="is-active"><a class="tocitem" href>Examples</a><ul class="internal"><li><a class="tocitem" href="#Table-of-Contents"><span>Table of Contents</span></a></li><li><a class="tocitem" href="#Basic-Examples"><span>Basic Examples</span></a></li><li><a class="tocitem" href="#Scientific-Computing-Applications"><span>Scientific Computing Applications</span></a></li><li><a class="tocitem" href="#Matrix-Free-Examples"><span>Matrix-Free Examples</span></a></li><li><a class="tocitem" href="#Advanced-Features"><span>Advanced Features</span></a></li><li><a class="tocitem" href="#Performance-Examples"><span>Performance Examples</span></a></li><li><a class="tocitem" href="#Real-World-Applications"><span>Real-World Applications</span></a></li></ul></li><li><a class="tocitem" href="../matrix_free_interface/">Matrix-Free Interface</a></li><li><a class="tocitem" href="../performance/">Performance Tips</a></li><li><a class="tocitem" href="../custom_contours/">Custom Contours</a></li><li><a class="tocitem" href="../complex_eigenvalues/">Complex Eigenvalues</a></li><li><a class="tocitem" href="../polynomial_problems/">Polynomial Problems</a></li><li><a class="tocitem" href="../parallel_computing/">Parallel Computing</a></li></ul></li><li><a class="tocitem" href="../api_reference/">API Reference</a></li><li><span class="tocitem">Project</span><ul><li><a class="tocitem" href="../contributing/">Contributing</a></li><li><a class="tocitem" href="../developer_guide/">Developer Guide</a></li><li><a class="tocitem" href="../testing/">Testing</a></li><li><a class="tocitem" href="../license/">License</a></li><li><a class="tocitem" href="../changelog/">Changelog</a></li><li><a class="tocitem" href="../bibliography/">Bibliography</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">User Guide</a></li><li class="is-active"><a href>Examples</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Examples</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl/blob/main/docs/src/examples.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Examples-and-Tutorials"><a class="docs-heading-anchor" href="#Examples-and-Tutorials">Examples and Tutorials</a><a id="Examples-and-Tutorials-1"></a><a class="docs-heading-anchor-permalink" href="#Examples-and-Tutorials" title="Permalink"></a></h1><p>Comprehensive collection of FeastKit.jl examples from basic usage to advanced applications.</p><h2 id="Table-of-Contents"><a class="docs-heading-anchor" href="#Table-of-Contents">Table of Contents</a><a id="Table-of-Contents-1"></a><a class="docs-heading-anchor-permalink" href="#Table-of-Contents" title="Permalink"></a></h2><ol><li><a href="#basic-examples">Basic Examples</a></li><li><a href="#scientific-computing-applications">Scientific Computing Applications</a>  </li><li><a href="#matrix-free-examples">Matrix-Free Examples</a></li><li><a href="#advanced-features">Advanced Features</a></li><li><a href="#performance-examples">Performance Examples</a></li><li><a href="#real-world-applications">Real-World Applications</a></li></ol><hr/><h2 id="Basic-Examples"><a class="docs-heading-anchor" href="#Basic-Examples">Basic Examples</a><a id="Basic-Examples-1"></a><a class="docs-heading-anchor-permalink" href="#Basic-Examples" title="Permalink"></a></h2><h3 id="Example-1:-Your-First-FeastKit-Calculation"><a class="docs-heading-anchor" href="#Example-1:-Your-First-FeastKit-Calculation">Example 1: Your First FeastKit Calculation</a><a id="Example-1:-Your-First-FeastKit-Calculation-1"></a><a class="docs-heading-anchor-permalink" href="#Example-1:-Your-First-FeastKit-Calculation" title="Permalink"></a></h3><p><strong>Problem</strong>: Find eigenvalues of a simple symmetric matrix.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+# Create a 5×5 symmetric matrix
+A = [4.0  -1.0   0.0   0.0   0.0
+    -1.0   4.0  -1.0   0.0   0.0  
+     0.0  -1.0   4.0  -1.0   0.0
+     0.0   0.0  -1.0   4.0  -1.0
+     0.0   0.0   0.0  -1.0   4.0]
+
+println(&quot;Matrix A:&quot;)
+display(A)
+
+# Find eigenvalues between 2 and 6
+result = feast(A, (2.0, 6.0), M0=5)
+
+println(&quot;\\nFEAST Results:&quot;)
+println(&quot;Status: $(result.info == 0 ? &quot;Success&quot; : &quot;Failed&quot;)&quot;)
+println(&quot;Found $(result.M) eigenvalues&quot;)
+
+for i in 1:result.M
+    λ = result.lambda[i]
+    println(&quot;λ[$i] = $λ&quot;)
+end
+
+# Compare with Julia&#39;s built-in eigensolver
+all_eigvals = sort(eigvals(A))
+println(&quot;\\nAll eigenvalues (Julia): $all_eigvals&quot;)</code></pre><p><strong>Expected Output:</strong></p><pre><code class="nohighlight hljs">Found 5 eigenvalues
+λ[1] = 2.0
+λ[2] = 3.0
+λ[3] = 4.0  
+λ[4] = 5.0
+λ[5] = 6.0</code></pre><h3 id="Example-2:-Sparse-Matrix-Eigenvalues"><a class="docs-heading-anchor" href="#Example-2:-Sparse-Matrix-Eigenvalues">Example 2: Sparse Matrix Eigenvalues</a><a id="Example-2:-Sparse-Matrix-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Example-2:-Sparse-Matrix-Eigenvalues" title="Permalink"></a></h3><p><strong>Problem</strong>: Find eigenvalues of a large sparse tridiagonal matrix.</p><pre><code class="language-julia hljs">using FeastKit, SparseArrays, LinearAlgebra
+
+# Create large sparse tridiagonal matrix  
+n = 1000
+A = spdiagm(-1 =&gt; -ones(n-1), 0 =&gt; 2*ones(n), 1 =&gt; -ones(n-1))
+
+println(&quot;Sparse matrix: $(n)×$(n) with $(nnz(A)) nonzeros&quot;)
+
+# Find the 10 smallest eigenvalues
+# For this tridiagonal matrix: λₖ = 2 - 2*cos(kπ/(n+1))
+λ_min = 2 - 2*cos(π/(n+1))      # ≈ 0.0001  
+λ_10 = 2 - 2*cos(10π/(n+1))     # ≈ 0.001
+
+println(&quot;Expected λ₁ ≈ $λ_min&quot;)
+println(&quot;Expected λ₁₀ ≈ $λ_10&quot;)
+
+# FeastKit search
+result = feast(A, (λ_min * 0.9, λ_10 * 1.1), M0=12)
+
+println(&quot;\\nFEAST found $(result.M) eigenvalues:&quot;)
+for i in 1:result.M
+    k = round(Int, acos(1 - result.lambda[i]/2) * (n+1) / π)
+    λ_exact = 2 - 2*cos(k*π/(n+1))
+    error = abs(result.lambda[i] - λ_exact)
+    println(&quot;λ[$i] = $(result.lambda[i]) (exact: $λ_exact, error: $error)&quot;)
+end</code></pre><h3 id="Example-3:-Generalized-Eigenvalue-Problem"><a class="docs-heading-anchor" href="#Example-3:-Generalized-Eigenvalue-Problem">Example 3: Generalized Eigenvalue Problem</a><a id="Example-3:-Generalized-Eigenvalue-Problem-1"></a><a class="docs-heading-anchor-permalink" href="#Example-3:-Generalized-Eigenvalue-Problem" title="Permalink"></a></h3><p><strong>Problem</strong>: Solve A<em>x = λ</em>B*x with two different matrices.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+# Create matrices A (stiffness) and B (mass)
+n = 100
+A = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))  # Stiffness
+B = SymTridiagonal(1.0 * ones(n), 0.1 * ones(n-1))   # Mass
+
+println(&quot;Generalized eigenvalue problem: A*x = λ*B*x&quot;)
+println(&quot;A: $(n)×$(n) tridiagonal (stiffness)&quot;)  
+println(&quot;B: $(n)×$(n) tridiagonal (mass)&quot;)
+
+# Find eigenvalues between 0.5 and 2.5
+result = feast(A, B, (0.5, 2.5), M0=15)
+
+println(&quot;\\nResults:&quot;)
+println(&quot;Found $(result.M) generalized eigenvalues&quot;)
+
+# Display first few eigenvalues and check generalized orthogonality  
+for i in 1:min(5, result.M)
+    λ = result.lambda[i]
+    x = result.q[:, i]
+    
+    # Check: A*x = λ*B*x
+    residual = norm(A*x - λ*(B*x))
+    println(&quot;λ[$i] = $λ (residual: $residual)&quot;)
+end
+
+# Check B-orthogonality of eigenvectors: X&#39;*B*X = I
+if result.M &gt; 1
+    X = result.q[:, 1:result.M]
+    orthogonality = norm(X&#39; * B * X - I)
+    println(&quot;\\nB-orthogonality error: $orthogonality&quot;)
+end</code></pre><hr/><h2 id="Scientific-Computing-Applications"><a class="docs-heading-anchor" href="#Scientific-Computing-Applications">Scientific Computing Applications</a><a id="Scientific-Computing-Applications-1"></a><a class="docs-heading-anchor-permalink" href="#Scientific-Computing-Applications" title="Permalink"></a></h2><h3 id="Example-4:-1D-Wave-Equation-(Vibrating-String)"><a class="docs-heading-anchor" href="#Example-4:-1D-Wave-Equation-(Vibrating-String)">Example 4: 1D Wave Equation (Vibrating String)</a><a id="Example-4:-1D-Wave-Equation-(Vibrating-String)-1"></a><a class="docs-heading-anchor-permalink" href="#Example-4:-1D-Wave-Equation-(Vibrating-String)" title="Permalink"></a></h3><p><strong>Problem</strong>: Find natural frequencies of a vibrating string.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, Plots
+
+# Physical parameters
+L = 1.0      # String length
+T = 100.0    # Tension
+ρ = 1.0      # Linear density  
+n = 500      # Discretization points
+
+# Discretization
+h = L / (n + 1)
+x = h * (1:n)
+
+# Finite difference matrices
+# d²u/dx² ≈ (u[i-1] - 2u[i] + u[i+1])/h²
+A = (T/h^2) * SymTridiagonal(-2.0 * ones(n), ones(n-1))  # -T * d²/dx²
+B = ρ * I  # Mass matrix
+
+println(&quot;1D Wave Equation: -T*d²u/dx² = ω²*ρ*u&quot;)
+println(&quot;String length: $L, Tension: $T, Density: $ρ&quot;)
+println(&quot;Discretized with $n points, h = $h&quot;)
+
+# Find first few natural frequencies
+# Analytical: ωₖ = kπ√(T/ρ)/L
+ω_max = 5π * sqrt(T/ρ) / L  # First 5 modes
+ω²_max = ω_max^2
+
+result = feast(A, B, (0.1, ω²_max), M0=8)
+
+println(&quot;\\nNatural frequencies (Hz):&quot;)
+frequencies = sqrt.(result.lambda[1:result.M]) / (2π)
+
+for i in 1:result.M
+    ω_analytical = i * π * sqrt(T/ρ) / L
+    f_analytical = ω_analytical / (2π)
+    error = abs(frequencies[i] - f_analytical)
+    
+    println(&quot;Mode $i: f = $(frequencies[i]) Hz (exact: $f_analytical Hz, error: $error)&quot;)
+end
+
+# Plot mode shapes
+if result.M &gt;= 3
+    p = plot(x, result.q[:, 1], label=&quot;Mode 1&quot;, linewidth=2)
+    plot!(p, x, result.q[:, 2], label=&quot;Mode 2&quot;, linewidth=2)
+    plot!(p, x, result.q[:, 3], label=&quot;Mode 3&quot;, linewidth=2)
+    xlabel!(p, &quot;Position x&quot;)
+    ylabel!(p, &quot;Amplitude&quot;)  
+    title!(p, &quot;Vibrating String Mode Shapes&quot;)
+    display(p)
+end</code></pre><h3 id="Example-5:-2D-Membrane-Vibrations-(Drum-Head)"><a class="docs-heading-anchor" href="#Example-5:-2D-Membrane-Vibrations-(Drum-Head)">Example 5: 2D Membrane Vibrations (Drum Head)</a><a id="Example-5:-2D-Membrane-Vibrations-(Drum-Head)-1"></a><a class="docs-heading-anchor-permalink" href="#Example-5:-2D-Membrane-Vibrations-(Drum-Head)" title="Permalink"></a></h3><p><strong>Problem</strong>: Find vibrational modes of a circular drum.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+# 2D Laplacian on square domain (approximating circular drum)
+nx, ny = 50, 50
+n = nx * ny
+h = 1.0 / (nx + 1)
+
+println(&quot;2D Membrane: -∇²u = ω²u on unit square&quot;)
+println(&quot;Grid: $(nx)×$(ny), spacing: $h&quot;)
+
+# Matrix-free 2D Laplacian with Dirichlet boundary conditions
+function laplacian_2d!(y, x)
+    fill!(y, 0)
+    
+    for j in 1:ny, i in 1:nx
+        k = (j-1) * nx + i
+        
+        # Central difference: -∇²u ≈ -(4u - u_left - u_right - u_up - u_down)/h²
+        y[k] += 4 * x[k] / h^2
+        
+        # Neighbors (with zero Dirichlet boundaries)  
+        if i &gt; 1
+            y[k] -= x[k-1] / h^2
+        end
+        if i &lt; nx
+            y[k] -= x[k+1] / h^2
+        end
+        if j &gt; 1
+            y[k] -= x[k-nx] / h^2  
+        end
+        if j &lt; ny
+            y[k] -= x[k+nx] / h^2
+        end
+    end
+end
+
+# Create matrix-free operator
+A_op = LinearOperator{Float64}(laplacian_2d!, (n, n), 
+                              issymmetric=true, isposdef=true)
+
+# Find fundamental modes (lowest frequencies)
+# Analytical for square: ωₘₙ² = π²(m² + n²) for m,n = 1,2,3,...  
+ω²_fundamental = π^2 * (1^2 + 1^2)  # Mode (1,1)
+ω²_search_max = π^2 * (2^2 + 2^2)   # Up to mode (2,2)
+
+println(&quot;Searching for eigenvalues up to $(ω²_search_max)&quot;)
+println(&quot;Fundamental frequency ω₁₁² = $ω²_fundamental&quot;)
+
+result = feast(A_op, (0.8 * ω²_fundamental, 1.2 * ω²_search_max), 
+              M0=10, solver=:cg, solver_opts=(rtol=1e-6, maxiter=500))
+
+println(&quot;\\n2D Membrane Modes:&quot;)
+println(&quot;Found $(result.M) eigenfrequencies&quot;)
+
+# Match with analytical modes
+analytical_modes = [(1,1), (1,2), (2,1), (2,2)]
+for i in 1:min(result.M, length(analytical_modes))
+    m, n = analytical_modes[i]
+    ω²_exact = π^2 * (m^2 + n^2)  
+    ω²_feast = result.lambda[i]
+    error = abs(ω²_feast - ω²_exact)
+    
+    println(&quot;Mode ($m,$n): ω² = $ω²_feast (exact: $ω²_exact, error: $error)&quot;)
+end
+
+# Visualize first mode shape
+if result.M &gt; 0
+    mode1 = reshape(result.q[:, 1], nx, ny)
+    println(&quot;\\nFirst mode shape computed (reshape to $(nx)×$(ny) grid for visualization)&quot;)
+end</code></pre><h3 id="Example-6:-Quantum-Harmonic-Oscillator"><a class="docs-heading-anchor" href="#Example-6:-Quantum-Harmonic-Oscillator">Example 6: Quantum Harmonic Oscillator</a><a id="Example-6:-Quantum-Harmonic-Oscillator-1"></a><a class="docs-heading-anchor-permalink" href="#Example-6:-Quantum-Harmonic-Oscillator" title="Permalink"></a></h3><p><strong>Problem</strong>: Find energy levels of quantum harmonic oscillator.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+# 1D Quantum Harmonic Oscillator: H = -½d²/dx² + ½x²
+# Discretized on [-L, L] with N points
+
+L = 6.0     # Domain size (covers most of wavefunction)
+N = 1000    # Grid points
+h = 2L / (N - 1)
+x = range(-L, L, length=N)
+
+println(&quot;Quantum Harmonic Oscillator: H = -½d²/dx² + ½x²&quot;)
+println(&quot;Domain: x ∈ [$(-L), $L], grid spacing: $h&quot;)
+
+# Hamiltonian matrix (using finite differences)
+# Kinetic energy: -½d²/dx² ≈ -½(ψ[i+1] - 2ψ[i] + ψ[i-1])/h²
+# Potential energy: ½x²ψ[i]
+
+H = zeros(N, N)
+
+for i in 1:N
+    # Potential energy
+    H[i, i] += 0.5 * x[i]^2
+    
+    # Kinetic energy (finite difference)
+    if i &gt; 1
+        H[i, i-1] += -0.5 / h^2
+    end
+    if i &lt; N  
+        H[i, i+1] += -0.5 / h^2
+    end
+    H[i, i] += 0.5 / h^2  # Central term from kinetic
+end
+
+# Enforce boundary conditions (ψ = 0 at boundaries)
+H[1, :] .= 0; H[1, 1] = 1e10
+H[N, :] .= 0; H[N, N] = 1e10
+
+println(&quot;Hamiltonian matrix: $(N)×$(N)&quot;)
+
+# Find ground state and first few excited states  
+# Analytical energies: Eₙ = n + ½ for n = 0, 1, 2, ...
+E_ground = 0.5      # Ground state
+E_max = 5.5         # Up to n = 5
+
+result = feast(H, (E_ground - 0.1, E_max + 0.1), M0=8)
+
+println(&quot;\\nQuantum Energy Levels:&quot;)
+println(&quot;Found $(result.M) energy eigenstates&quot;)
+
+for i in 1:result.M
+    E_exact = (i-1) + 0.5  # n = 0, 1, 2, ...
+    E_computed = result.lambda[i]
+    error = abs(E_computed - E_exact)
+    
+    println(&quot;n=$(i-1): E = $E_computed (exact: $E_exact, error: $error)&quot;)
+end
+
+# Check normalization of wavefunctions
+println(&quot;\\nWavefunction normalization check:&quot;)
+for i in 1:min(3, result.M)
+    ψ = result.q[:, i]
+    norm_ψ = sqrt(sum(ψ.^2) * h)  # Numerical integration
+    println(&quot;||ψ_$(i-1)||₂ = $norm_ψ (should be ≈ 1)&quot;)
+end</code></pre><hr/><h2 id="Matrix-Free-Examples"><a class="docs-heading-anchor" href="#Matrix-Free-Examples">Matrix-Free Examples</a><a id="Matrix-Free-Examples-1"></a><a class="docs-heading-anchor-permalink" href="#Matrix-Free-Examples" title="Permalink"></a></h2><h3 id="Example-7:-Large-Scale-Finite-Element-Problem"><a class="docs-heading-anchor" href="#Example-7:-Large-Scale-Finite-Element-Problem">Example 7: Large-Scale Finite Element Problem</a><a id="Example-7:-Large-Scale-Finite-Element-Problem-1"></a><a class="docs-heading-anchor-permalink" href="#Example-7:-Large-Scale-Finite-Element-Problem" title="Permalink"></a></h3><p><strong>Problem</strong>: Structural eigenanalysis without storing global matrices.</p><pre><code class="language-julia hljs">using FeastKit, SparseArrays
+
+# Simulate large finite element problem  
+# In reality, this would come from FE assembly
+n_nodes = 100000  # Very large problem
+n_dofs = 3 * n_nodes  # 3 DOFs per node (x, y, z)
+
+println(&quot;Large-scale structural analysis&quot;)  
+println(&quot;Nodes: $(n_nodes), DOFs: $(n_dofs)&quot;)
+println(&quot;Memory for full matrix: $(8 * n_dofs^2 / 1e9) GB&quot;)
+println(&quot;Memory for matrix-free: $(8 * n_dofs / 1e6) MB&quot;)
+
+# Matrix-free stiffness matrix operation K*u
+function stiffness_matvec!(Ku, u)
+    # In practice: loop over elements, compute element stiffness,
+    # and assemble contributions to Ku
+    
+    # Simplified: 3D Laplacian-like operator  
+    fill!(Ku, 0)
+    
+    # Simple 3D finite difference stencil (6-point)
+    n = length(u) ÷ 3  # Number of nodes
+    
+    for node in 1:n
+        for dof in 1:3  # x, y, z components
+            idx = 3*(node-1) + dof
+            
+            # Diagonal term (self-stiffness)
+            Ku[idx] += 6.0 * u[idx]
+            
+            # Coupling with neighboring nodes (simplified connectivity)
+            for neighbor_offset in [-1, 1, -10, 10, -100, 100]  # 3D grid-like
+                neighbor = node + neighbor_offset
+                if 1 &lt;= neighbor &lt;= n
+                    neighbor_idx = 3*(neighbor-1) + dof
+                    Ku[idx] -= u[neighbor_idx]
+                end
+            end
+        end
+    end
+end
+
+# Matrix-free mass matrix operation M*u
+function mass_matvec!(Mu, u)
+    # Diagonal mass matrix (lumped mass)
+    @. Mu = 1.0 * u
+end
+
+# Create matrix-free operators
+K_op = LinearOperator{Float64}(stiffness_matvec!, (n_dofs, n_dofs), issymmetric=true)
+M_op = LinearOperator{Float64}(mass_matvec!, (n_dofs, n_dofs), 
+                              issymmetric=true, isposdef=true)
+
+println(&quot;\\nCreated matrix-free operators&quot;)
+println(&quot;Searching for natural frequencies between 0.1 and 2.0 Hz...&quot;)
+
+# Find structural modes (natural frequencies)
+ω²_min, ω²_max = (2π * 0.1)^2, (2π * 2.0)^2
+
+result = feast(K_op, M_op, (ω²_min, ω²_max), M0=20,
+              solver=:cg,
+              solver_opts=(rtol=1e-4, maxiter=200))
+
+println(&quot;\\nStructural Analysis Results:&quot;)
+println(&quot;Found $(result.M) vibrational modes&quot;)
+
+frequencies_Hz = sqrt.(result.lambda[1:result.M]) / (2π)
+for i in 1:result.M
+    println(&quot;Mode $i: f = $(frequencies_Hz[i]) Hz&quot;)
+end
+
+println(&quot;\\nMatrix-free calculation completed successfully!&quot;)
+println(&quot;Peak memory usage: ~$(8 * n_dofs * result.M / 1e6) MB&quot;)</code></pre><h3 id="Example-8:-Iterative-Solver-Comparison"><a class="docs-heading-anchor" href="#Example-8:-Iterative-Solver-Comparison">Example 8: Iterative Solver Comparison</a><a id="Example-8:-Iterative-Solver-Comparison-1"></a><a class="docs-heading-anchor-permalink" href="#Example-8:-Iterative-Solver-Comparison" title="Permalink"></a></h3><p><strong>Problem</strong>: Compare different iterative solvers for matrix-free FeastKit.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, BenchmarkTools
+
+# Test problem: 2D Poisson equation
+nx, ny = 200, 200  
+n = nx * ny
+h = 1.0 / (nx + 1)
+
+println(&quot;2D Poisson Eigenvalue Problem&quot;)
+println(&quot;Grid: $(nx)×$(ny), DOFs: $(n)&quot;)
+
+# Matrix-free Laplacian
+function laplacian!(y, x)
+    fill!(y, 0)
+    for j in 1:ny, i in 1:nx
+        k = (j-1) * nx + i
+        y[k] += 4 * x[k] / h^2
+        
+        i &gt; 1  &amp;&amp; (y[k] -= x[k-1] / h^2)
+        i &lt; nx &amp;&amp; (y[k] -= x[k+1] / h^2)  
+        j &gt; 1  &amp;&amp; (y[k] -= x[k-nx] / h^2)
+        j &lt; ny &amp;&amp; (y[k] -= x[k+nx] / h^2)
+    end
+end
+
+A_op = LinearOperator{Float64}(laplacian!, (n, n), issymmetric=true, isposdef=true)
+interval = (10.0, 50.0)  # Search range
+
+# Test different iterative solvers
+solvers = [
+    (:cg, &quot;Conjugate Gradient&quot;),
+    (:gmres, &quot;GMRES&quot;), 
+    (:bicgstab, &quot;BiCGSTAB(l)&quot;)
+]
+
+results = Dict()
+
+for (solver_name, description) in solvers
+    println(&quot;\\n&quot; * &quot;=&quot;^50)
+    println(&quot;Testing solver: $description&quot;)
+    
+    # Configure solver options
+    if solver_name == :cg
+        opts = (rtol=1e-6, maxiter=300)
+    elseif solver_name == :gmres  
+        opts = (rtol=1e-6, restart=50, maxiter=300)
+    else  # bicgstab
+        opts = (rtol=1e-6, l=2, maxiter=300)
+    end
+    
+    # Time the calculation
+    time_taken = @elapsed begin
+        result = feast(A_op, interval, M0=8, 
+                      solver=solver_name, solver_opts=opts)
+    end
+    
+    results[solver_name] = (result=result, time=time_taken)
+    
+    println(&quot;Solver: $description&quot;)
+    println(&quot;  Time: $(time_taken) seconds&quot;)
+    println(&quot;  Eigenvalues found: $(result.M)&quot;)
+    println(&quot;  FeastKit status: $(result.info == 0 ? &quot;Success&quot; : &quot;Failed&quot;)&quot;)
+    println(&quot;  Convergence: $(result.epsout)&quot;)
+    
+    if result.M &gt; 0
+        println(&quot;  First 3 eigenvalues: $(result.lambda[1:min(3, result.M)])&quot;)
+    end
+end
+
+# Summary comparison
+println(&quot;\\n&quot; * &quot;=&quot;^60)
+println(&quot;SOLVER COMPARISON SUMMARY&quot;)
+println(&quot;=&quot;^60)
+printf_str = &quot;%-20s %-10s %-8s %-12s\\n&quot;
+@printf(printf_str, &quot;Solver&quot;, &quot;Time (s)&quot;, &quot;Found&quot;, &quot;Status&quot;)
+println(&quot;-&quot;^60)
+
+for (solver_name, description) in solvers
+    if haskey(results, solver_name)
+        r = results[solver_name]
+        status = r.result.info == 0 ? &quot;Success&quot; : &quot;Failed&quot;
+        @printf(printf_str, description, r.time, r.result.M, status)
+    end
+end</code></pre><hr/><h2 id="Advanced-Features"><a class="docs-heading-anchor" href="#Advanced-Features">Advanced Features</a><a id="Advanced-Features-1"></a><a class="docs-heading-anchor-permalink" href="#Advanced-Features" title="Permalink"></a></h2><h3 id="Example-9:-Custom-Contour-Integration"><a class="docs-heading-anchor" href="#Example-9:-Custom-Contour-Integration">Example 9: Custom Contour Integration</a><a id="Example-9:-Custom-Contour-Integration-1"></a><a class="docs-heading-anchor-permalink" href="#Example-9:-Custom-Contour-Integration" title="Permalink"></a></h3><p><strong>Problem</strong>: Use advanced integration methods for challenging problems.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+# Create a challenging matrix (clustered eigenvalues)
+n = 200
+A = diagm(0 =&gt; vcat(0.98:0.002:1.02, 2.0:0.1:5.0))  # Tight cluster + spread
+A = A + 0.01 * randn(n, n)  # Add small random perturbation  
+A = (A + A&#39;) / 2  # Ensure symmetry
+
+println(&quot;Matrix with clustered eigenvalues&quot;)
+println(&quot;Cluster around 1.0: [0.98, 1.02]&quot;)
+println(&quot;Spread eigenvalues: [2.0, 5.0]&quot;)
+
+target_interval = (0.97, 1.03)  # Focus on the cluster
+
+# Compare different integration methods
+integration_methods = [
+    (0, &quot;Gauss-Legendre&quot;),
+    (1, &quot;Trapezoidal&quot;), 
+    (2, &quot;Zolotarev&quot;)
+]
+
+println(&quot;\\nComparing integration methods for clustered eigenvalues:&quot;)
+
+for (method_id, method_name) in integration_methods
+    println(&quot;\\n&quot; * &quot;-&quot;^40)
+    println(&quot;Method: $method_name&quot;)
+    
+    # Test different numbers of integration points
+    for ne in [8, 16, 24]
+        # Generate custom contour
+        contour = feast_contour_expert(target_interval[1], target_interval[2], 
+                                     ne, method_id, 100)
+        
+        println(&quot;\\n  Integration points: $ne&quot;)
+        println(&quot;  Contour nodes: $(length(contour.Zne))&quot;)
+        
+        # Create custom FMP parameters
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[2] = ne           # Number of points
+        fpm[16] = method_id   # Integration method
+        fpm[18] = 100         # Circular contour
+        
+        result = feast(A, target_interval, M0=20, fpm=fpm)
+        
+        # Find how many eigenvalues are actually in the target interval
+        exact_in_interval = count(λ -&gt; target_interval[1] &lt;= λ &lt;= target_interval[2], 
+                                eigvals(A))
+        
+        println(&quot;    Found: $(result.M) eigenvalues&quot;)
+        println(&quot;    Expected: $exact_in_interval eigenvalues&quot;)  
+        println(&quot;    Convergence: $(result.epsout)&quot;)
+        println(&quot;    Iterations: $(result.loop)&quot;)
+    end
+end</code></pre><h3 id="Example-10:-Complex-Eigenvalue-Problems"><a class="docs-heading-anchor" href="#Example-10:-Complex-Eigenvalue-Problems">Example 10: Complex Eigenvalue Problems</a><a id="Example-10:-Complex-Eigenvalue-Problems-1"></a><a class="docs-heading-anchor-permalink" href="#Example-10:-Complex-Eigenvalue-Problems" title="Permalink"></a></h3><p><strong>Problem</strong>: Find eigenvalues of non-Hermitian matrices in complex regions.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, Random
+
+Random.seed!(123)
+
+# Create non-Hermitian matrix with known eigenvalue distribution
+n = 100
+
+# Upper Hessenberg matrix (like from Arnoldi process)
+A = triu(randn(ComplexF64, n, n), -1)  # Upper Hessenberg
+A[diagind(A)] .+= 2.0 + 0.5im          # Shift diagonal 
+
+println(&quot;Non-Hermitian matrix ($(n)×$(n) upper Hessenberg)&quot;)
+println(&quot;Expected eigenvalues near 2.0 + 0.5i&quot;)
+
+# Identity mass matrix
+B = Matrix{ComplexF64}(I, n, n)
+
+# Define circular search regions
+search_regions = [
+    (2.0 + 0.5im, 1.0, &quot;Main cluster&quot;),
+    (0.0 + 0.0im, 2.0, &quot;Origin region&quot;), 
+    (3.0 + 2.0im, 1.5, &quot;Upper right&quot;)
+]
+
+println(&quot;\\nSearching in multiple circular regions:&quot;)
+
+all_found_eigenvalues = ComplexF64[]
+
+for (center, radius, description) in search_regions
+    println(&quot;\\n&quot; * &quot;=&quot;^50) 
+    println(&quot;Region: $description&quot;)
+    println(&quot;Center: $center, Radius: $radius&quot;)
+    
+    result = feast_general(A, B, center, radius, M0=15)
+    
+    println(&quot;Status: $(result.info == 0 ? &quot;Success&quot; : &quot;Failed&quot;)&quot;)  
+    println(&quot;Found: $(result.M) eigenvalues&quot;)
+    
+    if result.M &gt; 0
+        println(&quot;Eigenvalues in this region:&quot;)
+        region_eigenvalues = result.lambda[1:result.M]
+        
+        for (i, λ) in enumerate(region_eigenvalues)
+            distance = abs(λ - center)
+            inside = distance &lt;= radius
+            println(&quot;  λ[$i] = $(round(λ, digits=4)) &quot; *
+                   &quot;(distance: $(round(distance, digits=3)), &quot; *
+                   &quot;inside: $inside)&quot;)
+        end
+        
+        # Add to global list (avoid duplicates)  
+        for λ in region_eigenvalues
+            if !any(abs.(λ .- all_found_eigenvalues) .&lt; 1e-8)
+                push!(all_found_eigenvalues, λ)
+            end
+        end
+    end
+end
+
+println(&quot;\\n&quot; * &quot;=&quot;^60)
+println(&quot;SUMMARY: Found $(length(all_found_eigenvalues)) unique eigenvalues&quot;)
+
+# Compare with full eigendecomposition
+true_eigenvalues = eigvals(A)
+println(&quot;Total eigenvalues in matrix: $(length(true_eigenvalues))&quot;)
+
+# Visualize eigenvalue distribution (if plotting available)
+try
+    using Plots
+    
+    p = scatter(real.(true_eigenvalues), imag.(true_eigenvalues), 
+               label=&quot;All eigenvalues&quot;, alpha=0.6, ms=4)
+    scatter!(p, real.(all_found_eigenvalues), imag.(all_found_eigenvalues),
+            label=&quot;FeastKit found&quot;, color=:red, ms=6, alpha=0.8)
+    
+    # Draw search circles
+    θ = 0:0.1:2π
+    for (center, radius, description) in search_regions
+        circle_x = real(center) .+ radius .* cos.(θ)  
+        circle_y = imag(center) .+ radius .* sin.(θ)
+        plot!(p, circle_x, circle_y, label=&quot;$description region&quot;, 
+              linestyle=:dash, linewidth=2)
+    end
+    
+    xlabel!(p, &quot;Real part&quot;)
+    ylabel!(p, &quot;Imaginary part&quot;)
+    title!(p, &quot;Complex Eigenvalue Distribution&quot;)
+    display(p)
+    
+catch e
+    println(&quot;Plotting not available: $e&quot;)
+end</code></pre><h3 id="Example-11:-Polynomial-Eigenvalue-Problems"><a class="docs-heading-anchor" href="#Example-11:-Polynomial-Eigenvalue-Problems">Example 11: Polynomial Eigenvalue Problems</a><a id="Example-11:-Polynomial-Eigenvalue-Problems-1"></a><a class="docs-heading-anchor-permalink" href="#Example-11:-Polynomial-Eigenvalue-Problems" title="Permalink"></a></h3><p><strong>Problem</strong>: Solve quadratic eigenvalue problem (λ²M + λC + K)x = 0.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+# Quadratic eigenvalue problem: (λ²M + λC + K)x = 0
+# Example: Damped vibration problem
+
+n = 50  # System size
+
+# Create coefficient matrices
+K = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))  # Stiffness
+C = 0.1 * SymTridiagonal(ones(n), zeros(n-1))         # Damping  
+M = Matrix{Float64}(I, n, n)                          # Mass
+
+println(&quot;Quadratic Eigenvalue Problem: (λ²M + λC + K)x = 0&quot;)
+println(&quot;Damped vibration system&quot;)
+println(&quot;System size: $(n)×$(n)&quot;)
+
+# Convert to matrix-free operators for polynomial FeastKit
+K_op = LinearOperator{ComplexF64}((y, x) -&gt; mul!(y, K, real.(x)), (n, n))
+C_op = LinearOperator{ComplexF64}((y, x) -&gt; mul!(y, C, real.(x)), (n, n))  
+M_op = LinearOperator{ComplexF64}((y, x) -&gt; mul!(y, M, real.(x)), (n, n))
+
+# Coefficient array: P(λ) = K + λC + λ²M
+coeffs = [K_op, C_op, M_op]
+
+println(&quot;Polynomial coefficients: P(λ) = K + λC + λ²M&quot;)
+
+# Search for eigenvalues near origin (low-frequency modes)
+center = 0.0 + 0.0im
+radius = 2.0
+
+println(&quot;Searching in circular region: center = $center, radius = $radius&quot;)
+
+result = feast_polynomial(coeffs, center, radius, M0=10)
+
+println(&quot;\\nPolynomial Eigenvalue Results:&quot;)
+println(&quot;Status: $(result.info == 0 ? &quot;Success&quot; : &quot;Failed&quot;)&quot;)
+println(&quot;Found: $(result.M) eigenvalues&quot;)
+
+if result.M &gt; 0
+    println(&quot;\\nEigenvalues (should be complex conjugate pairs):&quot;)
+    for i in 1:result.M
+        λ = result.lambda[i]
+        freq = abs(λ) / (2π)
+        damping_ratio = -real(λ) / abs(λ)
+        
+        println(&quot;λ[$i] = $(round(λ, digits=6))&quot;)  
+        println(&quot;  Frequency: $(round(freq, digits=4)) Hz&quot;)
+        println(&quot;  Damping ratio: $(round(damping_ratio, digits=4))&quot;)
+        println()
+    end
+    
+    # Verify polynomial eigenvalue equation: P(λ)x = 0
+    println(&quot;Verification (residual norms):&quot;)
+    for i in 1:min(3, result.M)
+        λ = result.lambda[i]
+        x = result.q[:, i]
+        
+        # Compute P(λ)x = (λ²M + λC + K)x  
+        residual = λ^2 * (M * real.(x)) + λ * (C * real.(x)) + K * real.(x)
+        residual_norm = norm(residual)
+        
+        println(&quot;||P(λ[$i])x[$i]|| = $residual_norm&quot;)
+    end
+end
+
+# Compare with linearized version (for validation)
+println(&quot;\\n&quot; * &quot;-&quot;^50)
+println(&quot;Comparison with linearized eigenvalue problem:&quot;)
+
+# Linearization: [ 0   I ] [x]     [x]
+#                [-K  -C] [λx] = λ[-M  0][λx] 
+#
+# This gives 2n eigenvalues (including spurious ones)
+
+A_lin = [zeros(n, n)  Matrix{Float64}(I, n, n);
+         -K           -C                       ]
+B_lin = [-M           zeros(n, n);
+         zeros(n, n)  Matrix{Float64}(I, n, n)]
+
+# Convert to complex for general eigenvalue solver
+A_lin_c = ComplexF64.(A_lin)
+B_lin_c = ComplexF64.(B_lin)
+
+result_lin = feast_general(A_lin_c, B_lin_c, center, radius, M0=20)
+
+println(&quot;Linearized problem found: $(result_lin.M) eigenvalues&quot;)
+if result_lin.M &gt; 0
+    println(&quot;First few linearized eigenvalues:&quot;)
+    for i in 1:min(5, result_lin.M)
+        println(&quot;  λ_lin[$i] = $(round(result_lin.lambda[i], digits=6))&quot;)
+    end
+end</code></pre><hr/><h2 id="Performance-Examples"><a class="docs-heading-anchor" href="#Performance-Examples">Performance Examples</a><a id="Performance-Examples-1"></a><a class="docs-heading-anchor-permalink" href="#Performance-Examples" title="Permalink"></a></h2><h3 id="Example-12:-Memory-Usage-Comparison"><a class="docs-heading-anchor" href="#Example-12:-Memory-Usage-Comparison">Example 12: Memory Usage Comparison</a><a id="Example-12:-Memory-Usage-Comparison-1"></a><a class="docs-heading-anchor-permalink" href="#Example-12:-Memory-Usage-Comparison" title="Permalink"></a></h3><p><strong>Problem</strong>: Compare memory usage of different approaches.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, SparseArrays
+
+# Test different problem sizes and approaches
+problem_sizes = [1000, 5000, 10000, 20000]
+
+println(&quot;Memory Usage Comparison: Dense vs Sparse vs Matrix-Free&quot;)
+println(&quot;=&quot;^70)
+@printf(&quot;%-10s %-15s %-15s %-15s\\n&quot;, &quot;Size&quot;, &quot;Dense (MB)&quot;, &quot;Sparse (MB)&quot;, &quot;Matrix-Free (MB)&quot;)
+println(&quot;-&quot;^70)
+
+for n in problem_sizes
+    # Dense matrix memory
+    dense_memory = 8 * n^2 / 1e6  # 8 bytes per Float64
+    
+    # Sparse matrix memory (assuming 0.1% density)
+    nnz_sparse = round(Int, 0.001 * n^2)
+    sparse_memory = (8 * nnz_sparse + 4 * (nnz_sparse + n + 1)) / 1e6  # data + indices
+    
+    # Matrix-free memory (just vectors for FeastKit)
+    M0 = 10
+    matfree_memory = 8 * n * M0 / 1e6  # Workspace vectors
+    
+    @printf(&quot;%-10d %-15.1f %-15.1f %-15.1f\\n&quot;, 
+           n, dense_memory, sparse_memory, matfree_memory)
+    
+    # Demonstrate actual usage for largest manageable size
+    if n &lt;= 5000
+        println(&quot;\\nTesting n = $n:&quot;)
+        
+        # Create test matrix  
+        A_dense = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))
+        A_sparse = sparse(A_dense)
+        
+        function A_matvec!(y, x)
+            y[1] = 2*x[1] - x[2]
+            for i in 2:n-1
+                y[i] = -x[i-1] + 2*x[i] - x[i+1]  
+            end
+            y[n] = -x[n-1] + 2*x[n]
+        end
+        A_op = LinearOperator{Float64}(A_matvec!, (n, n), issymmetric=true)
+        
+        # Time each approach  
+        interval = (0.01, 0.1)
+        M0 = 5
+        
+        println(&quot;  Dense matrix:&quot;)
+        @time result_dense = feast(A_dense, interval, M0=M0)
+        println(&quot;    Found: $(result_dense.M) eigenvalues&quot;)
+        
+        println(&quot;  Sparse matrix:&quot;)  
+        @time result_sparse = feast(A_sparse, interval, M0=M0)
+        println(&quot;    Found: $(result_sparse.M) eigenvalues&quot;)
+        
+        println(&quot;  Matrix-free:&quot;)
+        @time result_matfree = feast(A_op, interval, M0=M0, solver=:cg)  
+        println(&quot;    Found: $(result_matfree.M) eigenvalues&quot;)
+        
+        # Verify all give same results
+        if result_dense.M == result_sparse.M == result_matfree.M
+            max_diff = maximum(abs.(result_dense.lambda[1:result_dense.M] .- 
+                                  result_sparse.lambda[1:result_sparse.M]))
+            println(&quot;  Max difference (dense vs sparse): $max_diff&quot;)
+            
+            max_diff_mf = maximum(abs.(result_dense.lambda[1:result_dense.M] .- 
+                                     result_matfree.lambda[1:result_matfree.M]))
+            println(&quot;  Max difference (dense vs matrix-free): $max_diff_mf&quot;)
+        end
+        
+        println()
+    end
+end</code></pre><h3 id="Example-13:-Parallel-Performance"><a class="docs-heading-anchor" href="#Example-13:-Parallel-Performance">Example 13: Parallel Performance</a><a id="Example-13:-Parallel-Performance-1"></a><a class="docs-heading-anchor-permalink" href="#Example-13:-Parallel-Performance" title="Permalink"></a></h3><p><strong>Problem</strong>: Demonstrate parallel FeastKit capabilities.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, Distributed
+
+# Add worker processes
+if nprocs() == 1
+    addprocs(4)  # Add 4 worker processes
+end
+
+@everywhere using FeastKit, LinearAlgebra
+
+println(&quot;Parallel FeastKit Performance Test&quot;)
+println(&quot;Available processes: $(nprocs())&quot;)
+println(&quot;Worker processes: $(nworkers())&quot;)
+
+# Create test problem
+n = 5000
+A = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))
+interval = (0.01, 0.5)
+M0 = 20
+
+println(&quot;\\nProblem: $(n)×$(n) tridiagonal matrix&quot;)
+println(&quot;Search interval: $interval&quot;)
+println(&quot;Max eigenvalues: $M0&quot;)
+
+# Compare serial vs parallel performance
+println(&quot;\\n&quot; * &quot;=&quot;^50)
+println(&quot;Performance Comparison:&quot;)
+
+# Serial FeastKit
+println(&quot;\\nSerial FeastKit:&quot;)
+GC.gc()  # Clean garbage before timing
+serial_time = @elapsed begin
+    result_serial = feast(A, interval, M0=M0, parallel=false)
+end
+
+println(&quot;  Time: $(serial_time) seconds&quot;)
+println(&quot;  Eigenvalues found: $(result_serial.M)&quot;)
+println(&quot;  Status: $(result_serial.info == 0 ? &quot;Success&quot; : &quot;Failed&quot;)&quot;)
+
+# Parallel FeastKit with threading  
+if Threads.nthreads() &gt; 1
+    println(&quot;\\nThreaded FeastKit ($(Threads.nthreads()) threads):&quot;)
+    GC.gc()
+    threaded_time = @elapsed begin
+        result_threaded = feast(A, interval, M0=M0, parallel=:threads)
+    end
+    
+    println(&quot;  Time: $(threaded_time) seconds&quot;)
+    println(&quot;  Speedup: $(serial_time / threaded_time)x&quot;) 
+    println(&quot;  Eigenvalues found: $(result_threaded.M)&quot;)
+    println(&quot;  Status: $(result_threaded.info == 0 ? &quot;Success&quot; : &quot;Failed&quot;)&quot;)
+end
+
+# Distributed parallel FeastKit
+if nworkers() &gt; 1
+    println(&quot;\\nDistributed FeastKit ($(nworkers()) workers):&quot;)
+    GC.gc()
+    distributed_time = @elapsed begin
+        result_distributed = feast(A, interval, M0=M0, parallel=:distributed)
+    end
+    
+    println(&quot;  Time: $(distributed_time) seconds&quot;) 
+    println(&quot;  Speedup: $(serial_time / distributed_time)x&quot;)
+    println(&quot;  Eigenvalues found: $(result_distributed.M)&quot;)
+    println(&quot;  Status: $(result_distributed.info == 0 ? &quot;Success&quot; : &quot;Failed&quot;)&quot;)
+    
+    # Verify results match
+    if result_serial.M == result_distributed.M &gt; 0
+        max_diff = maximum(abs.(result_serial.lambda[1:result_serial.M] .- 
+                              result_distributed.lambda[1:result_distributed.M]))
+        println(&quot;  Max difference from serial: $max_diff&quot;)
+    end
+end
+
+# Performance summary
+println(&quot;\\n&quot; * &quot;=&quot;^50)
+println(&quot;Performance Summary:&quot;)
+println(&quot;Serial time: $(serial_time) seconds&quot;) 
+
+if @isdefined(threaded_time)
+    println(&quot;Threading speedup: $(serial_time / threaded_time)x&quot;)
+end
+
+if @isdefined(distributed_time)  
+    println(&quot;Distributed speedup: $(serial_time / distributed_time)x&quot;)
+end
+
+println(&quot;\\nNote: Speedup depends on problem size, hardware, and communication overhead.&quot;)
+println(&quot;Larger problems generally show better parallel scalability.&quot;)</code></pre><hr/><h2 id="Real-World-Applications"><a class="docs-heading-anchor" href="#Real-World-Applications">Real-World Applications</a><a id="Real-World-Applications-1"></a><a class="docs-heading-anchor-permalink" href="#Real-World-Applications" title="Permalink"></a></h2><h3 id="Example-14:-Electronic-Structure-(Tight-Binding-Model)"><a class="docs-heading-anchor" href="#Example-14:-Electronic-Structure-(Tight-Binding-Model)">Example 14: Electronic Structure (Tight-Binding Model)</a><a id="Example-14:-Electronic-Structure-(Tight-Binding-Model)-1"></a><a class="docs-heading-anchor-permalink" href="#Example-14:-Electronic-Structure-(Tight-Binding-Model)" title="Permalink"></a></h3><p><strong>Problem</strong>: Find electronic band structure using tight-binding approximation.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+# 1D Tight-binding model for electrons in a periodic chain
+# H = -t∑(c†ᵢcᵢ₊₁ + c†ᵢ₊₁cᵢ) + ε∑c†ᵢcᵢ
+
+N = 1000    # Number of sites  
+t = 1.0     # Hopping parameter
+ε = 0.0     # On-site energy
+
+println(&quot;1D Tight-Binding Electronic Structure&quot;)
+println(&quot;Chain length: $N sites&quot;)  
+println(&quot;Hopping parameter: $t&quot;)
+println(&quot;On-site energy: $ε&quot;)
+
+# Hamiltonian matrix (tridiagonal)
+H = SymTridiagonal(ε * ones(N), -t * ones(N-1))
+
+# For periodic boundary conditions, add corner elements
+H_periodic = Matrix(H)
+H_periodic[1, N] = H_periodic[N, 1] = -t
+
+println(&quot;Boundary conditions: periodic&quot;)
+println(&quot;Expected energy band: [$(ε-2t), $(ε+2t)]&quot;)
+
+# Find states in different parts of the band
+
+# Valence band (filled states, lower energies)
+E_valence_min, E_valence_max = ε - 2*t + 0.1, ε - 0.5  
+result_valence = feast(H_periodic, (E_valence_min, E_valence_max), M0=50)
+
+println(&quot;\\nValence band [$E_valence_min, $E_valence_max]:&quot;)
+println(&quot;  Found $(result_valence.M) states&quot;)
+
+# Conduction band (empty states, higher energies)
+E_conduct_min, E_conduct_max = ε + 0.5, ε + 2*t - 0.1
+result_conduct = feast(H_periodic, (E_conduct_min, E_conduct_max), M0=50)
+
+println(&quot;\\nConduction band [$E_conduct_min, $E_conduct_max]:&quot;)
+println(&quot;  Found $(result_conduct.M) states&quot;)
+
+# States near Fermi level (band gap region)
+E_gap_min, E_gap_max = ε - 0.5, ε + 0.5  
+result_gap = feast(H_periodic, (E_gap_min, E_gap_max), M0=20)
+
+println(&quot;\\nBand gap region [$E_gap_min, $E_gap_max]:&quot;)
+println(&quot;  Found $(result_gap.M) states&quot;)
+
+# Calculate density of states
+all_energies = vcat(
+    result_valence.M &gt; 0 ? result_valence.lambda[1:result_valence.M] : Float64[],
+    result_gap.M &gt; 0 ? result_gap.lambda[1:result_gap.M] : Float64[],  
+    result_conduct.M &gt; 0 ? result_conduct.lambda[1:result_conduct.M] : Float64[]
+)
+
+sort!(all_energies)
+
+println(&quot;\\nElectronic Structure Summary:&quot;)
+println(&quot;Total states found: $(length(all_energies))&quot;)
+if length(all_energies) &gt; 10
+    println(&quot;Lowest 5 energies: $(all_energies[1:5])&quot;)
+    println(&quot;Highest 5 energies: $(all_energies[end-4:end])&quot;)
+end
+
+# Analyze band gap
+if result_gap.M == 0
+    valence_top = result_valence.M &gt; 0 ? maximum(result_valence.lambda[1:result_valence.M]) : -Inf
+    conduct_bottom = result_conduct.M &gt; 0 ? minimum(result_conduct.lambda[1:result_conduct.M]) : Inf
+    
+    if isfinite(valence_top) &amp;&amp; isfinite(conduct_bottom)
+        band_gap = conduct_bottom - valence_top
+        println(&quot;\\nBand gap: $(band_gap) eV&quot;)
+        println(&quot;Valence band maximum: $valence_top&quot;)  
+        println(&quot;Conduction band minimum: $conduct_bottom&quot;)
+    end
+else
+    println(&quot;\\nStates found in gap region - may be surface states or numerical artifacts&quot;)
+end</code></pre><h3 id="Example-15:-Fluid-Dynamics-Stability-Analysis"><a class="docs-heading-anchor" href="#Example-15:-Fluid-Dynamics-Stability-Analysis">Example 15: Fluid Dynamics Stability Analysis</a><a id="Example-15:-Fluid-Dynamics-Stability-Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Example-15:-Fluid-Dynamics-Stability-Analysis" title="Permalink"></a></h3><p><strong>Problem</strong>: Linear stability analysis of fluid flow.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+# Linear stability analysis of 2D channel flow
+# Solve generalized eigenvalue problem: (A - λB)φ = 0
+# where A is the linearized Navier-Stokes operator
+
+# Flow parameters  
+Re = 1000.0    # Reynolds number
+nx, ny = 64, 32  # Grid resolution
+Lx, Ly = 4π, 2.0 # Domain size  
+
+n = nx * ny      # Total degrees of freedom
+
+println(&quot;2D Channel Flow Stability Analysis&quot;)
+println(&quot;Reynolds number: $Re&quot;)
+println(&quot;Domain: $Lx × $Ly&quot;)  
+println(&quot;Grid: $(nx) × $(ny)&quot;)
+println(&quot;DOFs: $n&quot;)
+
+# Create simplified stability operators (matrix-free)
+# In practice, these would come from discretized Navier-Stokes
+
+function stability_operator!(y, x)
+    # Simplified 2D advection-diffusion operator
+    # Represents linearized Navier-Stokes around base flow
+    
+    fill!(y, 0)
+    
+    # Grid spacing
+    hx, hy = Lx/nx, Ly/ny
+    
+    for j in 1:ny, i in 1:nx
+        k = (j-1)*nx + i
+        
+        # Base flow velocity (parabolic profile)  
+        y_coord = (j-1) * hy
+        U_base = 4 * (y_coord/Ly) * (1 - y_coord/Ly)  # Parabolic
+        
+        # Advection terms: U·∇φ
+        if i &gt; 1 &amp;&amp; i &lt; nx
+            y[k] += U_base * (x[k+1] - x[k-1]) / (2*hx)  # ∂φ/∂x
+        end
+        
+        # Viscous terms: (1/Re)∇²φ  
+        y[k] -= 4 * x[k] / (Re * hx^2)  # Central difference
+        if i &gt; 1
+            y[k] += x[k-1] / (Re * hx^2)
+        end
+        if i &lt; nx
+            y[k] += x[k+1] / (Re * hx^2)
+        end
+        if j &gt; 1
+            y[k] += x[k-nx] / (Re * hy^2)
+        end  
+        if j &lt; ny
+            y[k] += x[k+nx] / (Re * hy^2)
+        end
+        
+        # Pressure gradient and continuity (simplified)
+        y[k] += 0.1 * x[k]  # Regularization
+    end
+end
+
+function mass_operator!(y, x)
+    # Time derivative term  
+    copy!(y, x)
+end
+
+# Create matrix-free operators
+A_op = LinearOperator{ComplexF64}(
+    (y, x) -&gt; stability_operator!(y, complex(real.(x))), (n, n)
+)
+B_op = LinearOperator{ComplexF64}(
+    (y, x) -&gt; mass_operator!(y, complex(real.(x))), (n, n)
+)
+
+# Search for unstable modes (positive real part)
+# and neutral/stable modes near imaginary axis
+
+search_regions = [
+    (0.1 + 0.0im, 0.5, &quot;Unstable modes&quot;),           # Right half-plane
+    (0.0 + 2.0im, 1.0, &quot;High frequency modes&quot;),     # Imaginary axis, high freq  
+    (0.0 + 0.5im, 0.8, &quot;Low frequency modes&quot;)       # Imaginary axis, low freq
+]
+
+println(&quot;\\nSearching for instability modes:&quot;)
+all_eigenvalues = ComplexF64[]
+
+for (center, radius, description) in search_regions
+    println(&quot;\\n&quot; * &quot;=&quot;^40)
+    println(&quot;Region: $description&quot;)
+    println(&quot;Center: $center, Radius: $radius&quot;)
+    
+    result = feast_general(A_op, B_op, center, radius, M0=10)
+    
+    println(&quot;Status: $(result.info == 0 ? &quot;Success&quot; : &quot;Failed&quot;)&quot;)
+    println(&quot;Found: $(result.M) modes&quot;)
+    
+    if result.M &gt; 0
+        println(&quot;Eigenvalues (growth rate + i*frequency):&quot;)
+        region_modes = result.lambda[1:result.M]
+        
+        for (i, λ) in enumerate(region_modes)
+            growth_rate = real(λ)
+            frequency = imag(λ)
+            stability = growth_rate &gt; 1e-6 ? &quot;UNSTABLE&quot; : 
+                       growth_rate &lt; -1e-6 ? &quot;stable&quot; : &quot;neutral&quot;
+                       
+            println(&quot;  λ[$i] = $(round(λ, digits=6)) ($stability)&quot;)
+            println(&quot;    Growth rate: $(round(growth_rate, digits=6))&quot;)  
+            println(&quot;    Frequency: $(round(frequency, digits=6))&quot;)
+        end
+        
+        append!(all_eigenvalues, region_modes)
+    end
+end
+
+# Stability analysis summary
+println(&quot;\\n&quot; * &quot;=&quot;^60)
+println(&quot;FLOW STABILITY SUMMARY&quot;)  
+println(&quot;=&quot;^60)
+
+if length(all_eigenvalues) &gt; 0
+    unstable_modes = filter(λ -&gt; real(λ) &gt; 1e-6, all_eigenvalues)
+    neutral_modes = filter(λ -&gt; abs(real(λ)) &lt;= 1e-6, all_eigenvalues)  
+    stable_modes = filter(λ -&gt; real(λ) &lt; -1e-6, all_eigenvalues)
+    
+    println(&quot;Total modes found: $(length(all_eigenvalues))&quot;)
+    println(&quot;Unstable modes: $(length(unstable_modes))&quot;)
+    println(&quot;Neutral modes: $(length(neutral_modes))&quot;)
+    println(&quot;Stable modes: $(length(stable_modes))&quot;)
+    
+    if length(unstable_modes) &gt; 0
+        max_growth = maximum(real.(unstable_modes))
+        println(&quot;\\nFLOW IS UNSTABLE!&quot;)
+        println(&quot;Maximum growth rate: $max_growth&quot;)
+        
+        # Find most unstable mode
+        most_unstable_idx = argmax(real.(unstable_modes))
+        λ_most_unstable = unstable_modes[most_unstable_idx]
+        println(&quot;Most unstable mode: $λ_most_unstable&quot;)
+        println(&quot;Doubling time: $(log(2)/real(λ_most_unstable))&quot;)
+        
+    else
+        println(&quot;\\nFLOW APPEARS STABLE&quot;)
+        println(&quot;All found modes have negative or zero growth rates&quot;)
+    end
+else
+    println(&quot;No eigenvalues found in searched regions&quot;)
+    println(&quot;Flow stability could not be determined&quot;)
+end</code></pre><hr/><p>&lt;div align=&quot;center&quot;&gt;   &lt;p&gt;&lt;strong&gt;Complete Examples Collection for FeastKit.jl&lt;/strong&gt;&lt;/p&gt;   &lt;p&gt;From basic usage to advanced scientific applications&lt;/p&gt;   ← <a href="../getting_started/">Getting Started</a> | <a href="../api_reference/">API Reference</a> → &lt;/div&gt;</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../getting_started/">« Getting Started</a><a class="docs-footer-nextpage" href="../matrix_free_interface/">Matrix-Free Interface »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Friday 19 December 2025 17:59">Friday 19 December 2025</span>. Using Julia version 1.12.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

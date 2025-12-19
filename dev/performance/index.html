@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Performance Tips · FeastKit.jl</title><meta name="title" content="Performance Tips · FeastKit.jl"/><meta property="og:title" content="Performance Tips · FeastKit.jl"/><meta property="twitter:title" content="Performance Tips · FeastKit.jl"/><meta name="description" content="Documentation for FeastKit.jl."/><meta property="og:description" content="Documentation for FeastKit.jl."/><meta property="twitter:description" content="Documentation for FeastKit.jl."/><meta property="og:url" content="https://subhk.github.io/FeastKit.jl/stable/performance/"/><meta property="twitter:url" content="https://subhk.github.io/FeastKit.jl/stable/performance/"/><link rel="canonical" href="https://subhk.github.io/FeastKit.jl/stable/performance/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">FeastKit.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../zero_to_feast/">Zero to FeastKit</a></li><li><a class="tocitem" href="../getting_started/">Getting Started</a></li><li><span class="tocitem">User Guide</span><ul><li><a class="tocitem" href="../examples/">Examples</a></li><li><a class="tocitem" href="../matrix_free_interface/">Matrix-Free Interface</a></li><li class="is-active"><a class="tocitem" href>Performance Tips</a><ul class="internal"><li><a class="tocitem" href="#Table-of-Contents"><span>Table of Contents</span></a></li><li><a class="tocitem" href="#Performance-Overview"><span>Performance Overview</span></a></li><li><a class="tocitem" href="#Memory-Optimization"><span>Memory Optimization</span></a></li><li><a class="tocitem" href="#Computational-Efficiency"><span>Computational Efficiency</span></a></li><li><a class="tocitem" href="#Parallel-Computing"><span>Parallel Computing</span></a></li><li><a class="tocitem" href="#Problem-Specific-Optimizations"><span>Problem-Specific Optimizations</span></a></li><li><a class="tocitem" href="#Benchmarking-and-Profiling"><span>Benchmarking and Profiling</span></a></li><li><a class="tocitem" href="#Performance-Checklist"><span>Performance Checklist</span></a></li></ul></li><li><a class="tocitem" href="../custom_contours/">Custom Contours</a></li><li><a class="tocitem" href="../complex_eigenvalues/">Complex Eigenvalues</a></li><li><a class="tocitem" href="../polynomial_problems/">Polynomial Problems</a></li><li><a class="tocitem" href="../parallel_computing/">Parallel Computing</a></li></ul></li><li><a class="tocitem" href="../api_reference/">API Reference</a></li><li><span class="tocitem">Project</span><ul><li><a class="tocitem" href="../contributing/">Contributing</a></li><li><a class="tocitem" href="../developer_guide/">Developer Guide</a></li><li><a class="tocitem" href="../testing/">Testing</a></li><li><a class="tocitem" href="../license/">License</a></li><li><a class="tocitem" href="../changelog/">Changelog</a></li><li><a class="tocitem" href="../bibliography/">Bibliography</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">User Guide</a></li><li class="is-active"><a href>Performance Tips</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Performance Tips</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl/blob/main/docs/src/performance.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Performance-Guide"><a class="docs-heading-anchor" href="#Performance-Guide">Performance Guide</a><a id="Performance-Guide-1"></a><a class="docs-heading-anchor-permalink" href="#Performance-Guide" title="Permalink"></a></h1><p>Optimize FeastKit.jl for maximum performance in your eigenvalue calculations.</p><h2 id="Table-of-Contents"><a class="docs-heading-anchor" href="#Table-of-Contents">Table of Contents</a><a id="Table-of-Contents-1"></a><a class="docs-heading-anchor-permalink" href="#Table-of-Contents" title="Permalink"></a></h2><ol><li><a href="#performance-overview">Performance Overview</a></li><li><a href="#memory-optimization">Memory Optimization</a></li><li><a href="#computational-efficiency">Computational Efficiency</a></li><li><a href="#parallel-computing">Parallel Computing</a></li><li><a href="#problem-specific-optimizations">Problem-Specific Optimizations</a></li><li><a href="#benchmarking-and-profiling">Benchmarking and Profiling</a></li></ol><hr/><h2 id="Performance-Overview"><a class="docs-heading-anchor" href="#Performance-Overview">Performance Overview</a><a id="Performance-Overview-1"></a><a class="docs-heading-anchor-permalink" href="#Performance-Overview" title="Permalink"></a></h2><h3 id="FEAST-Algorithm-Complexity"><a class="docs-heading-anchor" href="#FEAST-Algorithm-Complexity">FEAST Algorithm Complexity</a><a id="FEAST-Algorithm-Complexity-1"></a><a class="docs-heading-anchor-permalink" href="#FEAST-Algorithm-Complexity" title="Permalink"></a></h3><p>The FEAST algorithm has the following computational complexity:</p><table><tr><th style="text-align: right">Operation</th><th style="text-align: right">Complexity</th><th style="text-align: right">Description</th></tr><tr><td style="text-align: right"><strong>Contour Integration</strong></td><td style="text-align: right">O(ne × M₀ × T_solve)</td><td style="text-align: right">ne integration points, M₀ subspace size</td></tr><tr><td style="text-align: right"><strong>Reduced Eigenvalue Problem</strong></td><td style="text-align: right">O(M₀³)</td><td style="text-align: right">Dense eigenvalue problem</td></tr><tr><td style="text-align: right"><strong>Refinement Iterations</strong></td><td style="text-align: right">O(k × above)</td><td style="text-align: right">k ≈ 1-5 typically</td></tr></table><p>Where T_solve is the cost of solving (zB - A)X = Y linear systems.</p><div class="admonition is-category-performance" id="Key-Performance-Factors-48bdce18c1f59cd6"><header class="admonition-header">Key Performance Factors<a class="admonition-anchor" href="#Key-Performance-Factors-48bdce18c1f59cd6" title="Permalink"></a></header><div class="admonition-body"><ul><li><strong>Linear solver efficiency</strong>: Dominates total cost (80-95%)</li><li><strong>Number of integration points</strong>: Linear scaling with ne</li><li><strong>Subspace size M₀</strong>: Memory O(N×M₀), computation O(M₀³)</li><li><strong>Matrix structure</strong>: Dense vs sparse vs matrix-free</li></ul></div></div><hr/><h2 id="Memory-Optimization"><a class="docs-heading-anchor" href="#Memory-Optimization">Memory Optimization</a><a id="Memory-Optimization-1"></a><a class="docs-heading-anchor-permalink" href="#Memory-Optimization" title="Permalink"></a></h2><h3 id="Memory-Usage-Patterns"><a class="docs-heading-anchor" href="#Memory-Usage-Patterns">Memory Usage Patterns</a><a id="Memory-Usage-Patterns-1"></a><a class="docs-heading-anchor-permalink" href="#Memory-Usage-Patterns" title="Permalink"></a></h3><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+# Problem sizes and memory requirements
+function memory_analysis(N, M0, ne=8)
+    println(&quot;Memory Analysis for N=$N, M₀=$M0&quot;)
+    println(&quot;=&quot;^50)
+    
+    # Workspace memory (dominant term)
+    workspace_mb = 8 * N * M0 / 1e6  # Float64 vectors
+    
+    # Integration weights/nodes  
+    integration_mb = 16 * ne / 1e6  # Complex{Float64}
+    
+    # Reduced matrices
+    reduced_mb = 8 * M0^2 / 1e6
+    
+    println(&quot;Workspace vectors: $(workspace_mb) MB&quot;)
+    println(&quot;Integration data: $(integration_mb) MB&quot;) 
+    println(&quot;Reduced matrices: $(reduced_mb) MB&quot;)
+    println(&quot;Total FeastKit memory: $(workspace_mb + integration_mb + reduced_mb) MB&quot;)
+    
+    # Matrix storage (if not matrix-free)
+    matrix_dense_gb = 8 * N^2 / 1e9
+    matrix_sparse_mb = 8 * 0.001 * N^2 / 1e6  # Assuming 0.1% density
+    
+    println(&quot;\nMatrix storage (not matrix-free):&quot;)
+    println(&quot;Dense matrix: $(matrix_dense_gb) GB&quot;)
+    println(&quot;Sparse matrix (~0.1%): $(matrix_sparse_mb) MB&quot;)
+    
+    return (workspace_mb, matrix_dense_gb)
+end
+
+# Analyze different problem sizes
+for N in [1000, 10000, 100000, 1000000]
+    memory_analysis(N, 20)
+    println()
+end</code></pre><h3 id="Memory-Optimization-Strategies"><a class="docs-heading-anchor" href="#Memory-Optimization-Strategies">Memory Optimization Strategies</a><a id="Memory-Optimization-Strategies-1"></a><a class="docs-heading-anchor-permalink" href="#Memory-Optimization-Strategies" title="Permalink"></a></h3><div class="admonition is-success" id="Memory-Optimization-Tips-4dfeed1e897ef67f"><header class="admonition-header">Memory Optimization Tips<a class="admonition-anchor" href="#Memory-Optimization-Tips-4dfeed1e897ef67f" title="Permalink"></a></header><div class="admonition-body"><ol><li><strong>Use matrix-free methods</strong> for large problems</li><li><strong>Choose M₀ carefully</strong>: Balance accuracy vs memory  </li><li><strong>Reduce integration points</strong> if convergence allows</li><li><strong>Use iterative refinement</strong> instead of high precision</li><li><strong>Consider domain decomposition</strong> for very large problems</li></ol></div></div><h4 id="Strategy-1:-Matrix-Free-Implementation"><a class="docs-heading-anchor" href="#Strategy-1:-Matrix-Free-Implementation">Strategy 1: Matrix-Free Implementation</a><a id="Strategy-1:-Matrix-Free-Implementation-1"></a><a class="docs-heading-anchor-permalink" href="#Strategy-1:-Matrix-Free-Implementation" title="Permalink"></a></h4><pre><code class="language-julia hljs"># Instead of storing the full matrix
+A_matrix = create_large_matrix(n)  # Requires O(n²) memory
+result = feast(A_matrix, interval)
+
+# Use matrix-free operations  
+function A_mult!(y, x)
+    # Your matrix-vector product (O(n) memory)
+    apply_operator!(y, x, parameters)
+end
+
+A_op = LinearOperator{Float64}(A_mult!, (n, n), issymmetric=true)
+result = feast(A_op, interval, solver=:cg)</code></pre><h4 id="Strategy-2:-Adaptive-Subspace-Sizing"><a class="docs-heading-anchor" href="#Strategy-2:-Adaptive-Subspace-Sizing">Strategy 2: Adaptive Subspace Sizing</a><a id="Strategy-2:-Adaptive-Subspace-Sizing-1"></a><a class="docs-heading-anchor-permalink" href="#Strategy-2:-Adaptive-Subspace-Sizing" title="Permalink"></a></h4><pre><code class="language-julia hljs">function adaptive_feast(A, interval; M0_initial=10, max_M0=50)
+    M0 = M0_initial
+    
+    while M0 &lt;= max_M0
+        result = feast(A, interval, M0=M0)
+        
+        if result.info == 0
+            # Check if we found all eigenvalues in interval
+            if result.M &lt; M0 * 0.8  # Found significantly fewer than M0
+                println(&quot;Found $(result.M) eigenvalues with M0=$M0&quot;)
+                return result
+            end
+        end
+        
+        M0 = min(M0 + 10, max_M0)
+        println(&quot;Increasing M0 to $M0&quot;)
+    end
+    
+    @warn &quot;May not have found all eigenvalues&quot;
+    return result
+end</code></pre><hr/><h2 id="Computational-Efficiency"><a class="docs-heading-anchor" href="#Computational-Efficiency">Computational Efficiency</a><a id="Computational-Efficiency-1"></a><a class="docs-heading-anchor-permalink" href="#Computational-Efficiency" title="Permalink"></a></h2><h3 id="Integration-Method-Selection"><a class="docs-heading-anchor" href="#Integration-Method-Selection">Integration Method Selection</a><a id="Integration-Method-Selection-1"></a><a class="docs-heading-anchor-permalink" href="#Integration-Method-Selection" title="Permalink"></a></h3><p>Different integration methods have varying computational costs:</p><pre><code class="language-julia hljs">using FeastKit, BenchmarkTools
+
+function benchmark_integration_methods(A, interval)
+    methods = [
+        (0, &quot;Gauss-Legendre&quot;),
+        (1, &quot;Trapezoidal&quot;), 
+        (2, &quot;Zolotarev&quot;)
+    ]
+    
+    println(&quot;Integration Method Comparison&quot;)
+    println(&quot;=&quot;^40)
+    
+    results = []
+    
+    for (method_id, method_name) in methods
+        println(&quot;\n$method_name:&quot;)
+        
+        # Test different numbers of integration points
+        for ne in [8, 12, 16, 24]
+            contour = feast_contour_expert(interval[1], interval[2], ne, method_id, 100)
+            
+            fpm = zeros(Int, 64)
+            feastinit!(fmp)
+            fpm[2] = ne
+            fpm[16] = method_id
+            
+            time = @elapsed begin
+                result = feast(A, interval, M0=10, fpm=fpm)
+            end
+            
+            push!(results, (method_name, ne, time, result.M, result.info))
+            println(&quot;  ne=$ne: $(time) s, found $(result.M), status $(result.info)&quot;)
+        end
+    end
+    
+    return results
+end
+
+# Run benchmark
+A = SymTridiagonal(2.0 * ones(1000), -1.0 * ones(999))
+results = benchmark_integration_methods(A, (0.1, 1.0))</code></pre><div class="admonition is-category-performance" id="Integration-Method-Guidelines-14a9245797121321"><header class="admonition-header">Integration Method Guidelines<a class="admonition-anchor" href="#Integration-Method-Guidelines-14a9245797121321" title="Permalink"></a></header><div class="admonition-body"><ul><li><strong>Gauss-Legendre</strong>: Highest accuracy per point, best for smooth problems</li><li><strong>Zolotarev</strong>: Optimal for elliptical contours, excellent for clustered eigenvalues</li><li><strong>Trapezoidal</strong>: Simplest, good for initial experiments</li></ul></div></div><h3 id="Linear-Solver-Optimization"><a class="docs-heading-anchor" href="#Linear-Solver-Optimization">Linear Solver Optimization</a><a id="Linear-Solver-Optimization-1"></a><a class="docs-heading-anchor-permalink" href="#Linear-Solver-Optimization" title="Permalink"></a></h3><p>The linear solver dominates computational cost. Choose wisely:</p><pre><code class="language-julia hljs">function benchmark_solvers(A_op, B_op, interval)
+    solvers = [
+        (:cg, &quot;Conjugate Gradient&quot;, (rtol=1e-8, maxiter=1000)),
+        (:gmres, &quot;GMRES&quot;, (rtol=1e-8, restart=30, maxiter=1000)),
+        (:bicgstab, &quot;BiCGSTAB&quot;, (rtol=1e-8, l=2, maxiter=1000))
+    ]
+    
+    println(&quot;Linear Solver Comparison&quot;)
+    println(&quot;=&quot;^30)
+    
+    for (solver, name, opts) in solvers
+        println(&quot;\n$name:&quot;)
+        
+        try
+            time = @elapsed begin
+                result = feast(A_op, B_op, interval, M0=10, 
+                              solver=solver, solver_opts=opts)
+            end
+            
+            println(&quot;  Time: $(time) s&quot;)
+            println(&quot;  Found: $(result.M) eigenvalues&quot;)  
+            println(&quot;  Status: $(result.info == 0 ? &quot;Success&quot; : &quot;Failed&quot;)&quot;)
+            println(&quot;  Final residual: $(result.epsout)&quot;)
+            
+        catch e
+            println(&quot;  Failed: $e&quot;)
+        end
+    end
+end</code></pre><div class="admonition is-success" id="Solver-Selection-Guidelines-477feee568567e42"><header class="admonition-header">Solver Selection Guidelines<a class="admonition-anchor" href="#Solver-Selection-Guidelines-477feee568567e42" title="Permalink"></a></header><div class="admonition-body"><ul><li><strong>CG</strong>: Best for symmetric positive definite (SPD) systems</li><li><strong>GMRES</strong>: General purpose, works for any nonsingular system</li><li><strong>BiCGSTAB</strong>: Good for systems with complex eigenvalues near shifts</li></ul></div></div><hr/><h2 id="Parallel-Computing"><a class="docs-heading-anchor" href="#Parallel-Computing">Parallel Computing</a><a id="Parallel-Computing-1"></a><a class="docs-heading-anchor-permalink" href="#Parallel-Computing" title="Permalink"></a></h2><h3 id="Shared-Memory-Parallelization"><a class="docs-heading-anchor" href="#Shared-Memory-Parallelization">Shared Memory Parallelization</a><a id="Shared-Memory-Parallelization-1"></a><a class="docs-heading-anchor-permalink" href="#Shared-Memory-Parallelization" title="Permalink"></a></h3><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+BLAS.set_num_threads(8)  # Use 8 threads for BLAS operations
+
+# Enable threading in FeastKit
+result = feast(A, interval, M0=20, parallel=:threads)</code></pre><h3 id="Distributed-Memory-Parallelization"><a class="docs-heading-anchor" href="#Distributed-Memory-Parallelization">Distributed Memory Parallelization</a><a id="Distributed-Memory-Parallelization-1"></a><a class="docs-heading-anchor-permalink" href="#Distributed-Memory-Parallelization" title="Permalink"></a></h3><pre><code class="language-julia hljs">using Distributed, FeastKit
+
+# Add worker processes
+addprocs(4)
+
+@everywhere using FeastKit
+
+# Distributed FeastKit
+result = feast(A, interval, M0=20, parallel=:mpi)</code></pre><h3 id="Hybrid-Parallelization"><a class="docs-heading-anchor" href="#Hybrid-Parallelization">Hybrid Parallelization</a><a id="Hybrid-Parallelization-1"></a><a class="docs-heading-anchor-permalink" href="#Hybrid-Parallelization" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Use both MPI and threading
+BLAS.set_num_threads(4)  # 4 threads per MPI process
+
+result = feast(A, interval, M0=20, parallel=:hybrid)</code></pre><h3 id="Performance-Scaling-Analysis"><a class="docs-heading-anchor" href="#Performance-Scaling-Analysis">Performance Scaling Analysis</a><a id="Performance-Scaling-Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Performance-Scaling-Analysis" title="Permalink"></a></h3><pre><code class="language-julia hljs">function scaling_study(A, interval)
+    thread_counts = [1, 2, 4, 8, 16]
+    results = []
+    
+    println(&quot;Parallel Scaling Study&quot;)
+    println(&quot;=&quot;^30)
+    
+    # Serial baseline
+    BLAS.set_num_threads(1)
+    serial_time = @elapsed begin
+        result_serial = feast(A, interval, M0=20, parallel=false)
+    end
+    
+    println(&quot;Serial: $(serial_time) s (baseline)&quot;)
+    
+    # Test different thread counts
+    for nthreads in thread_counts[2:end]
+        BLAS.set_num_threads(nthreads)
+        
+        parallel_time = @elapsed begin
+            result_parallel = feast(A, interval, M0=20, parallel=:threads)
+        end
+        
+        speedup = serial_time / parallel_time
+        efficiency = speedup / nthreads
+        
+        println(&quot;$nthreads threads: $(parallel_time) s, speedup $(speedup), efficiency $(efficiency)&quot;)
+        push!(results, (nthreads, parallel_time, speedup, efficiency))
+    end
+    
+    return results
+end</code></pre><hr/><h2 id="Problem-Specific-Optimizations"><a class="docs-heading-anchor" href="#Problem-Specific-Optimizations">Problem-Specific Optimizations</a><a id="Problem-Specific-Optimizations-1"></a><a class="docs-heading-anchor-permalink" href="#Problem-Specific-Optimizations" title="Permalink"></a></h2><h3 id="Sparse-Matrix-Optimizations"><a class="docs-heading-anchor" href="#Sparse-Matrix-Optimizations">Sparse Matrix Optimizations</a><a id="Sparse-Matrix-Optimizations-1"></a><a class="docs-heading-anchor-permalink" href="#Sparse-Matrix-Optimizations" title="Permalink"></a></h3><pre><code class="language-julia hljs">using SparseArrays, FeastKit
+
+function optimize_sparse_feast(A_sparse, interval)
+    println(&quot;Sparse Matrix Optimization&quot;)
+    println(&quot;Matrix: $(size(A_sparse, 1))×$(size(A_sparse, 2)), nnz: $(nnz(A_sparse))&quot;)
+    
+    # Strategy 1: Direct sparse solver (for small-medium problems)
+    if size(A_sparse, 1) &lt; 50000
+        println(&quot;\nUsing direct sparse solver:&quot;)
+        time_direct = @elapsed begin
+            result_direct = feast(A_sparse, interval, M0=20)
+        end
+        println(&quot;Time: $(time_direct) s, Found: $(result_direct.M)&quot;)
+    end
+    
+    # Strategy 2: Matrix-free with iterative solver
+    println(&quot;\nUsing matrix-free iterative solver:&quot;)
+    A_mult!(y, x) = mul!(y, A_sparse, x)
+    A_op = LinearOperator{Float64}(A_mult!, size(A_sparse), issymmetric=issymmetric(A_sparse))
+    
+    time_iterative = @elapsed begin
+        result_iterative = feast(A_op, interval, M0=20, 
+                               solver=:gmres, 
+                               solver_opts=(rtol=1e-6, restart=50))
+    end
+    println(&quot;Time: $(time_iterative) s, Found: $(result_iterative.M)&quot;)
+    
+    # Strategy 3: Preconditioned iterative solver
+    println(&quot;\nUsing preconditioned iterative solver:&quot;)
+    P = create_preconditioner(A_sparse)  # Your preconditioner
+    
+    time_precond = @elapsed begin
+        result_precond = feast(A_op, interval, M0=20,
+                              solver=:gmres,
+                              solver_opts=(rtol=1e-6, Pl=P, restart=30))
+    end
+    println(&quot;Time: $(time_precond) s, Found: $(result_precond.M)&quot;)
+end
+
+function create_preconditioner(A)
+    # Example: Incomplete LU preconditioner
+    return ilu(A, τ=0.01)  # Requires Preconditioners.jl
+end</code></pre><h3 id="Eigenvalue-Distribution-Optimization"><a class="docs-heading-anchor" href="#Eigenvalue-Distribution-Optimization">Eigenvalue Distribution Optimization</a><a id="Eigenvalue-Distribution-Optimization-1"></a><a class="docs-heading-anchor-permalink" href="#Eigenvalue-Distribution-Optimization" title="Permalink"></a></h3><pre><code class="language-julia hljs">function optimize_for_distribution(A, interval, eigenvalue_density=&quot;uniform&quot;)
+    if eigenvalue_density == &quot;clustered&quot;
+        # Use more integration points and Zolotarev method
+        contour = feast_contour_expert(interval[1], interval[2], 24, 2, 100)
+        
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fmp[2] = 24      # More integration points
+        fpm[16] = 2      # Zolotarev integration
+        fpm[3] = 14      # Higher precision
+        
+        result = feast(A, interval, M0=30, fpm=fpm)
+        
+    elseif eigenvalue_density == &quot;sparse&quot;
+        # Use fewer integration points, lower precision
+        result = feast(A, interval, M0=10, 
+                      integration_points=8, 
+                      tolerance=1e-8)
+        
+    else  # uniform
+        # Default settings work well
+        result = feast(A, interval, M0=20)
+    end
+    
+    return result
+end</code></pre><hr/><h2 id="Benchmarking-and-Profiling"><a class="docs-heading-anchor" href="#Benchmarking-and-Profiling">Benchmarking and Profiling</a><a id="Benchmarking-and-Profiling-1"></a><a class="docs-heading-anchor-permalink" href="#Benchmarking-and-Profiling" title="Permalink"></a></h2><h3 id="Comprehensive-Benchmarking-Suite"><a class="docs-heading-anchor" href="#Comprehensive-Benchmarking-Suite">Comprehensive Benchmarking Suite</a><a id="Comprehensive-Benchmarking-Suite-1"></a><a class="docs-heading-anchor-permalink" href="#Comprehensive-Benchmarking-Suite" title="Permalink"></a></h3><pre><code class="language-julia hljs">using FeastKit, BenchmarkTools, Profile
+
+function feast_benchmark_suite()
+    println(&quot;FeastKit.jl Comprehensive Benchmark Suite&quot;)
+    println(&quot;=&quot;^50)
+    
+    # Test problems of increasing size
+    problems = [
+        (1000, &quot;Small&quot;),
+        (10000, &quot;Medium&quot;), 
+        (50000, &quot;Large&quot;),
+        (100000, &quot;Very Large&quot;)
+    ]
+    
+    results = Dict()
+    
+    for (n, size_name) in problems
+        println(&quot;\n$size_name Problem (N=$n)&quot;)
+        println(&quot;-&quot;^30)
+        
+        # Create test matrix
+        A = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))
+        interval = (0.01, 0.1)
+        
+        # Benchmark different approaches
+        approaches = [
+            (&quot;Dense&quot;, () -&gt; feast(Matrix(A), interval, M0=10)),
+            (&quot;Sparse&quot;, () -&gt; feast(sparse(A), interval, M0=10)),
+            (&quot;Matrix-Free&quot;, () -&gt; begin
+                A_mult!(y, x) = mul!(y, A, x)
+                A_op = LinearOperator{Float64}(A_mult!, (n, n), issymmetric=true)
+                feast(A_op, interval, M0=10, solver=:cg)
+            end)
+        ]
+        
+        results[size_name] = []
+        
+        for (approach_name, approach_func) in approaches
+            try
+                # Warm up
+                if n &lt;= 10000  # Skip warmup for very large problems
+                    approach_func()
+                end
+                
+                # Benchmark
+                benchmark = @benchmark $approach_func() seconds=30 samples=5
+                median_time = median(benchmark).time / 1e9  # Convert to seconds
+                
+                println(&quot;$approach_name: $(median_time) s&quot;)
+                push!(results[size_name], (approach_name, median_time))
+                
+            catch e
+                println(&quot;$approach_name: Failed ($e)&quot;)
+                push!(results[size_name], (approach_name, Inf))
+            end
+        end
+    end
+    
+    # Summary table
+    println(&quot;\n&quot; * &quot;=&quot;^60)
+    println(&quot;BENCHMARK SUMMARY&quot;)  
+    println(&quot;=&quot;^60)
+    @printf(&quot;%-12s %-12s %-12s %-12s\\n&quot;, &quot;Size&quot;, &quot;Dense (s)&quot;, &quot;Sparse (s)&quot;, &quot;Matrix-Free (s)&quot;)
+    println(&quot;-&quot;^60)
+    
+    for (size_name, size_results) in results
+        times = Dict(name =&gt; time for (name, time) in size_results)
+        @printf(&quot;%-12s %-12.3f %-12.3f %-12.3f\\n&quot;, 
+                size_name, 
+                get(times, &quot;Dense&quot;, Inf),
+                get(times, &quot;Sparse&quot;, Inf), 
+                get(times, &quot;Matrix-Free&quot;, Inf))
+    end
+    
+    return results
+end
+
+# Run comprehensive benchmark
+results = feast_benchmark_suite()</code></pre><h3 id="Profiling-FeastKit-Performance"><a class="docs-heading-anchor" href="#Profiling-FeastKit-Performance">Profiling FeastKit Performance</a><a id="Profiling-FeastKit-Performance-1"></a><a class="docs-heading-anchor-permalink" href="#Profiling-FeastKit-Performance" title="Permalink"></a></h3><pre><code class="language-julia hljs">using Profile, ProfileView
+
+function profile_feast(A, interval)
+    println(&quot;Profiling FeastKit Performance&quot;)
+    
+    # Profile a typical FeastKit run
+    @profile result = feast(A, interval, M0=20)
+    
+    # Show profile results
+    Profile.print()
+    
+    # Interactive profile view (if ProfileView.jl is available)
+    try
+        ProfileView.view()
+    catch
+        println(&quot;Install ProfileView.jl for interactive profiling&quot;)
+    end
+    
+    return result
+end
+
+# Example usage
+A = SymTridiagonal(2.0 * ones(5000), -1.0 * ones(4999))
+profile_feast(A, (0.1, 1.0))</code></pre><h3 id="Memory-Profiling"><a class="docs-heading-anchor" href="#Memory-Profiling">Memory Profiling</a><a id="Memory-Profiling-1"></a><a class="docs-heading-anchor-permalink" href="#Memory-Profiling" title="Permalink"></a></h3><pre><code class="language-julia hljs">function memory_profile_feast(A, interval)
+    println(&quot;Memory Profiling FeastKit&quot;)
+    
+    # Track memory allocation
+    GC.gc()  # Clean up before profiling
+    initial_memory = Base.gc_bytes()
+    
+    result = feast(A, interval, M0=20)
+    
+    GC.gc()
+    final_memory = Base.gc_bytes()
+    
+    allocated_mb = (final_memory - initial_memory) / 1e6
+    println(&quot;Total memory allocated: $(allocated_mb) MB&quot;)
+    
+    # Detailed allocation tracking
+    @time result = feast(A, interval, M0=20)
+    
+    return result
+end</code></pre><hr/><h2 id="Performance-Checklist"><a class="docs-heading-anchor" href="#Performance-Checklist">Performance Checklist</a><a id="Performance-Checklist-1"></a><a class="docs-heading-anchor-permalink" href="#Performance-Checklist" title="Permalink"></a></h2><div class="admonition is-category-success" id="Pre-Optimization-Checklist-6b08859876023d01"><header class="admonition-header">Pre-Optimization Checklist<a class="admonition-anchor" href="#Pre-Optimization-Checklist-6b08859876023d01" title="Permalink"></a></header><div class="admonition-body"><ul><li>[ ] <strong>Problem size</strong>: Use matrix-free for N &gt; 50,000</li><li>[ ] <strong>Matrix type</strong>: Sparse for &lt;1% density, matrix-free for larger</li><li>[ ] <strong>Eigenvalue distribution</strong>: Clustered → more integration points</li><li>[ ] <strong>Search interval</strong>: Tight intervals → faster convergence</li><li>[ ] <strong>Subspace size M₀</strong>: 1.5-2× expected number of eigenvalues</li></ul></div></div><div class="admonition is-success" id="Solver-Optimization-Checklist-e0f52e7afea6488f"><header class="admonition-header">Solver Optimization Checklist<a class="admonition-anchor" href="#Solver-Optimization-Checklist-e0f52e7afea6488f" title="Permalink"></a></header><div class="admonition-body"><ul><li>[ ] <strong>CG for SPD</strong>: Symmetric positive definite problems</li><li>[ ] <strong>GMRES for general</strong>: Non-symmetric or indefinite problems</li><li>[ ] <strong>Preconditioner</strong>: For poorly conditioned systems</li><li>[ ] <strong>Tolerance</strong>: Balance accuracy vs speed (1e-6 to 1e-12)</li><li>[ ] <strong>Max iterations</strong>: Increase for difficult problems</li></ul></div></div><div class="admonition is-category-performance" id="Parallelization-Checklist-3f43e47bc83bb3c3"><header class="admonition-header">Parallelization Checklist<a class="admonition-anchor" href="#Parallelization-Checklist-3f43e47bc83bb3c3" title="Permalink"></a></header><div class="admonition-body"><ul><li>[ ] <strong>BLAS threads</strong>: Set to number of physical cores</li><li>[ ] <strong>FeastKit parallel</strong>: Use :threads for shared memory</li><li>[ ] <strong>MPI</strong>: For distributed memory systems  </li><li>[ ] <strong>Load balancing</strong>: Ensure even work distribution</li><li>[ ] <strong>Communication</strong>: Minimize for distributed systems</li></ul></div></div><hr/><p>&lt;div align=&quot;center&quot;&gt;   &lt;p&gt;&lt;strong&gt;Optimize your FeastKit.jl calculations for maximum performance&lt;/strong&gt;&lt;/p&gt;   ← <a href="../examples/">Examples</a> | <a href="../api_reference/">API Reference</a> → &lt;/div&gt;</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../matrix_free_interface/">« Matrix-Free Interface</a><a class="docs-footer-nextpage" href="../custom_contours/">Custom Contours »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Friday 19 December 2025 17:59">Friday 19 December 2025</span>. Using Julia version 1.12.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Getting Started · FeastKit.jl</title><meta name="title" content="Getting Started · FeastKit.jl"/><meta property="og:title" content="Getting Started · FeastKit.jl"/><meta property="twitter:title" content="Getting Started · FeastKit.jl"/><meta name="description" content="Documentation for FeastKit.jl."/><meta property="og:description" content="Documentation for FeastKit.jl."/><meta property="twitter:description" content="Documentation for FeastKit.jl."/><meta property="og:url" content="https://subhk.github.io/FeastKit.jl/stable/getting_started/"/><meta property="twitter:url" content="https://subhk.github.io/FeastKit.jl/stable/getting_started/"/><link rel="canonical" href="https://subhk.github.io/FeastKit.jl/stable/getting_started/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">FeastKit.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../zero_to_feast/">Zero to FeastKit</a></li><li class="is-active"><a class="tocitem" href>Getting Started</a><ul class="internal"><li><a class="tocitem" href="#Table-of-Contents"><span>Table of Contents</span></a></li><li><a class="tocitem" href="#Installation"><span>Installation</span></a></li><li><a class="tocitem" href="#First-Steps"><span>First Steps</span></a></li><li><a class="tocitem" href="#Basic-Usage-Patterns"><span>Basic Usage Patterns</span></a></li><li><a class="tocitem" href="#Understanding-Results"><span>Understanding Results</span></a></li><li><a class="tocitem" href="#Common-Workflows"><span>Common Workflows</span></a></li><li><a class="tocitem" href="#Next-Steps"><span>Next Steps</span></a></li></ul></li><li><span class="tocitem">User Guide</span><ul><li><a class="tocitem" href="../examples/">Examples</a></li><li><a class="tocitem" href="../matrix_free_interface/">Matrix-Free Interface</a></li><li><a class="tocitem" href="../performance/">Performance Tips</a></li><li><a class="tocitem" href="../custom_contours/">Custom Contours</a></li><li><a class="tocitem" href="../complex_eigenvalues/">Complex Eigenvalues</a></li><li><a class="tocitem" href="../polynomial_problems/">Polynomial Problems</a></li><li><a class="tocitem" href="../parallel_computing/">Parallel Computing</a></li></ul></li><li><a class="tocitem" href="../api_reference/">API Reference</a></li><li><span class="tocitem">Project</span><ul><li><a class="tocitem" href="../contributing/">Contributing</a></li><li><a class="tocitem" href="../developer_guide/">Developer Guide</a></li><li><a class="tocitem" href="../testing/">Testing</a></li><li><a class="tocitem" href="../license/">License</a></li><li><a class="tocitem" href="../changelog/">Changelog</a></li><li><a class="tocitem" href="../bibliography/">Bibliography</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Getting Started</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Getting Started</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl/blob/main/docs/src/getting_started.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Getting-Started-with-FeastKit.jl"><a class="docs-heading-anchor" href="#Getting-Started-with-FeastKit.jl">Getting Started with FeastKit.jl</a><a id="Getting-Started-with-FeastKit.jl-1"></a><a class="docs-heading-anchor-permalink" href="#Getting-Started-with-FeastKit.jl" title="Permalink"></a></h1><p>This guide will get you up and running with FeastKit.jl in minutes. Whether you&#39;re new to eigenvalue problems or an experienced user, this tutorial covers everything you need to know.</p><h2 id="Table-of-Contents"><a class="docs-heading-anchor" href="#Table-of-Contents">Table of Contents</a><a id="Table-of-Contents-1"></a><a class="docs-heading-anchor-permalink" href="#Table-of-Contents" title="Permalink"></a></h2><ol><li><a href="#installation">Installation</a></li><li><a href="#first-steps">First Steps</a>  </li><li><a href="#basic-usage-patterns">Basic Usage Patterns</a></li><li><a href="#understanding-results">Understanding Results</a></li><li><a href="#common-workflows">Common Workflows</a></li><li><a href="#next-steps">Next Steps</a></li></ol><hr/><h2 id="Installation"><a class="docs-heading-anchor" href="#Installation">Installation</a><a id="Installation-1"></a><a class="docs-heading-anchor-permalink" href="#Installation" title="Permalink"></a></h2><h3 id="Prerequisites"><a class="docs-heading-anchor" href="#Prerequisites">Prerequisites</a><a id="Prerequisites-1"></a><a class="docs-heading-anchor-permalink" href="#Prerequisites" title="Permalink"></a></h3><p>FeastKit.jl requires Julia 1.6 or later. Install Julia from <a href="https://julialang.org/downloads/">julialang.org</a>.</p><h3 id="Installing-FeastKit.jl"><a class="docs-heading-anchor" href="#Installing-FeastKit.jl">Installing FeastKit.jl</a><a id="Installing-FeastKit.jl-1"></a><a class="docs-heading-anchor-permalink" href="#Installing-FeastKit.jl" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Start Julia and enter package mode with ]
+julia&gt; ]
+
+# Install FeastKit.jl
+pkg&gt; add FeastKit
+
+# Or for the development version:
+pkg&gt; add https://github.com/your-repo/FeastKit.jl.git
+
+# Return to Julia mode
+pkg&gt; &lt;backspace&gt;
+
+# Load the package
+julia&gt; using FeastKit</code></pre><h3 id="Verify-Installation"><a class="docs-heading-anchor" href="#Verify-Installation">Verify Installation</a><a id="Verify-Installation-1"></a><a class="docs-heading-anchor-permalink" href="#Verify-Installation" title="Permalink"></a></h3><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+# Create a small test problem
+A = [2.0 -1.0; -1.0 2.0]
+result = feast(A, (0.5, 2.5))
+
+println(&quot;Installation successful! Found $(result.M) eigenvalues.&quot;)</code></pre><p>Expected output: <code>Installation successful! Found 2 eigenvalues.</code></p><hr/><h2 id="First-Steps"><a class="docs-heading-anchor" href="#First-Steps">First Steps</a><a id="First-Steps-1"></a><a class="docs-heading-anchor-permalink" href="#First-Steps" title="Permalink"></a></h2><h3 id="Your-First-Eigenvalue-Calculation"><a class="docs-heading-anchor" href="#Your-First-Eigenvalue-Calculation">Your First Eigenvalue Calculation</a><a id="Your-First-Eigenvalue-Calculation-1"></a><a class="docs-heading-anchor-permalink" href="#Your-First-Eigenvalue-Calculation" title="Permalink"></a></h3><p>Let&#39;s solve a classic eigenvalue problem step by step:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+# Step 1: Create a matrix
+# (This is a 1D discrete Laplacian - common in scientific computing)
+n = 100
+A = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))
+
+println(&quot;Created $(n)×$(n) tridiagonal matrix&quot;)
+println(&quot;Matrix A has eigenvalues between $(2-2) and $(2+2)&quot;)</code></pre><pre><code class="language-julia hljs"># Step 2: Define search interval
+# We want eigenvalues between 0.5 and 1.5
+Emin, Emax = 0.5, 1.5
+
+println(&quot;Searching for eigenvalues in [$Emin, $Emax]&quot;)</code></pre><pre><code class="language-julia hljs"># Step 3: Run FeastKit
+# M0 = maximum number of eigenvalues to find
+result = feast(A, (Emin, Emax), M0=10)
+
+println(&quot;FeastKit completed:&quot;)
+println(&quot;  Status: $(result.info == 0 ? &quot;Success&quot; : &quot;Error&quot;)&quot;)
+println(&quot;  Found: $(result.M) eigenvalues&quot;)
+println(&quot;  Iterations: $(result.loop)&quot;)</code></pre><pre><code class="language-julia hljs"># Step 4: Examine results
+if result.M &gt; 0
+    println(&quot;\\nEigenvalues found:&quot;)
+    for i in 1:result.M
+        println(&quot;  λ[$i] = $(result.lambda[i])&quot;)
+    end
+end</code></pre><h3 id="Understanding-What-Happened"><a class="docs-heading-anchor" href="#Understanding-What-Happened">Understanding What Happened</a><a id="Understanding-What-Happened-1"></a><a class="docs-heading-anchor-permalink" href="#Understanding-What-Happened" title="Permalink"></a></h3><p>FeastKit searched only in <code>[0.5, 1.5]</code> — it didn&#39;t compute all eigenvalues   Found eigenvalues efficiently using contour integration   Verified convergence — <code>result.info == 0</code> means success   Provided eigenvectors too — stored in <code>result.q</code></p><hr/><h2 id="Basic-Usage-Patterns"><a class="docs-heading-anchor" href="#Basic-Usage-Patterns">Basic Usage Patterns</a><a id="Basic-Usage-Patterns-1"></a><a class="docs-heading-anchor-permalink" href="#Basic-Usage-Patterns" title="Permalink"></a></h2><h3 id="Pattern-1:-Standard-Eigenvalue-Problem"><a class="docs-heading-anchor" href="#Pattern-1:-Standard-Eigenvalue-Problem">Pattern 1: Standard Eigenvalue Problem</a><a id="Pattern-1:-Standard-Eigenvalue-Problem-1"></a><a class="docs-heading-anchor-permalink" href="#Pattern-1:-Standard-Eigenvalue-Problem" title="Permalink"></a></h3><p>For problems of the form <strong>A⋅x = λ⋅x</strong>:</p><pre><code class="language-julia hljs">using FeastKit
+
+# Your matrix (dense, sparse, whatever!)
+A = your_matrix()
+
+# Find eigenvalues in an interval
+result = feast(A, (Emin, Emax), M0=20)
+
+# Access results
+eigenvalues = result.lambda[1:result.M]
+eigenvectors = result.q[:, 1:result.M]</code></pre><p><strong>Real-world example:</strong></p><pre><code class="language-julia hljs">using FeastKit, SparseArrays
+
+# Large sparse matrix from discretized PDE
+n = 10000
+A = spdiagm(-1 =&gt; -ones(n-1), 0 =&gt; 2*ones(n), 1 =&gt; -ones(n-1))
+
+# Find the 10 smallest eigenvalues  
+result = feast(A, (0.001, 0.1), M0=10)
+println(&quot;Smallest eigenvalues: $(result.lambda[1:result.M])&quot;)</code></pre><h3 id="Pattern-2:-Generalized-Eigenvalue-Problem"><a class="docs-heading-anchor" href="#Pattern-2:-Generalized-Eigenvalue-Problem">Pattern 2: Generalized Eigenvalue Problem</a><a id="Pattern-2:-Generalized-Eigenvalue-Problem-1"></a><a class="docs-heading-anchor-permalink" href="#Pattern-2:-Generalized-Eigenvalue-Problem" title="Permalink"></a></h3><p>For problems of the form <strong>A⋅x = λ⋅B⋅x</strong>:</p><pre><code class="language-julia hljs"># Two matrices A and B
+A = your_stiffness_matrix()
+B = your_mass_matrix()  
+
+# Solve generalized problem
+result = feast(A, B, (Emin, Emax), M0=15)</code></pre><p><strong>Real-world example:</strong></p><pre><code class="language-julia hljs">using FeastKit
+
+# Structural dynamics: K⋅u = ω²⋅M⋅u
+K = stiffness_matrix()  # Stiffness
+M = mass_matrix()       # Mass
+
+# Find natural frequencies between 10 and 100 Hz
+ω²_min, ω²_max = (2π*10)^2, (2π*100)^2
+result = feast(K, M, (ω²_min, ω²_max), M0=20)
+
+frequencies_Hz = sqrt.(result.lambda[1:result.M]) / (2π)
+println(&quot;Natural frequencies: $frequencies_Hz Hz&quot;)</code></pre><h3 id="Pattern-3:-Matrix-Free-for-Large-Problems"><a class="docs-heading-anchor" href="#Pattern-3:-Matrix-Free-for-Large-Problems">Pattern 3: Matrix-Free for Large Problems</a><a id="Pattern-3:-Matrix-Free-for-Large-Problems-1"></a><a class="docs-heading-anchor-permalink" href="#Pattern-3:-Matrix-Free-for-Large-Problems" title="Permalink"></a></h3><p>When your matrix is too large to store:</p><pre><code class="language-julia hljs"># Define matrix-vector multiplication
+function A_multiply!(y, x)
+    # Your custom A*x computation here
+    # Example: finite difference stencil
+    n = length(x)
+    y[1] = 2*x[1] - x[2]
+    for i in 2:n-1
+        y[i] = -x[i-1] + 2*x[i] - x[i+1]
+    end
+    y[n] = -x[n-1] + 2*x[n]
+end
+
+# Create operator
+n = 1_000_000  # Very large!
+A_op = LinearOperator{Float64}(A_multiply!, (n, n), issymmetric=true)
+
+# Solve exactly the same way
+result = feast(A_op, (Emin, Emax), M0=10, solver=:cg)</code></pre><h3 id="Pattern-4:-Complex-Eigenvalues"><a class="docs-heading-anchor" href="#Pattern-4:-Complex-Eigenvalues">Pattern 4: Complex Eigenvalues</a><a id="Pattern-4:-Complex-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Pattern-4:-Complex-Eigenvalues" title="Permalink"></a></h3><p>For non-symmetric matrices with complex eigenvalues:</p><pre><code class="language-julia hljs">using FeastKit
+
+# Non-symmetric matrix
+A = your_nonsymmetric_matrix()
+B = Matrix(I, size(A)...)  # Identity matrix
+
+# Define circular search region in complex plane
+center = 1.0 + 0.5im     # Center point  
+radius = 2.0             # Search radius
+
+result = feast_general(A, B, center, radius, M0=15)
+
+# Complex eigenvalues
+complex_eigenvalues = result.lambda[1:result.M]</code></pre><hr/><h2 id="Understanding-Results"><a class="docs-heading-anchor" href="#Understanding-Results">Understanding Results</a><a id="Understanding-Results-1"></a><a class="docs-heading-anchor-permalink" href="#Understanding-Results" title="Permalink"></a></h2><h3 id="The-FeastResult-Structure"><a class="docs-heading-anchor" href="#The-FeastResult-Structure">The FeastResult Structure</a><a id="The-FeastResult-Structure-1"></a><a class="docs-heading-anchor-permalink" href="#The-FeastResult-Structure" title="Permalink"></a></h3><p>Every FeastKit calculation returns a <code>FeastResult</code> with these fields:</p><pre><code class="language-julia hljs">result = feast(A, (Emin, Emax), M0=10)
+
+# Eigenvalues and eigenvectors
+result.lambda    # Vector of eigenvalues
+result.q         # Matrix of eigenvectors (columns)
+result.M         # Number of eigenvalues found
+
+# Convergence information  
+result.info      # 0 = success, &gt;0 = error code
+result.epsout    # Final residual
+result.loop      # Number of refinement iterations  
+result.res       # Individual residuals</code></pre><h3 id="Interpreting-Status-Codes"><a class="docs-heading-anchor" href="#Interpreting-Status-Codes">Interpreting Status Codes</a><a id="Interpreting-Status-Codes-1"></a><a class="docs-heading-anchor-permalink" href="#Interpreting-Status-Codes" title="Permalink"></a></h3><pre><code class="language-julia hljs">if result.info == 0
+    println(&quot;Success! Found $(result.M) eigenvalues&quot;)
+elseif result.info == 1
+    println(&quot;Error: Invalid matrix size&quot;)
+elseif result.info == 2  
+    println(&quot;Error: Invalid M0 parameter&quot;)
+elseif result.info == 3
+    println(&quot;Error: Invalid search interval&quot;)
+else
+    println(&quot;Error: Code $(result.info)&quot;)
+end</code></pre><h3 id="Quality-Assessment"><a class="docs-heading-anchor" href="#Quality-Assessment">Quality Assessment</a><a id="Quality-Assessment-1"></a><a class="docs-heading-anchor-permalink" href="#Quality-Assessment" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Check convergence quality
+println(&quot;Final residual: $(result.epsout)&quot;)
+println(&quot;Max individual residual: $(maximum(result.res[1:result.M]))&quot;)
+
+# Verify eigenvalues are in target interval
+in_interval = [Emin &lt;= λ &lt;= Emax for λ in result.lambda[1:result.M]]
+println(&quot;All eigenvalues in interval: $(all(in_interval))&quot;)
+
+# Check orthogonality of eigenvectors (if B = I)
+Q = result.q[:, 1:result.M]
+orthogonality_error = norm(Q&#39;*Q - I)
+println(&quot;Orthogonality error: $orthogonality_error&quot;)</code></pre><hr/><h2 id="Common-Workflows"><a class="docs-heading-anchor" href="#Common-Workflows">Common Workflows</a><a id="Common-Workflows-1"></a><a class="docs-heading-anchor-permalink" href="#Common-Workflows" title="Permalink"></a></h2><h3 id="Workflow-1:-Finding-Specific-Eigenvalues"><a class="docs-heading-anchor" href="#Workflow-1:-Finding-Specific-Eigenvalues">Workflow 1: Finding Specific Eigenvalues</a><a id="Workflow-1:-Finding-Specific-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Workflow-1:-Finding-Specific-Eigenvalues" title="Permalink"></a></h3><p><strong>Problem</strong>: You need the 10 eigenvalues closest to 5.0</p><pre><code class="language-julia hljs">using FeastKit
+
+# Strategy: Search in a small interval around 5.0
+center = 5.0
+width = 0.1
+result = feast(A, (center - width, center + width), M0=15)
+
+if result.M &gt;= 10
+    closest_10 = result.lambda[1:10]
+    println(&quot;10 eigenvalues closest to 5.0: $closest_10&quot;)
+else
+    println(&quot;Found only $(result.M) eigenvalues, try wider interval&quot;)
+end</code></pre><h3 id="Workflow-2:-Eigenvalue-Counting"><a class="docs-heading-anchor" href="#Workflow-2:-Eigenvalue-Counting">Workflow 2: Eigenvalue Counting</a><a id="Workflow-2:-Eigenvalue-Counting-1"></a><a class="docs-heading-anchor-permalink" href="#Workflow-2:-Eigenvalue-Counting" title="Permalink"></a></h3><p><strong>Problem</strong>: How many eigenvalues are in <code>[0, 1]</code>?</p><pre><code class="language-julia hljs"># Use FeastKit to count eigenvalues
+result = feast(A, (0.0, 1.0), M0=100)  # Large M0 for counting
+
+println(&quot;Number of eigenvalues in [0,1]: $(result.M)&quot;)
+
+# For more precise counting, use the rational function
+rational_values = feast_rational(test_points, 0.0, 1.0, fpm)
+# Values near 1.0 indicate eigenvalues nearby</code></pre><h3 id="Workflow-3:-Parameter-Tuning"><a class="docs-heading-anchor" href="#Workflow-3:-Parameter-Tuning">Workflow 3: Parameter Tuning</a><a id="Workflow-3:-Parameter-Tuning-1"></a><a class="docs-heading-anchor-permalink" href="#Workflow-3:-Parameter-Tuning" title="Permalink"></a></h3><p><strong>Problem</strong>: FeastKit isn&#39;t converging well</p><pre><code class="language-julia hljs"># Step 1: Check if eigenvalues exist in your interval
+bounds = feast_validate_interval(A, (Emin, Emax))
+println(&quot;Estimated eigenvalue range: $bounds&quot;)
+
+# Step 2: Adjust FeastKit parameters
+fpm = zeros(Int, 64)
+feastinit!(fpm)
+fpm[1] = 1      # Print level (0=silent, 1=summary, 2=detailed)
+fpm[2] = 16     # Integration points (8-32 typical)
+fmp[3] = 12     # Tolerance: 10^(-fmp[3])
+fpm[4] = 50     # Max refinement iterations
+
+result = feast(A, (Emin, Emax), M0=20, fpm=fpm)
+
+# Step 3: Try different integration methods
+result_zolotarev = feast(A, (Emin, Emax), M0=20, 
+                        integration_method=:zolotarev, 
+                        integration_points=12)</code></pre><h3 id="Workflow-4:-Large-Scale-Problems"><a class="docs-heading-anchor" href="#Workflow-4:-Large-Scale-Problems">Workflow 4: Large-Scale Problems</a><a id="Workflow-4:-Large-Scale-Problems-1"></a><a class="docs-heading-anchor-permalink" href="#Workflow-4:-Large-Scale-Problems" title="Permalink"></a></h3><p><strong>Problem</strong>: Matrix has millions of unknowns</p><pre><code class="language-julia hljs"># Convert to matrix-free 
+function matvec!(y, x)
+    # Your efficient A*x implementation
+    # Use BLAS, threading, GPU, etc.
+end
+
+A_op = LinearOperator{Float64}(matvec!, (n, n), issymmetric=true)
+
+# Use appropriate iterative solver
+result = feast(A_op, (Emin, Emax), M0=10,
+              solver=:cg,  # or :gmres, :bicgstab
+              solver_opts=(rtol=1e-6, maxiter=1000))
+
+# Monitor memory usage
+println(&quot;Memory used: $(Base.summarysize(result) / 1e6) MB&quot;)</code></pre><hr/><h2 id="Next-Steps"><a class="docs-heading-anchor" href="#Next-Steps">Next Steps</a><a id="Next-Steps-1"></a><a class="docs-heading-anchor-permalink" href="#Next-Steps" title="Permalink"></a></h2><h3 id="Ready-for-More?"><a class="docs-heading-anchor" href="#Ready-for-More?">Ready for More?</a><a id="Ready-for-More?-1"></a><a class="docs-heading-anchor-permalink" href="#Ready-for-More?" title="Permalink"></a></h3><p>Now that you understand the basics, explore these advanced topics:</p><h4 id="Performance-Optimization"><a class="docs-heading-anchor" href="#Performance-Optimization">Performance Optimization</a><a id="Performance-Optimization-1"></a><a class="docs-heading-anchor-permalink" href="#Performance-Optimization" title="Permalink"></a></h4><ul><li><a href="../matrix_free_interface/">Matrix-Free Interface</a> - Handle matrices too large for memory</li><li><a href="../parallel_computing/">Parallel Computing</a> - Use multiple cores and nodes</li><li><a href="../performance/">Performance Tips</a> - Speed and memory optimization</li></ul><h4 id="Advanced-Features"><a class="docs-heading-anchor" href="#Advanced-Features">Advanced Features</a><a id="Advanced-Features-1"></a><a class="docs-heading-anchor-permalink" href="#Advanced-Features" title="Permalink"></a></h4><ul><li><a href="../custom_contours/">Custom Contour Integration</a> - Zolotarev, Gauss-Legendre methods</li><li><a href="../complex_eigenvalues/">Complex Eigenvalues</a> - Non-Hermitian problems</li><li><a href="../polynomial_problems/">Polynomial Eigenvalue Problems</a> - Quadratic and higher-order</li></ul><h4 id="Real-Applications"><a class="docs-heading-anchor" href="#Real-Applications">Real Applications</a><a id="Real-Applications-1"></a><a class="docs-heading-anchor-permalink" href="#Real-Applications" title="Permalink"></a></h4><ul><li><a href="../examples/">Structural Dynamics</a> - Vibration analysis</li><li><a href="../examples/">Quantum Mechanics</a> - Electronic structure</li><li><a href="../examples/">Fluid Dynamics</a> - Stability analysis</li><li><a href="../examples/">Network Analysis</a> - Graph eigenvalues</li></ul><h3 id="Quick-Reference-Card"><a class="docs-heading-anchor" href="#Quick-Reference-Card">Quick Reference Card</a><a id="Quick-Reference-Card-1"></a><a class="docs-heading-anchor-permalink" href="#Quick-Reference-Card" title="Permalink"></a></h3><p>Keep this handy while coding:</p><pre><code class="language-julia hljs"># Basic usage
+result = feast(A, (Emin, Emax), M0=10)
+
+# Generalized problem  
+result = feast(A, B, (Emin, Emax), M0=10)
+
+# Matrix-free
+A_op = LinearOperator{Float64}(matvec!, (n,n), issymmetric=true)
+result = feast(A_op, (Emin, Emax), M0=10, solver=:cg)
+
+# Complex eigenvalues
+result = feast_general(A, B, center, radius, M0=10)
+
+# Check results
+if result.info == 0
+    eigenvalues = result.lambda[1:result.M]
+    eigenvectors = result.q[:, 1:result.M]
+end</code></pre><h3 id="Getting-Help"><a class="docs-heading-anchor" href="#Getting-Help">Getting Help</a><a id="Getting-Help-1"></a><a class="docs-heading-anchor-permalink" href="#Getting-Help" title="Permalink"></a></h3><ul><li>Full API: <a href="../api_reference/">API Reference</a></li><li>Issues: <a href="https://github.com/your-repo/FeastKit.jl/issues">GitHub Issues</a>  </li><li>Community: <a href="https://github.com/your-repo/FeastKit.jl/discussions">GitHub Discussions</a></li><li>Contact: your-email@domain.com</li></ul><hr/><p>&lt;div align=&quot;center&quot;&gt;   &lt;p&gt;&lt;strong&gt;Congratulations! You&#39;re now ready to use FeastKit.jl effectively.&lt;/strong&gt;&lt;/p&gt;   Explore the <a href="../api_reference/">API Reference</a> · See more <a href="../examples/">Examples</a> &lt;/div&gt;</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../zero_to_feast/">« Zero to FeastKit</a><a class="docs-footer-nextpage" href="../examples/">Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Friday 19 December 2025 17:59">Friday 19 December 2025</span>. Using Julia version 1.12.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

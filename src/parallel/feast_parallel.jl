@@ -52,7 +52,8 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
         # Parallel computation of moments for each contour point
         if use_threads && Threads.nthreads() > 1
             # Use threading for shared memory parallelism
-            moments = pfeast_compute_moments_threaded(A, B, workspace.work, contour, M0; verbose=verbose)
+            # Only print verbose output on first iteration to avoid spam
+            moments = pfeast_compute_moments_threaded(A, B, workspace.work, contour, M0; verbose=(verbose && loop == 1))
         else
             # Use distributed computing for multiple processes
             moments = pfeast_compute_moments_distributed(A, B, workspace.work, contour, M0)
@@ -398,7 +399,8 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     for loop in 1:max_loops
         # Compute moments in parallel
         if use_threads && Threads.nthreads() > 1
-            moments = pfeast_compute_sparse_moments_threaded(A, B, workspace.work, contour, M0; verbose=verbose)
+            # Only print verbose output on first iteration to avoid spam
+            moments = pfeast_compute_sparse_moments_threaded(A, B, workspace.work, contour, M0; verbose=(verbose && loop == 1))
         else
             moments = pfeast_compute_sparse_moments_distributed(A, B, workspace.work, contour, M0)
         end

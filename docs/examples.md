@@ -1,10 +1,4 @@
-# Examples and Tutorials {#examples_page}
-
-```@id examples_page
-```
-
-```@id examples
-```
+# Examples and Tutorials
 
 Comprehensive collection of FeastKit.jl examples from basic usage to advanced applications.
 

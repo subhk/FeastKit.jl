@@ -236,16 +236,18 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
             Sq_real = Matrix{ReducedT}(real.(0.5 .* (zSq .+ adjoint(zSq))))
 
             # Try Symmetric solver first (more accurate), fall back to general if not positive definite
+            # IMPORTANT: Solve Sq*x = lambda*Aq*x (not Aq*x = lambda*Sq*x)
+            # This is because zAq ≈ Q'*P*Q and zSq ≈ Q'*A*P*Q where P is the spectral projector
             lambda_red = Vector{ReducedT}(undef, 0)
             v_red = Array{ReducedT}(undef, 0, 0)
             try
-                F = eigen(Symmetric(Aq_real), Symmetric(Sq_real))
+                F = eigen(Symmetric(Sq_real), Symmetric(Aq_real))
                 lambda_red = Vector{ReducedT}(F.values)
                 v_red = Array{ReducedT}(F.vectors)
             catch e
                 if isa(e, PosDefException) || isa(e, LAPACKException)
                     # Fall back to general eigenvalue solver if not positive definite
-                    F = eigen(Aq_real, Sq_real)
+                    F = eigen(Sq_real, Aq_real)
                     lambda_red = Vector{ReducedT}(real.(F.values))
                     v_red = Array{ReducedT}(real.(F.vectors))
                 else

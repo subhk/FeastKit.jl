@@ -230,39 +230,38 @@ function pfeast_solve_contour_chunk(A::Matrix{T}, B::Matrix{T},
 end
 
 # Solve for a single contour point
-function pfeast_solve_single_point(A::Matrix{T}, B::Matrix{T}, work::Matrix{T}, 
+function pfeast_solve_single_point(A::Matrix{T}, B::Matrix{T}, work::Matrix{T},
                                   z::Complex{T}, w::Complex{T}, M0::Int) where T<:Real
     N = size(A, 1)
-    
+
     # Local moment matrices
     Aq_local = zeros(T, M0, M0)
     Sq_local = zeros(T, M0, M0)
-    
+
     try
         # Form and factorize (z*B - A)
         system_matrix = z * B - A
         F = lu(system_matrix)
-        
-        # Right-hand side
+
+        # Right-hand side: B * Q0
         rhs = B * work[:, 1:M0]
-        
-        # Solve linear systems
+
+        # Solve linear systems: Y = (z*B - A) \ (B*Q0)
         workc_local = F \ rhs
-        
-        # Compute moment contribution
-        for j in 1:M0
-            for i in 1:M0
-                moment_val = real(w * dot(work[:, i], workc_local[:, j]))
-                Aq_local[i, j] = moment_val
-                Sq_local[i, j] = moment_val * real(z)
-            end
-        end
-        
+
+        # Compute moment contribution with factor of 2 for half-contour symmetry
+        # Matches Fortran: Aq += (2 * Wne[e]) * (Q0' * Y)
+        #                  Sq += (2 * Wne[e] * Zne[e]) * (Q0' * Y)
+        temp = work[:, 1:M0]' * workc_local
+        weight = 2 * w  # Factor of 2 for conjugate half-contour
+        Aq_local .= real.(weight .* temp)
+        Sq_local .= real.(weight * z .* temp)
+
     catch err
         @warn "Linear solve failed for contour point z=$z: $err"
         # Return zero contribution
     end
-    
+
     return (Aq_local, Sq_local)
 end
 

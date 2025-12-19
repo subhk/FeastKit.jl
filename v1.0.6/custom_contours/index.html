@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Custom Contours · FeastKit.jl</title><meta name="title" content="Custom Contours · FeastKit.jl"/><meta property="og:title" content="Custom Contours · FeastKit.jl"/><meta property="twitter:title" content="Custom Contours · FeastKit.jl"/><meta name="description" content="Documentation for FeastKit.jl."/><meta property="og:description" content="Documentation for FeastKit.jl."/><meta property="twitter:description" content="Documentation for FeastKit.jl."/><meta property="og:url" content="https://subhk.github.io/FeastKit.jl/stable/custom_contours/"/><meta property="twitter:url" content="https://subhk.github.io/FeastKit.jl/stable/custom_contours/"/><link rel="canonical" href="https://subhk.github.io/FeastKit.jl/stable/custom_contours/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">FeastKit.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../zero_to_feast/">Zero to FeastKit</a></li><li><a class="tocitem" href="../getting_started/">Getting Started</a></li><li><span class="tocitem">User Guide</span><ul><li><a class="tocitem" href="../examples/">Examples</a></li><li><a class="tocitem" href="../matrix_free_interface/">Matrix-Free Interface</a></li><li><a class="tocitem" href="../performance/">Performance Tips</a></li><li class="is-active"><a class="tocitem" href>Custom Contours</a><ul class="internal"><li><a class="tocitem" href="#Table-of-Contents"><span>Table of Contents</span></a></li><li><a class="tocitem" href="#Contour-Integration-Theory"><span>Contour Integration Theory</span></a></li><li><a class="tocitem" href="#Built-in-Integration-Methods"><span>Built-in Integration Methods</span></a></li><li><a class="tocitem" href="#Custom-Contour-Design"><span>Custom Contour Design</span></a></li><li><a class="tocitem" href="#Advanced-Applications"><span>Advanced Applications</span></a></li><li><a class="tocitem" href="#Advanced-Contour-Shapes"><span>Advanced Contour Shapes</span></a></li><li><a class="tocitem" href="#Troubleshooting-Contour-Issues"><span>Troubleshooting Contour Issues</span></a></li></ul></li><li><a class="tocitem" href="../complex_eigenvalues/">Complex Eigenvalues</a></li><li><a class="tocitem" href="../polynomial_problems/">Polynomial Problems</a></li><li><a class="tocitem" href="../parallel_computing/">Parallel Computing</a></li></ul></li><li><a class="tocitem" href="../api_reference/">API Reference</a></li><li><span class="tocitem">Project</span><ul><li><a class="tocitem" href="../contributing/">Contributing</a></li><li><a class="tocitem" href="../developer_guide/">Developer Guide</a></li><li><a class="tocitem" href="../testing/">Testing</a></li><li><a class="tocitem" href="../license/">License</a></li><li><a class="tocitem" href="../changelog/">Changelog</a></li><li><a class="tocitem" href="../bibliography/">Bibliography</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">User Guide</a></li><li class="is-active"><a href>Custom Contours</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Custom Contours</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl/blob/main/docs/src/custom_contours.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Custom-Contour-Integration"><a class="docs-heading-anchor" href="#Custom-Contour-Integration">Custom Contour Integration</a><a id="Custom-Contour-Integration-1"></a><a class="docs-heading-anchor-permalink" href="#Custom-Contour-Integration" title="Permalink"></a></h1><p>Advanced guide to customizing FeastKit&#39;s contour integration for optimal performance and accuracy.</p><h2 id="Table-of-Contents"><a class="docs-heading-anchor" href="#Table-of-Contents">Table of Contents</a><a id="Table-of-Contents-1"></a><a class="docs-heading-anchor-permalink" href="#Table-of-Contents" title="Permalink"></a></h2><ol><li><a href="#contour-integration-theory">Contour Integration Theory</a></li><li><a href="#built-in-integration-methods">Built-in Integration Methods</a>  </li><li><a href="#custom-contour-design">Custom Contour Design</a></li><li><a href="#advanced-applications">Advanced Applications</a></li><li><a href="#troubleshooting-contour-issues">Troubleshooting Contour Issues</a></li></ol><hr/><h2 id="Contour-Integration-Theory"><a class="docs-heading-anchor" href="#Contour-Integration-Theory">Contour Integration Theory</a><a id="Contour-Integration-Theory-1"></a><a class="docs-heading-anchor-permalink" href="#Contour-Integration-Theory" title="Permalink"></a></h2><h3 id="Mathematical-Foundation"><a class="docs-heading-anchor" href="#Mathematical-Foundation">Mathematical Foundation</a><a id="Mathematical-Foundation-1"></a><a class="docs-heading-anchor-permalink" href="#Mathematical-Foundation" title="Permalink"></a></h3><p>The FEAST algorithm uses contour integration to compute spectral projectors. For a matrix <strong>A</strong> with eigenvalues λᵢ and eigenvectors xᵢ, the spectral projector is:</p><p class="math-container">\[P = \frac{1}{2\pi i} \oint_\Gamma (z\mathbf{I} - \mathbf{A})^{-1} dz\]</p><p>Where Γ is a contour enclosing the eigenvalues of interest.</p><h3 id="Moment-Based-Approach"><a class="docs-heading-anchor" href="#Moment-Based-Approach">Moment-Based Approach</a><a id="Moment-Based-Approach-1"></a><a class="docs-heading-anchor-permalink" href="#Moment-Based-Approach" title="Permalink"></a></h3><p>FeastKit computes moments of the spectral projector:</p><p class="math-container">\[\mathbf{S}_k = \frac{1}{2\pi i} \oint_\Gamma z^k (z\mathbf{B} - \mathbf{A})^{-1} \mathbf{Q} dz\]</p><p>The numerical integration becomes:</p><p class="math-container">\[\mathbf{S}_k \approx \sum_{e=1}^{n_e} w_e z_e^k (z_e\mathbf{B} - \mathbf{A})^{-1} \mathbf{Q}\]</p><div class="admonition is-info" id="Key-Insight-84dfdcc78b096f49"><header class="admonition-header">Key Insight<a class="admonition-anchor" href="#Key-Insight-84dfdcc78b096f49" title="Permalink"></a></header><div class="admonition-body"><p>The quality of eigenvalue extraction depends critically on:</p><ul><li><strong>Contour placement</strong>: Must enclose target eigenvalues</li><li><strong>Integration accuracy</strong>: Affects moment computation quality  </li><li><strong>Node distribution</strong>: Should resolve eigenvalue clustering</li></ul></div></div><hr/><h2 id="Built-in-Integration-Methods"><a class="docs-heading-anchor" href="#Built-in-Integration-Methods">Built-in Integration Methods</a><a id="Built-in-Integration-Methods-1"></a><a class="docs-heading-anchor-permalink" href="#Built-in-Integration-Methods" title="Permalink"></a></h2><h3 id="Gauss-Legendre-Integration"><a class="docs-heading-anchor" href="#Gauss-Legendre-Integration">Gauss-Legendre Integration</a><a id="Gauss-Legendre-Integration-1"></a><a class="docs-heading-anchor-permalink" href="#Gauss-Legendre-Integration" title="Permalink"></a></h3><p><strong>Best for</strong>: High accuracy with minimal points, smooth integrands</p><pre><code class="language-julia hljs">using FeastKit
+
+# High-accuracy Gauss-Legendre with 16 points
+contour = feast_contour_expert(-1.0, 1.0, 16, 0, 100)
+
+println(&quot;Gauss-Legendre contour:&quot;)
+println(&quot;Nodes: &quot;, contour.Zne[1:5])  # Show first 5 nodes
+println(&quot;Weights: &quot;, contour.Wne[1:5]) # Show first 5 weights</code></pre><p><strong>Advantages</strong>:</p><ul><li>Highest accuracy per integration point</li><li>Optimal for smooth problems</li><li>Well-established theory</li></ul><p><strong>Disadvantages</strong>:  </p><ul><li>Points not uniformly distributed</li><li>May miss isolated eigenvalues</li></ul><h3 id="Trapezoidal-Rule-Integration"><a class="docs-heading-anchor" href="#Trapezoidal-Rule-Integration">Trapezoidal Rule Integration</a><a id="Trapezoidal-Rule-Integration-1"></a><a class="docs-heading-anchor-permalink" href="#Trapezoidal-Rule-Integration" title="Permalink"></a></h3><p><strong>Best for</strong>: Robust integration, debugging, educational purposes</p><pre><code class="language-julia hljs"># Trapezoidal rule with 12 points
+contour = feast_contour_expert(-2.0, 2.0, 12, 1, 100)
+
+# Visualize uniform node distribution
+θ = [angle(z) for z in contour.Zne]
+println(&quot;Angles: &quot;, sort(θ))  # Should be uniformly spaced</code></pre><p><strong>Advantages</strong>:</p><ul><li>Uniformly distributed points</li><li>Simple and robust</li><li>Good for debugging</li></ul><p><strong>Disadvantages</strong>:</p><ul><li>Lower accuracy per point</li><li>Requires more points for precision</li></ul><h3 id="Zolotarev-Integration"><a class="docs-heading-anchor" href="#Zolotarev-Integration">Zolotarev Integration</a><a id="Zolotarev-Integration-1"></a><a class="docs-heading-anchor-permalink" href="#Zolotarev-Integration" title="Permalink"></a></h3><p><strong>Best for</strong>: Elliptical domains, clustered eigenvalues</p><pre><code class="language-julia hljs"># Zolotarev integration (optimal for ellipses)
+contour = feast_contour_expert(0.0, 4.0, 12, 2, 100)
+
+println(&quot;Zolotarev contour characteristics:&quot;)
+println(&quot;Optimized for elliptical regions&quot;)
+println(&quot;Excellent for clustered eigenvalues&quot;)</code></pre><p><strong>Advantages</strong>:</p><ul><li>Theoretically optimal for ellipses  </li><li>Excellent for clustered eigenvalues</li><li>Adaptive node placement</li></ul><p><strong>Disadvantages</strong>:</p><ul><li>More complex implementation</li><li>Problem-specific optimization</li></ul><hr/><h2 id="Custom-Contour-Design"><a class="docs-heading-anchor" href="#Custom-Contour-Design">Custom Contour Design</a><a id="Custom-Contour-Design-1"></a><a class="docs-heading-anchor-permalink" href="#Custom-Contour-Design" title="Permalink"></a></h2><h3 id="Designing-Your-Own-Contour"><a class="docs-heading-anchor" href="#Designing-Your-Own-Contour">Designing Your Own Contour</a><a id="Designing-Your-Own-Contour-1"></a><a class="docs-heading-anchor-permalink" href="#Designing-Your-Own-Contour" title="Permalink"></a></h3><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+function create_rectangular_contour(xmin, xmax, ymin, ymax, nx, ny)
+    &quot;&quot;&quot;
+    Create rectangular contour for eigenvalues in complex rectangle.
+    
+    Parameters:
+    - xmin, xmax: Real axis bounds
+    - ymin, ymax: Imaginary axis bounds  
+    - nx, ny: Number of points on horizontal/vertical segments
+    &quot;&quot;&quot;
+    
+    # Bottom edge: xmin to xmax
+    bottom_x = range(xmin, xmax, length=nx)
+    bottom_nodes = [x + im*ymin for x in bottom_x]
+    bottom_weights = fill((xmax - xmin) / nx, nx)
+    
+    # Right edge: ymin to ymax  
+    right_y = range(ymin, ymax, length=ny)[2:end] # Skip corner
+    right_nodes = [xmax + im*y for y in right_y]
+    right_weights = fill(im * (ymax - ymin) / ny, ny-1)
+    
+    # Top edge: xmax to xmin (reverse direction)
+    top_x = range(xmax, xmin, length=nx)[2:end] # Skip corner
+    top_nodes = [x + im*ymax for x in top_x] 
+    top_weights = fill(-(xmax - xmin) / nx, nx-1)
+    
+    # Left edge: ymax to ymin (reverse direction)
+    left_y = range(ymax, ymin, length=ny)[2:end-1] # Skip corners
+    left_nodes = [xmin + im*y for y in left_y]
+    left_weights = fill(-im * (ymax - ymin) / ny, ny-2)
+    
+    # Combine all segments
+    all_nodes = vcat(bottom_nodes, right_nodes, top_nodes, left_nodes)
+    all_weights = vcat(bottom_weights, right_weights, top_weights, left_weights)
+    
+    return all_nodes, all_weights
+end
+
+# Example: Rectangle around complex eigenvalues
+nodes, weights = create_rectangular_contour(-1, 3, -2, 2, 20, 16)
+println(&quot;Created rectangular contour with $(length(nodes)) points&quot;)
+
+# Use with FeastKit
+contour = feast_contour_custom_weights!(nodes, weights)</code></pre><h3 id="Circular-Contour-for-Complex-Eigenvalues"><a class="docs-heading-anchor" href="#Circular-Contour-for-Complex-Eigenvalues">Circular Contour for Complex Eigenvalues</a><a id="Circular-Contour-for-Complex-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Circular-Contour-for-Complex-Eigenvalues" title="Permalink"></a></h3><pre><code class="language-julia hljs">function create_circular_contour(center, radius, n_points)
+    &quot;&quot;&quot;
+    Create circular contour for general eigenvalue problems.
+    &quot;&quot;&quot;
+    θ = range(0, 2π, length=n_points+1)[1:end-1]  # Exclude 2π (same as 0)
+    
+    nodes = [center + radius * exp(im * θᵢ) for θᵢ in θ]
+    weights = [im * radius * exp(im * θᵢ) * (2π / n_points) for θᵢ in θ]
+    
+    return nodes, weights
+end
+
+# Example usage
+center = 1.0 + 0.5im  
+radius = 2.0
+nodes, weights = create_circular_contour(center, radius, 16)
+
+contour = feast_contour_custom_weights!(nodes, weights)</code></pre><h3 id="Adaptive-Contour-Generation"><a class="docs-heading-anchor" href="#Adaptive-Contour-Generation">Adaptive Contour Generation</a><a id="Adaptive-Contour-Generation-1"></a><a class="docs-heading-anchor-permalink" href="#Adaptive-Contour-Generation" title="Permalink"></a></h3><pre><code class="language-julia hljs">function adaptive_elliptical_contour(Emin, Emax, eigenvalue_estimates; 
+                                    min_points=8, max_points=32)
+    &quot;&quot;&quot;
+    Create elliptical contour adapted to eigenvalue distribution.
+    &quot;&quot;&quot;
+    
+    # Analyze eigenvalue clustering
+    λ_center = (Emax + Emin) / 2
+    λ_spread = (Emax - Emin) / 2
+    
+    # Estimate clustering near center
+    center_density = sum(abs.(eigenvalue_estimates .- λ_center) .&lt; λ_spread/4)
+    total_estimates = length(eigenvalue_estimates)
+    
+    if center_density / total_estimates &gt; 0.7
+        # High clustering near center - use more points, Zolotarev method
+        n_points = max_points
+        method = 2  # Zolotarev
+        aspect_ratio = 50  # Flatter ellipse
+        println(&quot;Detected clustering: using $n_points Zolotarev points&quot;)
+        
+    elseif total_estimates &lt; 5  
+        # Few eigenvalues - use fewer points
+        n_points = min_points
+        method = 0  # Gauss-Legendre 
+        aspect_ratio = 100  # Circle
+        println(&quot;Few eigenvalues: using $n_points Gauss-Legendre points&quot;)
+        
+    else
+        # Moderate distribution - standard approach
+        n_points = 16
+        method = 0  # Gauss-Legendre
+        aspect_ratio = 100
+        println(&quot;Standard distribution: using $n_points Gauss-Legendre points&quot;)
+    end
+    
+    return feast_contour_expert(Emin, Emax, n_points, method, aspect_ratio)
+end
+
+# Example with eigenvalue estimates
+λ_estimates = [0.5, 0.52, 0.54, 1.8, 1.82, 1.84]  # Two clusters
+contour = adaptive_elliptical_contour(0.0, 2.5, λ_estimates)</code></pre><hr/><h2 id="Advanced-Applications"><a class="docs-heading-anchor" href="#Advanced-Applications">Advanced Applications</a><a id="Advanced-Applications-1"></a><a class="docs-heading-anchor-permalink" href="#Advanced-Applications" title="Permalink"></a></h2><h3 id="Multi-Level-Contour-Strategy"><a class="docs-heading-anchor" href="#Multi-Level-Contour-Strategy">Multi-Level Contour Strategy</a><a id="Multi-Level-Contour-Strategy-1"></a><a class="docs-heading-anchor-permalink" href="#Multi-Level-Contour-Strategy" title="Permalink"></a></h3><p>For problems with eigenvalues at different scales:</p><pre><code class="language-julia hljs">function multi_level_feast(A, eigenvalue_regions; M0_per_region=10)
+    &quot;&quot;&quot;
+    Apply FeastKit to multiple regions with customized contours.
+    &quot;&quot;&quot;
+    
+    all_eigenvalues = Float64[]
+    all_eigenvectors = Matrix{Float64}(undef, size(A, 1), 0)
+    
+    for (i, (region_min, region_max, description)) in enumerate(eigenvalue_regions)
+        println(&quot;Processing region $i: $description&quot;)
+        println(&quot;Interval: [$region_min, $region_max]&quot;)
+        
+        # Customize contour for this region
+        width = region_max - region_min
+        
+        if width &lt; 0.01  # Very narrow region
+            n_points = 32
+            method = 2  # Zolotarev for high precision
+        elseif width &gt; 10  # Very wide region  
+            n_points = 12
+            method = 1  # Trapezoidal for robustness
+        else
+            n_points = 16
+            method = 0  # Gauss-Legendre standard
+        end
+        
+        contour = feast_contour_expert(region_min, region_max, 
+                                     n_points, method, 100)
+        
+        # Apply FeastKit to this region
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[2] = n_points
+        fpm[16] = method
+        
+        result = feast(A, (region_min, region_max), M0=M0_per_region, fpm=fpm)
+        
+        println(&quot;Found $(result.M) eigenvalues in region $i&quot;)
+        
+        if result.M &gt; 0
+            append!(all_eigenvalues, result.lambda[1:result.M])
+            all_eigenvectors = hcat(all_eigenvectors, result.q[:, 1:result.M])
+        end
+    end
+    
+    # Sort combined results
+    perm = sortperm(all_eigenvalues)
+    all_eigenvalues = all_eigenvalues[perm]
+    all_eigenvectors = all_eigenvectors[:, perm]
+    
+    println(&quot;\\nTotal eigenvalues found: $(length(all_eigenvalues))&quot;)
+    return all_eigenvalues, all_eigenvectors
+end
+
+# Example usage
+regions = [
+    (0.01, 0.1, &quot;Low frequency modes&quot;),
+    (0.8, 1.2, &quot;Mid-range cluster&quot;), 
+    (4.5, 5.5, &quot;High frequency modes&quot;)
+]
+
+A = create_test_matrix(1000)
+eigenvalues, eigenvectors = multi_level_feast(A, regions)</code></pre><h3 id="Contour-Optimization-via-Rational-Function"><a class="docs-heading-anchor" href="#Contour-Optimization-via-Rational-Function">Contour Optimization via Rational Function</a><a id="Contour-Optimization-via-Rational-Function-1"></a><a class="docs-heading-anchor-permalink" href="#Contour-Optimization-via-Rational-Function" title="Permalink"></a></h3><pre><code class="language-julia hljs">function optimize_contour_placement(A, initial_interval, target_count; 
+                                   max_iterations=5)
+    &quot;&quot;&quot;
+    Optimize contour placement using rational function evaluation.
+    &quot;&quot;&quot;
+    
+    Emin, Emax = initial_interval
+    
+    for iter in 1:max_iterations
+        println(&quot;Iteration $iter: interval [$Emin, $Emax]&quot;)
+        
+        # Generate test points in current interval
+        test_points = range(Emin, Emax, length=50)
+        
+        # Evaluate rational function to estimate eigenvalue count
+        contour = feast_contour_expert(Emin, Emax, 16, 0, 100)
+        rational_values = feast_rational_expert(contour.Zne, contour.Wne, test_points)
+        
+        # Count estimated eigenvalues (rational function ≈ 1 near eigenvalues)
+        estimated_count = sum(rational_values .&gt; 0.5)
+        
+        println(&quot;Estimated eigenvalues in interval: $estimated_count&quot;)
+        println(&quot;Target count: $target_count&quot;)
+        
+        if abs(estimated_count - target_count) &lt;= 1
+            println(&quot;Converged to optimal interval!&quot;)
+            break
+        end
+        
+        # Adjust interval based on estimate
+        if estimated_count &gt; target_count
+            # Too many eigenvalues - shrink interval
+            width = Emax - Emin
+            center = (Emin + Emax) / 2
+            new_width = width * 0.8
+            Emin = center - new_width/2
+            Emax = center + new_width/2
+            
+        else  # estimated_count &lt; target_count
+            # Too few eigenvalues - expand interval
+            width = Emax - Emin  
+            expansion = 1.2
+            Emin -= width * (expansion - 1) / 2
+            Emax += width * (expansion - 1) / 2
+        end
+    end
+    
+    return (Emin, Emax)
+end
+
+# Example usage
+A = SymTridiagonal(2.0 * ones(500), -1.0 * ones(499))
+initial_interval = (0.5, 1.5)
+optimized_interval = optimize_contour_placement(A, initial_interval, 10)
+
+println(&quot;Optimized interval: $optimized_interval&quot;)</code></pre><hr/><h2 id="Advanced-Contour-Shapes"><a class="docs-heading-anchor" href="#Advanced-Contour-Shapes">Advanced Contour Shapes</a><a id="Advanced-Contour-Shapes-1"></a><a class="docs-heading-anchor-permalink" href="#Advanced-Contour-Shapes" title="Permalink"></a></h2><h3 id="Star-Shaped-Contours"><a class="docs-heading-anchor" href="#Star-Shaped-Contours">Star-Shaped Contours</a><a id="Star-Shaped-Contours-1"></a><a class="docs-heading-anchor-permalink" href="#Star-Shaped-Contours" title="Permalink"></a></h3><p>For eigenvalues with radial distribution:</p><pre><code class="language-julia hljs">function create_star_contour(center, radius, n_spikes, n_points_per_spike)
+    &quot;&quot;&quot;
+    Create star-shaped contour for eigenvalues with radial symmetry.
+    &quot;&quot;&quot;
+    nodes = ComplexF64[]
+    weights = ComplexF64[]
+    
+    for spike in 1:n_spikes
+        # Base angle for this spike
+        θ_base = 2π * (spike - 1) / n_spikes
+        
+        # Create points along this spike
+        for i in 1:n_points_per_spike
+            # Vary radius from center to maximum
+            r = radius * i / n_points_per_spike
+            θ = θ_base + 0.1 * sin(4π * i / n_points_per_spike)  # Add slight perturbation
+            
+            z = center + r * exp(im * θ)
+            push!(nodes, z)
+            
+            # Approximate weight (tangent direction)
+            dz_dt = (radius / n_points_per_spike) * exp(im * θ) * 
+                   (1 + im * 0.4 * π * cos(4π * i / n_points_per_spike) / n_points_per_spike)
+            push!(weights, dz_dt)
+        end
+    end
+    
+    return nodes, weights
+end</code></pre><h3 id="Lens-Shaped-Contours"><a class="docs-heading-anchor" href="#Lens-Shaped-Contours">Lens-Shaped Contours</a><a id="Lens-Shaped-Contours-1"></a><a class="docs-heading-anchor-permalink" href="#Lens-Shaped-Contours" title="Permalink"></a></h3><p>For eigenvalues in bimodal distributions:</p><pre><code class="language-julia hljs">function create_lens_contour(focus1, focus2, width, n_points)
+    &quot;&quot;&quot;
+    Create lens-shaped (elliptical) contour between two focal points.
+    &quot;&quot;&quot;
+    # Ellipse parameters
+    center = (focus1 + focus2) / 2
+    focus_distance = abs(focus2 - focus1)
+    major_axis = focus_distance + width
+    minor_axis = width
+    
+    θ = range(0, 2π, length=n_points+1)[1:end-1]
+    
+    nodes = ComplexF64[]
+    weights = ComplexF64[]
+    
+    for θᵢ in θ
+        # Parametric ellipse
+        x = (major_axis/2) * cos(θᵢ)
+        y = (minor_axis/2) * sin(θᵢ)
+        
+        z = center + x + im * y
+        push!(nodes, z)
+        
+        # Derivative for weight calculation
+        dx_dθ = -(major_axis/2) * sin(θᵢ)  
+        dy_dθ = (minor_axis/2) * cos(θᵢ)
+        dz_dθ = dx_dθ + im * dy_dθ
+        
+        weight = dz_dθ * (2π / n_points)
+        push!(weights, weight)
+    end
+    
+    return nodes, weights
+end</code></pre><hr/><h2 id="Troubleshooting-Contour-Issues"><a class="docs-heading-anchor" href="#Troubleshooting-Contour-Issues">Troubleshooting Contour Issues</a><a id="Troubleshooting-Contour-Issues-1"></a><a class="docs-heading-anchor-permalink" href="#Troubleshooting-Contour-Issues" title="Permalink"></a></h2><h3 id="Diagnostic-Tools"><a class="docs-heading-anchor" href="#Diagnostic-Tools">Diagnostic Tools</a><a id="Diagnostic-Tools-1"></a><a class="docs-heading-anchor-permalink" href="#Diagnostic-Tools" title="Permalink"></a></h3><pre><code class="language-julia hljs">function diagnose_contour_quality(contour, A, interval)
+    &quot;&quot;&quot;
+    Analyze contour quality for eigenvalue computation.
+    &quot;&quot;&quot;
+    
+    println(&quot;Contour Quality Diagnostics&quot;)
+    println(&quot;=&quot;^40)
+    
+    Zne, Wne = contour.Zne, contour.Wne
+    n_points = length(Zne)
+    
+    # 1. Check contour closure
+    contour_sum = sum(Wne)
+    closure_error = abs(contour_sum)
+    println(&quot;Contour closure error: $closure_error&quot;)
+    
+    if closure_error &gt; 1e-12
+        @warn &quot;Contour may not be properly closed&quot;
+    end
+    
+    # 2. Check node distribution
+    min_spacing = minimum([abs(Zne[i] - Zne[j]) 
+                          for i in 1:n_points for j in i+1:n_points])
+    avg_spacing = sum(abs(Zne[i+1] - Zne[i]) for i in 1:n_points-1) / (n_points-1)
+    
+    println(&quot;Minimum node spacing: $min_spacing&quot;)
+    println(&quot;Average node spacing: $avg_spacing&quot;)
+    
+    if min_spacing &lt; avg_spacing * 0.1
+        @warn &quot;Nodes may be too close together&quot;
+    end
+    
+    # 3. Test integration accuracy with known function
+    # Integrate f(z) = 1 (should give 0 for closed contour)
+    integral_one = sum(Wne)
+    println(&quot;∮ 1 dz = $integral_one (should be ≈ 0)&quot;)
+    
+    # 4. Estimate condition number at integration points
+    condition_numbers = Float64[]
+    for z in Zne
+        try
+            # Approximate condition number of (zI - A)
+            shift_matrix = z * I - A
+            σ_min = minimum(svdvals(shift_matrix))  # Smallest singular value
+            cond_approx = 1.0 / σ_min
+            push!(condition_numbers, cond_approx)
+        catch
+            push!(condition_numbers, Inf)
+        end
+    end
+    
+    max_cond = maximum(condition_numbers)
+    avg_cond = mean(condition_numbers)
+    
+    println(&quot;Max condition number: $max_cond&quot;)
+    println(&quot;Average condition number: $avg_cond&quot;) 
+    
+    if max_cond &gt; 1e12
+        @warn &quot;Some integration points may be too close to eigenvalues&quot;
+    end
+    
+    return (closure_error, min_spacing, avg_spacing, max_cond, avg_cond)
+end
+
+# Example usage
+A = randn(100, 100); A = A + A&#39;  # Symmetric test matrix
+interval = (-2, 2)
+contour = feast_contour_expert(interval[1], interval[2], 16, 0, 100)
+
+diagnostics = diagnose_contour_quality(contour, A, interval)</code></pre><h3 id="Common-Issues-and-Solutions"><a class="docs-heading-anchor" href="#Common-Issues-and-Solutions">Common Issues and Solutions</a><a id="Common-Issues-and-Solutions-1"></a><a class="docs-heading-anchor-permalink" href="#Common-Issues-and-Solutions" title="Permalink"></a></h3><div class="admonition is-warning" id="Issue:-No-eigenvalues-found-e9cd72febc8c4ce6"><header class="admonition-header">Issue: No eigenvalues found<a class="admonition-anchor" href="#Issue:-No-eigenvalues-found-e9cd72febc8c4ce6" title="Permalink"></a></header><div class="admonition-body"><p><strong>Causes</strong>: Contour doesn&#39;t enclose eigenvalues</p><p><strong>Solutions</strong>:</p><pre><code class="language-julia hljs"># 1. Check eigenvalue bounds
+bounds = feast_validate_interval(A, interval)
+println(&quot;Estimated bounds: $bounds&quot;)
+
+# 2. Use wider interval
+wider_interval = (bounds[1] - 0.1, bounds[2] + 0.1)
+result = feast(A, wider_interval)
+
+# 3. Visualize rational function
+test_points = range(interval[1], interval[2], length=100)
+rational_vals = feast_rational_expert(contour.Zne, contour.Wne, test_points)
+# Plot rational_vals vs test_points (peaks indicate eigenvalues)</code></pre></div></div><div class="admonition is-warning" id="Issue:-Integration-not-converging-bdcb6764ef89254b"><header class="admonition-header">Issue: Integration not converging<a class="admonition-anchor" href="#Issue:-Integration-not-converging-bdcb6764ef89254b" title="Permalink"></a></header><div class="admonition-body"><p><strong>Causes</strong>: Too few integration points, poor contour shape</p><p><strong>Solutions</strong>:</p><pre><code class="language-julia hljs"># 1. Increase integration points
+contour = feast_contour_expert(interval[1], interval[2], 32, 0, 100)
+
+# 2. Use Zolotarev integration for difficult problems
+contour = feast_contour_expert(interval[1], interval[2], 24, 2, 100)
+
+# 3. Adjust ellipse aspect ratio for eigenvalue distribution
+contour = feast_contour_expert(interval[1], interval[2], 16, 0, 50)  # Flatter</code></pre></div></div><div class="admonition is-warning" id="Issue:-Spurious-eigenvalues-2d2c20f1dbecbaf0"><header class="admonition-header">Issue: Spurious eigenvalues<a class="admonition-anchor" href="#Issue:-Spurious-eigenvalues-2d2c20f1dbecbaf0" title="Permalink"></a></header><div class="admonition-body"><p><strong>Causes</strong>: Numerical errors, ill-conditioned linear systems</p><p><strong>Solutions</strong>:</p><pre><code class="language-julia hljs"># 1. Increase precision
+fpm = zeros(Int, 64)
+fpm[3] = 14  # Higher tolerance (10^-14)
+result = feast(A, interval, fmp=fpm)
+
+# 2. Check residuals
+for i in 1:result.M
+    residual = norm(A * result.q[:, i] - result.lambda[i] * result.q[:, i])
+    println(&quot;λ[$(i)]: residual = $residual&quot;)
+end
+
+# 3. Use iterative refinement
+fpm[4] = 50  # More refinement iterations</code></pre></div></div><hr/><p>&lt;div align=&quot;center&quot;&gt;   &lt;p&gt;&lt;strong&gt;Master advanced contour integration techniques with FeastKit.jl&lt;/strong&gt;&lt;/p&gt;   ← <a href="../performance/">Performance</a> | <a href="../api_reference/">API Reference</a> → &lt;/div&gt;</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../performance/">« Performance Tips</a><a class="docs-footer-nextpage" href="../complex_eigenvalues/">Complex Eigenvalues »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Friday 19 December 2025 18:32">Friday 19 December 2025</span>. Using Julia version 1.12.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

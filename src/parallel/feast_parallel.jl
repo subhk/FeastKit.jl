@@ -228,34 +228,34 @@ function pfeast_compute_moments_distributed(A::Matrix{T}, B::Matrix{T},
     return moments
 end
 
-# Serial fallback computation
-function pfeast_compute_moments_serial(A::Matrix{T}, B::Matrix{T}, 
-                                      work::Matrix{T}, contour::FeastContour{T}, 
+# Serial fallback computation (returns complex moments)
+function pfeast_compute_moments_serial(A::Matrix{T}, B::Matrix{T},
+                                      work::Matrix{T}, contour::FeastContour{T},
                                       M0::Int) where T<:Real
     ne = length(contour.Zne)
-    moments = Vector{Tuple{Matrix{T}, Matrix{T}}}(undef, ne)
-    
+    moments = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, ne)
+
     for e in 1:ne
-        moments[e] = pfeast_solve_single_point(A, B, work, contour.Zne[e], 
+        moments[e] = pfeast_solve_single_point(A, B, work, contour.Zne[e],
                                              contour.Wne[e], M0)
     end
-    
+
     return moments
 end
 
-# Solve a chunk of contour points on a worker
-function pfeast_solve_contour_chunk(A::Matrix{T}, B::Matrix{T}, 
-                                   work::Matrix{T}, contour_nodes::Vector{Complex{T}}, 
+# Solve a chunk of contour points on a worker (returns complex moments)
+function pfeast_solve_contour_chunk(A::Matrix{T}, B::Matrix{T},
+                                   work::Matrix{T}, contour_nodes::Vector{Complex{T}},
                                    contour_weights::Vector{Complex{T}},
                                    chunk_indices::Vector{Int}, M0::Int) where T<:Real
-    chunk_moments = Vector{Tuple{Matrix{T}, Matrix{T}}}(undef, length(chunk_indices))
-    
+    chunk_moments = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, length(chunk_indices))
+
     for (i, e) in enumerate(chunk_indices)
         z = contour_nodes[e]
         w = contour_weights[e]
         chunk_moments[i] = pfeast_solve_single_point(A, B, work, z, w, M0)
     end
-    
+
     return chunk_moments
 end
 

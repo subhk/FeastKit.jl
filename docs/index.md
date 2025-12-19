@@ -1,16 +1,8 @@
-# FeastKit.jl Documentation
+# FeastKit.jl
 
-<div align="center">
-  <h1>FeastKit.jl</h1>
-  <p><em>Fast Eigenvalue Algorithm using Spectral Transformations in Julia</em></p>
-  
-  <p>
-    <a href="#quick-start">Quick Start</a> •
-    <a href="#examples">Examples</a> •
-    <a href="#api-reference">API Reference</a> •
-    <a href="#advanced-features">Advanced</a>
-  </p>
-</div>
+*Fast Eigenvalue Algorithm using Spectral Transformations in Julia*
+
+[Quick Start](@ref quick-start) | [Examples](@ref examples-gallery) | [API Reference](api_reference.md) | [Advanced Features](@ref core-concepts)
 
 ---
 
@@ -19,7 +11,7 @@
 FeastKit.jl is a Julia implementation of the **FEAST eigenvalue algorithm**, a powerful numerical method for finding eigenvalues and eigenvectors of large sparse matrices within specified intervals or regions. Unlike traditional methods that compute all eigenvalues, FeastKit allows you to:
 
 - Target specific eigenvalues in intervals `[Emin, Emax]` or complex regions
-- Handle very large problems (millions of unknowns) efficiently  
+- Handle very large problems (millions of unknowns) efficiently
 - Work matrix-free without storing explicit matrices
 - Leverage parallelization for high-performance computing
 - Use custom contour integration for optimal convergence
@@ -37,7 +29,7 @@ FeastKit.jl is a Julia implementation of the **FEAST eigenvalue algorithm**, a p
 
 ---
 
-## Quick Start
+## [Quick Start](@id quick-start)
 
 ### Installation
 
@@ -46,7 +38,7 @@ using Pkg
 Pkg.add("FeastKit")  # When available from registry
 
 # Or for development:
-Pkg.add(url="https://github.com/your-repo/FeastKit.jl")
+Pkg.add(url="https://github.com/subhk/FeastKit.jl")
 ```
 
 ### Your First FeastKit Calculation
@@ -91,12 +83,9 @@ result = feast(A_op, (0.5, 1.5), M0=10)
 
 ---
 
-## Examples Gallery
+## [Examples Gallery](@id examples-gallery)
 
-### Basic Examples
-
-<details>
-<summary><strong>Dense Matrix Eigenvalues</strong></summary>
+### Dense Matrix Eigenvalues
 
 ```julia
 using FeastKit, LinearAlgebra
@@ -114,10 +103,8 @@ for i in 1:result.M
     println("λ[$i] = $(result.lambda[i])")
 end
 ```
-</details>
 
-<details>
-<summary><strong>Sparse Matrix Problems</strong></summary>
+### Sparse Matrix Problems
 
 ```julia
 using FeastKit, SparseArrays
@@ -132,10 +119,8 @@ result = feast(A, (4.8, 5.2), M0=8)
 
 println("Largest eigenvalues: $(result.lambda[1:result.M])")
 ```
-</details>
 
-<details>
-<summary><strong>Generalized Eigenvalue Problem</strong></summary>
+### Generalized Eigenvalue Problem
 
 ```julia
 using FeastKit
@@ -150,49 +135,8 @@ result = feast(A, B, (0.1, 0.8), M0=15)
 
 println("Generalized eigenvalues: $(result.lambda[1:result.M])")
 ```
-</details>
 
-### Advanced Examples
-
-<details>
-<summary><strong>2D Partial Differential Equation</strong></summary>
-
-```julia
-using FeastKit
-
-# 2D Laplacian eigenvalue problem: -Δu = λu
-nx, ny = 100, 100
-n = nx * ny
-h = 1.0 / (nx + 1)
-
-# Matrix-free 2D Laplacian
-function laplacian_2d!(y, x)
-    fill!(y, 0)
-    for j in 1:ny, i in 1:nx
-        k = (j-1) * nx + i
-        y[k] += 4 * x[k] / h^2
-        
-        # Neighbors with boundary conditions
-        i > 1  && (y[k] -= x[k-1] / h^2)
-        i < nx && (y[k] -= x[k+1] / h^2) 
-        j > 1  && (y[k] -= x[k-nx] / h^2)
-        j < ny && (y[k] -= x[k+nx] / h^2)
-    end
-end
-
-A_op = LinearOperator{Float64}(laplacian_2d!, (n, n), 
-                              issymmetric=true, isposdef=true)
-
-# Find smallest eigenvalues (fundamental modes)
-λ_min = 2π^2 * (1/nx^2 + 1/ny^2)
-result = feast(A_op, (0.8*λ_min, 2.0*λ_min), M0=10, solver=:cg)
-
-println("PDE eigenvalues: $(result.lambda[1:result.M])")
-```
-</details>
-
-<details>
-<summary><strong>Complex Non-Hermitian Problems</strong></summary>
+### Complex Non-Hermitian Problems
 
 ```julia
 using FeastKit
@@ -214,18 +158,17 @@ for i in 1:result.M
     println("λ[$i] = $(real(λ)) + $(imag(λ))im")
 end
 ```
-</details>
 
 ---
 
-## Core Concepts
+## [Core Concepts](@id core-concepts)
 
 ### The FEAST Algorithm
 
 The FEAST algorithm uses **contour integration** in the complex plane to extract eigenvalues in specified regions. The key idea:
 
 1. **Define a contour** around your region of interest
-2. **Integrate along the contour** using spectral projectors  
+2. **Integrate along the contour** using spectral projectors
 3. **Extract eigenvalues** inside the contour via reduced eigenvalue problems
 
 ```
@@ -278,20 +221,17 @@ contour = feast_contour_expert(Emin, Emax, 16, 2, 100)  # Zolotarev integration
 
 ### Performance Tips
 
-Use matrix-free for large problems  
-Choose appropriate solvers: CG for SPD, GMRES for general  
-Tune integration points: More points = better accuracy, slower  
-Enable parallelization for very large problems  
-Use custom contours for challenging geometries  
+- Use matrix-free for large problems
+- Choose appropriate solvers: CG for SPD, GMRES for general
+- Tune integration points: More points = better accuracy, slower
+- Enable parallelization for very large problems
+- Use custom contours for challenging geometries
 
 ---
 
 ## Troubleshooting
 
-### Common Issues
-
-<details>
-<summary><strong>No eigenvalues found</strong></summary>
+### No eigenvalues found
 
 **Cause**: Search interval doesn't contain eigenvalues
 
@@ -304,32 +244,23 @@ println("Estimated eigenvalue range: $bounds")
 # Use a broader interval
 result = feast(A, (bounds[1], bounds[2]), M0=10)
 ```
-</details>
 
-<details>
-<summary><strong>Linear solver not converging</strong></summary>
+### Linear solver not converging
 
 **Cause**: Iterative solver issues in matrix-free mode
 
 **Solutions**:
 ```julia
 # Increase solver tolerance and iterations
-result = feast(A_op, interval, 
+result = feast(A_op, interval,
               solver=:gmres,
               solver_opts=(rtol=1e-4, maxiter=2000, restart=50))
 
 # Try different solver
 result = feast(A_op, interval, solver=:bicgstab)
-
-# Use custom preconditioner
-P = create_preconditioner(A_op)  # Your preconditioner
-result = feast(A_op, interval, 
-              solver_opts=(Pl=P, rtol=1e-6))
 ```
-</details>
 
-<details>
-<summary><strong>Memory allocation failed</strong></summary>
+### Memory allocation failed
 
 **Cause**: Problem too large for available memory
 
@@ -341,20 +272,13 @@ result = feast(A_op, interval, M0=10)
 
 # Reduce M0 (max eigenvalues)
 result = feast(A, interval, M0=5)  # Instead of M0=20
-
-# Use iterative refinement
-fpm = zeros(Int, 64)
-fpm[4] = 5  # Fewer refinement iterations
-result = feast(A, interval, M0=10, fpm=fpm)
 ```
-</details>
 
 ### Getting Help
 
-- Documentation: Check [API Reference](#api-reference)
-- Issues: Report bugs on [GitHub Issues](https://github.com/your-repo/FeastKit.jl/issues)
-- Discussions: Ask questions on [GitHub Discussions](https://github.com/your-repo/FeastKit.jl/discussions)
-- Email: Contact developers at your-email@domain.com
+- **Documentation**: Check [API Reference](api_reference.md)
+- **Issues**: Report bugs on [GitHub Issues](https://github.com/subhk/FeastKit.jl/issues)
+- **Discussions**: Ask questions on [GitHub Discussions](https://github.com/subhk/FeastKit.jl/discussions)
 
 ---
 
@@ -363,7 +287,7 @@ result = feast(A, interval, M0=10, fpm=fpm)
 Ready to dive deeper? Explore these advanced topics:
 
 - [Matrix-Free Interface](matrix_free_interface.md) - For large-scale problems
-- [Parallel Computing](parallel_computing.md) - MPI and threading  
+- [Parallel Computing](parallel_computing.md) - MPI and threading
 - [Custom Contours](custom_contours.md) - Advanced integration methods
 - [Performance Optimization](performance.md) - Speed and memory tips
 - [Examples](examples.md) - Real-world applications
@@ -372,22 +296,17 @@ Ready to dive deeper? Explore these advanced topics:
 
 | I want to... | Go to... |
 |---------------|----------|
-| **Get started immediately** | [Quick Start](#quick-start) |
-| **See working examples** | [Examples Gallery](#examples) |
-| **Find function documentation** | [API Reference](api_reference.md) |
-| **Solve very large problems** | [Matrix-Free Guide](matrix_free_interface.md) |
-| **Use multiple processors** | [Parallel Computing](parallel_computing.md) |
-| **Optimize performance** | [Performance Guide](performance.md) |
+| Get started immediately | [Quick Start](@ref quick-start) |
+| See working examples | [Examples Gallery](@ref examples-gallery) |
+| Find function documentation | [API Reference](api_reference.md) |
+| Solve very large problems | [Matrix-Free Guide](matrix_free_interface.md) |
+| Use multiple processors | [Parallel Computing](parallel_computing.md) |
+| Optimize performance | [Performance Guide](performance.md) |
 
 ---
 
-<div align="center">
-  <p><strong>Ready to solve your eigenvalue problems with FeastKit.jl?</strong></p>
-  <p><a href="#quick-start">Start Computing →</a></p>
-</div>
+**Ready to solve your eigenvalue problems with FeastKit.jl?** [Start Computing →](@ref quick-start)
 
 ---
 
-<small>
-<em>FeastKit.jl</em> | <a href="https://github.com/your-repo/FeastKit.jl">GitHub</a> | <a href="https://github.com/your-repo/FeastKit.jl/releases">Releases</a> | <a href="LICENSE.html">License</a>
-</small>
+*FeastKit.jl* | [GitHub](https://github.com/subhk/FeastKit.jl) | [Releases](https://github.com/subhk/FeastKit.jl/releases) | [License](license.md)

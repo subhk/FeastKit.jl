@@ -6,30 +6,36 @@ using SharedArrays
 using LinearAlgebra
 
 # Parallel FeastKit for real symmetric problems
-function pfeast_sygv!(A::Matrix{T}, B::Matrix{T}, 
+function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                       use_threads::Bool = true) where T<:Real
     # Parallel FeastKit for dense real symmetric generalized eigenvalue problem
-    
+
     N = size(A, 1)
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
-    
+
+    # Initialize Feast parameters first (needed for contour generation)
+    feastdefault!(fpm)
+
     # Generate integration contour
     contour = feast_contour(Emin, Emax, fpm)
     ne = length(contour.Zne)
-    
+
     # Initialize moment matrices (shared across workers)
     Aq = zeros(T, M0, M0)
     Sq = zeros(T, M0, M0)
-    
+
     # Initialize workspace for subspace
     workspace = FeastWorkspaceReal{T}(N, M0)
-    
-    # Generate random initial subspace
+
+    # Generate random initial subspace and normalize columns (matches serial FEAST)
     randn!(workspace.work)
-    
-    # Initialize Feast parameters
-    feastdefault!(fpm)
+    for j in 1:M0
+        col_norm = norm(view(workspace.work, :, j))
+        if col_norm > 0
+            workspace.work[:, j] ./= col_norm
+        end
+    end
     eps_tolerance = feast_tolerance(fpm)
     max_loops = fpm[4]
     
@@ -284,20 +290,26 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                         Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                         use_threads::Bool = true) where T<:Real
     # Parallel FeastKit for sparse matrices
-    
+
     N = size(A, 1)
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
-    
+
+    # Initialize Feast parameters first (needed for contour generation)
+    feastdefault!(fpm)
+
     # Generate integration contour
     contour = feast_contour(Emin, Emax, fpm)
     ne = length(contour.Zne)
-    
-    # Initialize workspace
+
+    # Initialize workspace with normalized random vectors (matches serial FEAST)
     workspace = FeastWorkspaceReal{T}(N, M0)
     randn!(workspace.work)
-    
-    # Initialize Feast parameters
-    feastdefault!(fpm)
+    for j in 1:M0
+        col_norm = norm(view(workspace.work, :, j))
+        if col_norm > 0
+            workspace.work[:, j] ./= col_norm
+        end
+    end
     eps_tolerance = feast_tolerance(fpm)
     max_loops = fpm[4]
     

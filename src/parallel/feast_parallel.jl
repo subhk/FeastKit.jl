@@ -8,7 +8,7 @@ using LinearAlgebra
 # Parallel FeastKit for real symmetric problems
 function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
-                      use_threads::Bool = true) where T<:Real
+                      use_threads::Bool = true, verbose::Bool = false) where T<:Real
     # Parallel FeastKit for dense real symmetric generalized eigenvalue problem
 
     N = size(A, 1)
@@ -52,7 +52,7 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
         # Parallel computation of moments for each contour point
         if use_threads && Threads.nthreads() > 1
             # Use threading for shared memory parallelism
-            moments = pfeast_compute_moments_threaded(A, B, workspace.work, contour, M0)
+            moments = pfeast_compute_moments_threaded(A, B, workspace.work, contour, M0; verbose=verbose)
         else
             # Use distributed computing for multiple processes
             moments = pfeast_compute_moments_distributed(A, B, workspace.work, contour, M0)
@@ -369,7 +369,7 @@ end
 # Parallel sparse Feast
 function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                         Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
-                        use_threads::Bool = true) where T<:Real
+                        use_threads::Bool = true, verbose::Bool = false) where T<:Real
     # Parallel FeastKit for sparse matrices
 
     N = size(A, 1)
@@ -398,7 +398,7 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     for loop in 1:max_loops
         # Compute moments in parallel
         if use_threads && Threads.nthreads() > 1
-            moments = pfeast_compute_sparse_moments_threaded(A, B, workspace.work, contour, M0)
+            moments = pfeast_compute_sparse_moments_threaded(A, B, workspace.work, contour, M0; verbose=verbose)
         else
             moments = pfeast_compute_sparse_moments_distributed(A, B, workspace.work, contour, M0)
         end
@@ -484,11 +484,16 @@ end
 function pfeast_compute_sparse_moments_threaded(A::SparseMatrixCSC{T,Int},
                                                B::SparseMatrixCSC{T,Int},
                                                work::Matrix{T}, contour::FeastContour{T},
-                                               M0::Int) where T<:Real
+                                               M0::Int; verbose::Bool=false) where T<:Real
     ne = length(contour.Zne)
+    nthreads = Threads.nthreads()
     moments = Vector{Tuple{Matrix{T}, Matrix{T}}}(undef, ne)
+    thread_assignments = zeros(Int, ne)
 
     Threads.@threads for e in 1:ne
+        # Record which thread is handling this contour point
+        thread_assignments[e] = Threads.threadid()
+
         z = contour.Zne[e]
         w = contour.Wne[e]
 
@@ -522,6 +527,17 @@ function pfeast_compute_sparse_moments_threaded(A::SparseMatrixCSC{T,Int},
         catch err
             @warn "Sparse solve failed for contour point $e: $err"
             moments[e] = (zeros(T, M0, M0), zeros(T, M0, M0))
+        end
+    end
+
+    # Print distribution info if verbose
+    if verbose
+        println("Contour point distribution across $nthreads threads (sparse):")
+        for tid in 1:nthreads
+            points = findall(==(tid), thread_assignments)
+            if !isempty(points)
+                println("  Thread $tid: contour points $points")
+            end
         end
     end
 

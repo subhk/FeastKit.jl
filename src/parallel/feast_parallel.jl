@@ -142,17 +142,25 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
 end
 
 # Threaded computation of moments (returns complex moments for proper symmetrization)
+# Each contour point is assigned to a different thread for parallel execution
 function pfeast_compute_moments_threaded(A::Matrix{T}, B::Matrix{T},
                                         work::Matrix{T}, contour::FeastContour{T},
-                                        M0::Int) where T<:Real
+                                        M0::Int; verbose::Bool=false) where T<:Real
     ne = length(contour.Zne)
     N = size(A, 1)
+    nthreads = Threads.nthreads()
 
     # Pre-allocate thread-local storage for complex moments
     moments = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, ne)
 
-    # Parallel loop over integration points
+    # Track which thread processes each contour point (for verification)
+    thread_assignments = zeros(Int, ne)
+
+    # Parallel loop over integration points - each contour point goes to a thread
     Threads.@threads for e in 1:ne
+        # Record which thread is handling this contour point
+        thread_assignments[e] = Threads.threadid()
+
         z = contour.Zne[e]
         w = contour.Wne[e]
 
@@ -189,7 +197,54 @@ function pfeast_compute_moments_threaded(A::Matrix{T}, B::Matrix{T},
         end
     end
 
+    # Print distribution info if verbose
+    if verbose
+        println("Contour point distribution across $nthreads threads:")
+        for tid in 1:nthreads
+            points = findall(==(tid), thread_assignments)
+            if !isempty(points)
+                println("  Thread $tid: contour points $points")
+            end
+        end
+    end
+
     return moments
+end
+
+"""
+    pfeast_show_distribution(ne::Int; use_threads::Bool=true)
+
+Display how contour points would be distributed across processors/threads.
+
+# Arguments
+- `ne::Int`: Number of contour points (integration nodes)
+- `use_threads::Bool`: If true, show thread distribution; if false, show worker distribution
+"""
+function pfeast_show_distribution(ne::Int; use_threads::Bool=true)
+    if use_threads
+        nthreads = Threads.nthreads()
+        println("Thread-based distribution for $ne contour points across $nthreads threads:")
+
+        # Simulate the distribution that Threads.@threads would do
+        # Julia uses a static schedule by default
+        points_per_thread = cld(ne, nthreads)
+        for tid in 1:nthreads
+            start_idx = (tid - 1) * points_per_thread + 1
+            end_idx = min(tid * points_per_thread, ne)
+            if start_idx <= ne
+                println("  Thread $tid: contour points $start_idx:$end_idx")
+            end
+        end
+    else
+        nw = nworkers()
+        println("Distributed computation for $ne contour points across $nw workers:")
+        chunks = distribute_contour_points(ne, nw)
+        for (i, chunk) in enumerate(chunks)
+            if !isempty(chunk)
+                println("  Worker $(workers()[i]): contour points $chunk")
+            end
+        end
+    end
 end
 
 # Distributed computation of moments (returns complex moments)

@@ -322,6 +322,10 @@ state = ParallelFeastState(comm, A, B, interval, M0)
 result = feast_parallel!(state)
 ```
 
+```@docs
+FeastKit.pfeast_show_distribution
+```
+
 ---
 
 ## Types and Structures

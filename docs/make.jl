@@ -8,7 +8,6 @@ makedocs(
     modules = [FeastKit],
     authors = "FeastKit.jl Contributors",
     repo = Remotes.GitHub("subhk", "FeastKit.jl"),
-    source = ".",  # Source files are in docs/ not docs/src/
     doctest = false,
     format = Documenter.HTML(
         prettyurls = get(ENV, "CI", "") == "true",

@@ -64,10 +64,21 @@ mutable struct FeastWorkspaceComplex{T<:Real}
     end
 end
 
-# Feast result structure
+# Feast result structure for Hermitian/symmetric problems (real eigenvalues)
 struct FeastResult{T<:Real, VT}
     lambda::Vector{T}
     q::Matrix{VT}
+    M::Int
+    res::Vector{T}
+    info::Int
+    epsout::T
+    loop::Int
+end
+
+# Feast result structure for general (non-Hermitian) problems (complex eigenvalues)
+struct FeastGeneralResult{T<:Real}
+    lambda::Vector{Complex{T}}
+    q::Matrix{Complex{T}}
     M::Int
     res::Vector{T}
     info::Int
@@ -96,9 +107,10 @@ end
     Feast_RCI_FACTORIZE = 10         # Factorize (Ze*B - A)
     Feast_RCI_SOLVE = 11             # Solve linear system using existing factorization
 
-    # Inner product operations (for moment accumulation)
-    Feast_RCI_INNER_PRODUCT = 20     # Compute Q^H * Y
-    Feast_RCI_INNER_PRODUCT_T = 21   # Compute Q^H * Y (transpose variant)
+    # Transpose factorization and solve (for non-Hermitian problems)
+    # In Fortran: ijob=20 prepares transpose solve, ijob=21 solves (Ze*B - A)^T * x = b
+    Feast_RCI_FACTORIZE_T = 20       # Factorize for transpose solve
+    Feast_RCI_SOLVE_T = 21           # Solve transpose linear system
 
     # Matrix-vector products
     Feast_RCI_MULT_A = 30            # Compute A * X
@@ -111,8 +123,10 @@ end
     Feast_RCI_REDUCED_SYSTEM = 60    # Solve reduced eigenvalue system
 end
 
-# Provide backward compatibility aliases (deprecated, for transition)
-const Feast_RCI_SOLVE_TRANSPOSE = Feast_RCI_INNER_PRODUCT_T
+# Backward compatibility aliases
+const Feast_RCI_SOLVE_TRANSPOSE = Feast_RCI_SOLVE_T
+const Feast_RCI_INNER_PRODUCT = Feast_RCI_FACTORIZE_T    # Deprecated: misleading name
+const Feast_RCI_INNER_PRODUCT_T = Feast_RCI_SOLVE_T      # Deprecated: misleading name
 
 # Error codes
 @enum FeastError begin

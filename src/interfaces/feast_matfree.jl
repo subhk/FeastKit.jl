@@ -3,6 +3,7 @@
 
 using LinearAlgebra
 using SparseArrays
+using Krylov
 
 """
     MatrixFreeOperator{T}
@@ -226,23 +227,19 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
             
         elseif ijob[] == Int(Feast_RCI_MULT_A)
             # Compute A * q, store result in work
-            if mode[] == 1
-                # Compute A * q[:, 1:M] where M = mode[]
-                M = mode[]  # This will be updated by RCI to actual number found
+            # mode[] contains M = number of eigenvalues found
+            M = mode[]
+            if M >= 1
                 for j in 1:M
                     mul!(view(work, :, j), A_op, view(q, :, j))
                 end
             end
             
-        elseif ijob[] == Int(Feast_RCI_MULT_B) 
-            # Compute B * q, store result in work
-            if mode[] >= 1
-                M = mode[]
-                for j in 1:M  
-                    mul!(view(work, :, j), B_op, view(q, :, j))
-                end
-            end
-            
+        # Note: Feast_RCI_MULT_B is NOT issued by feast_srci! for symmetric problems.
+        # The B matrix is handled implicitly through the linear solver callback
+        # (z*B - A)^{-1}. The residual uses ||Aq - λq|| which assumes B=I or
+        # that the eigenvalue problem has been transformed appropriately.
+
         else
             # Unknown RCI code
             throw(ArgumentError("Unknown Feast RCI code: $(ijob[])"))
@@ -251,14 +248,14 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
     
     # Return results
     M_found = mode[]
-    return FeastResult(
-        lambda = lambda[1:M_found],
-        q = q[:, 1:M_found],
-        res = res[1:M_found],
-        M = M_found,
-        epsout = epsout[],
-        loop = loop[],
-        info = info[]
+    return FeastResult{T, T}(
+        lambda[1:M_found],
+        q[:, 1:M_found],
+        M_found,
+        res[1:M_found],
+        info[],
+        epsout[],
+        loop[]
     )
 end
 
@@ -326,23 +323,28 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
             continue
             
         elseif ijob[] == Int(Feast_RCI_SOLVE)
+            # For general problems, workc contains Q0 (the RHS) and result goes back to workc
+            # Need a temporary to avoid overwriting input before reading it
             try
-                linear_solver(workc, Ze[], work)
+                rhs_copy = copy(workc)
+                linear_solver(workc, Ze[], rhs_copy)
             catch e
                 info[] = Int(Feast_ERROR_LAPACK)
-                break  
+                break
             end
             
         elseif ijob[] == Int(Feast_RCI_MULT_A)
+            # Compute A * q, store result in workc (complex for general problems)
             M = mode[]
             for j in 1:M
-                mul!(view(work, :, j), A_op, view(q, :, j))
+                mul!(view(workc, :, j), A_op, view(q, :, j))
             end
-            
+
         elseif ijob[] == Int(Feast_RCI_MULT_B)
+            # Compute B * q, store result in workc (complex for general problems)
             M = mode[]
             for j in 1:M
-                mul!(view(work, :, j), B_op, view(q, :, j))
+                mul!(view(workc, :, j), B_op, view(q, :, j))
             end
             
         else
@@ -351,14 +353,17 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
     end
     
     M_found = mode[]
-    return FeastResult(
-        lambda = lambda[1:M_found],
-        q = q[:, 1:M_found], 
-        res = res[1:M_found],
-        M = M_found,
-        epsout = epsout[],
-        loop = loop[],
-        info = info[]
+    # Note: For general eigenvalue problems, eigenvalues are complex
+    # but the lambda vector stores Complex{T}, so we extract real part for FeastResult
+    lambda_real = real.(lambda[1:M_found])
+    return FeastResult{T, Complex{T}}(
+        lambda_real,
+        q[:, 1:M_found],
+        M_found,
+        res[1:M_found],
+        info[],
+        epsout[],
+        loop[]
     )
 end
 
@@ -406,7 +411,7 @@ High-level matrix-free Feast interface for symmetric/Hermitian problems.
 
 # Keyword Arguments
 - `M0`: Maximum number of eigenvalues (default: 10)
-- `solver`: Linear solver (:gmres, :bicgstab, :cg, or custom function)
+- `solver`: Linear solver (:gmres, :bicgstab, or custom function)
 - `solver_opts`: Options for iterative solver
 - `fpm`: Feast parameters
 - `tol`: Convergence tolerance
@@ -593,14 +598,14 @@ function feast_polynomial(coeffs_ops::Vector{<:MatrixFreeOperator{Complex{T}}},
     # Extract original eigenvectors (first N components)
     if result.M > 0
         q_original = result.q[1:N, :]
-        return FeastResult(
-            lambda = result.lambda,
-            q = q_original,
-            res = result.res,
-            M = result.M,
-            epsout = result.epsout,
-            loop = result.loop,
-            info = result.info
+        return FeastResult{T, Complex{T}}(
+            result.lambda,
+            q_original,
+            result.M,
+            result.res,
+            result.info,
+            result.epsout,
+            result.loop
         )
     else
         return result
@@ -611,60 +616,80 @@ end
 """
     create_iterative_solver(A_op, B_op, solver_type=:gmres; kwargs...)
 
-Create iterative linear solver for matrix-free Feast.
+Create iterative linear solver for matrix-free Feast using Krylov.jl.
+
+Note: The shifted system `(z*B - A)` has complex `z` (contour integration points),
+so the linear solver must handle complex arithmetic.
 
 # Arguments
 - `A_op`, `B_op`: Matrix-free operators
-- `solver_type`: `:gmres`, `:bicgstab`, `:cg`, etc.
-- `kwargs`: Options passed to iterative solver
+- `solver_type`: `:gmres` (default, recommended) or `:bicgstab`
+- `rtol`: Relative tolerance for convergence (default: 1e-6)
+- `maxiter`: Maximum iterations (default: 1000)
+- `restart`: GMRES restart parameter (default: 30)
 
 # Returns
 - Function `(Y, z, X) -> solve (z*B - A) * Y = X`
 """
-function create_iterative_solver(A_op::MatrixFreeOperator{T}, 
+function create_iterative_solver(A_op::MatrixFreeOperator{T},
                                 B_op::MatrixFreeOperator{T},
                                 solver_type::Symbol = :gmres;
                                 rtol::Float64 = 1e-6,
                                 maxiter::Int = 1000,
                                 restart::Int = 30,
                                 preconditioner = nothing) where T
-    
+
     N = size(A_op, 1)
-    
+
     function linear_solver(Y::AbstractMatrix, z::Number, X::AbstractMatrix)
         # Create shifted operator: (z*B - A)
+        # Note: z is always complex in FEAST, so output must be complex
+        CT = promote_type(T, typeof(z))
+
         function shifted_mul!(y, x)
             # y = (z*B - A) * x = z*(B*x) - A*x
-            temp = similar(x)
+            # Use complex temporary since z is complex
+            temp = zeros(CT, length(x))
             mul!(temp, B_op, x)
             temp .*= z
-            mul!(y, A_op, x)
-            y .= temp .- y
+            temp_A = zeros(CT, length(x))
+            mul!(temp_A, A_op, x)
+            y .= temp .- temp_A
         end
-        
-        shifted_op = LinearOperator{T}(shifted_mul!, (N, N))
-        
+
+        shifted_op = LinearOperator{CT}(shifted_mul!, (N, N))
+
         M0 = size(X, 2)
         for j in 1:M0
+            # Convert RHS to complex since z is complex (Krylov needs matching types)
+            xj = CT.(X[:, j])
             if solver_type == :gmres
-                Y[:, j], info = gmres!(view(Y, :, j), shifted_op, view(X, :, j),
-                                      restart=restart, rtol=rtol, maxiter=maxiter)
+                result, stats = Krylov.gmres(shifted_op, xj, restart=restart,
+                                             rtol=rtol, itmax=maxiter)
+                Y[:, j] .= result
+                converged = stats.solved
             elseif solver_type == :bicgstab
-                Y[:, j], info = bicgstabl!(view(Y, :, j), shifted_op, view(X, :, j),
-                                          l=2, rtol=rtol, maxiter=maxiter)
-            elseif solver_type == :cg && (issymmetric(A_op) && isposdef(shifted_op))
-                Y[:, j], info = cg!(view(Y, :, j), shifted_op, view(X, :, j),
-                                   rtol=rtol, maxiter=maxiter)
+                result, stats = Krylov.bicgstab(shifted_op, xj,
+                                                rtol=rtol, itmax=maxiter)
+                Y[:, j] .= result
+                converged = stats.solved
+            elseif solver_type == :cg
+                # CG only works for SPD systems - but (z*B - A) is NOT SPD for complex z
+                # CG should not be used with FEAST's complex contour points
+                throw(ArgumentError("CG solver cannot be used with FEAST: " *
+                                   "the shifted system (z*B - A) is not SPD for complex z. " *
+                                   "Use :gmres or :bicgstab instead."))
             else
-                throw(ArgumentError("Unsupported solver type: $solver_type"))
+                throw(ArgumentError("Unsupported solver type: $solver_type. " *
+                                   "Use :gmres or :bicgstab"))
             end
-            
-            if !info.isconverged
+
+            if !converged
                 @warn "Linear solver did not converge for column $j"
             end
         end
     end
-    
+
     return linear_solver
 end
 

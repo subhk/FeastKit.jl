@@ -109,27 +109,27 @@ end
 function check_feast_grci_input(N::Int, M0::Int, Emid::Complex{T}, r::T,
                                fpm::Vector{Int}) where T<:Real
     # Check validity of RCI Feast inputs for general problems
-    
+    # Matches Fortran dcheck_feast_grci_input (validates r, M0, N only)
+
     if N <= 0
         throw(ArgumentError("Matrix size N must be positive"))
     end
-    
+
     if M0 <= 0 || M0 > N
         throw(ArgumentError("Number of eigenvalues M0 must be between 1 and N"))
     end
-    
+
     if r <= 0
         throw(ArgumentError("Contour radius must be positive"))
     end
-    
+
     if length(fpm) < 64
         throw(ArgumentError("fpm array must have at least 64 elements"))
     end
-    
-    if fpm[2] < 3
-        throw(ArgumentError("Number of integration points must be at least 3"))
-    end
-    
+
+    # Note: Fortran dcheck_feast_grci_input does not validate fpm[2] or fpm[8]
+    # Integration point validation is handled by feastdefault!
+
     return true
 end
 
@@ -139,38 +139,101 @@ function feast_inside_contour_old(lambda::T, Emin::T, Emax::T,
     return feast_inside_contour(lambda, Emin, Emax)
 end
 
-function feast_inside_contourx(lambda::Complex{T}, Zne::Vector{Complex{T}}, 
+function feast_inside_contourx(lambda::Complex{T}, Zne::Vector{Complex{T}},
                               Wne::Vector{Complex{T}}) where T<:Real
-    # Check if eigenvalue is inside custom contour using winding number
+    # Check if eigenvalue is inside custom contour using triangulation
+    # Matches Fortran zfeast_inside_contourx algorithm
+    # The contour points define a polygon; we check if the eigenvalue
+    # is inside any triangle formed by the first point and pairs of other points.
+
     ne = length(Zne)
-    
-    # Compute winding number
-    winding = zero(Complex{T})
-    for i in 1:ne
-        winding += Wne[i] / (Zne[i] - lambda)
+
+    # Check for NaN
+    if isnan(real(lambda)) || isnan(imag(lambda))
+        return false
     end
-    
-    # Eigenvalue is inside if winding number ≈ 2πi
-    return abs(real(winding / (2π * im)) - 1.0) < 0.1
+
+    # First vertex of all triangles
+    x1 = real(Zne[1])
+    y1 = imag(Zne[1])
+
+    for i in 2:ne
+        x2 = real(Zne[i])
+        y2 = imag(Zne[i])
+        z1i = (Zne[i] - Zne[1]) / abs(Zne[i] - Zne[1])
+
+        for j in (i+1):ne
+            x3 = real(Zne[j])
+            y3 = imag(Zne[j])
+            z1j = (Zne[j] - Zne[1]) / abs(Zne[j] - Zne[1])
+
+            # Skip collinear points (Fortran tolerance: 1e-8)
+            dot_product = real(z1i) * real(z1j) + imag(z1i) * imag(z1j)
+            if abs(one(T) - abs(dot_product)) > T(1e-8)
+                # Barycentric coordinates for the point in triangle (Zne[1], Zne[i], Zne[j])
+                xp = real(lambda)
+                yp = imag(lambda)
+
+                denom = (y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3)
+                lambda1 = ((y2 - y3) * (xp - x3) + (x3 - x2) * (yp - y3)) / denom
+                lambda2 = ((y3 - y1) * (xp - x3) + (x1 - x3) * (yp - y3)) / denom
+                lambda3 = one(T) - lambda1 - lambda2
+
+                # Point is inside triangle if all barycentric coords >= 0 (with tolerance)
+                tol = T(1e-14)
+                if lambda1 > -tol && lambda2 > -tol && lambda3 > -tol
+                    return true
+                end
+            end
+        end
+    end
+
+    return false
 end
 
-function feast_bary_coef(lambda::Vector{T}, Zne::Vector{Complex{T}}) where T<:Real
-    # Compute barycentric coordinates (legacy function)
+"""
+    _feast_bary_coef_triangle(v1, v2, v3) -> Real
+
+Compute signed area (barycentric-style coefficient) for triangle check.
+Matches Fortran zfeast_bary_coef: coef = adbc1 - adbc2 + adbc3
+where adbc_i = cross-product term for signed area.
+"""
+function _feast_bary_coef_triangle(v1::Complex{T}, v2::Complex{T}, v3::Complex{T}) where T<:Real
+    adbc1 = real(v2) * imag(v3) - real(v3) * imag(v2)
+    adbc2 = real(v1) * imag(v3) - real(v3) * imag(v1)
+    adbc3 = real(v1) * imag(v2) - real(v2) * imag(v1)
+    return adbc1 - adbc2 + adbc3
+end
+
+"""
+    feast_cauchy_weights(lambda, Zne) -> Matrix{Complex}
+
+Compute normalized Cauchy kernel weights for eigenvalue filtering.
+For each eigenvalue λ_j, computes w_ji = (1/(Zne_i - λ_j)) normalized.
+
+Note: This is NOT the same as the Fortran `zfeast_bary_coef` which computes
+triangle signed areas. This function is used for eigenvalue filtering
+in the rational approximation context.
+"""
+function feast_cauchy_weights(lambda::Vector{T}, Zne::Vector{Complex{T}}) where T<:Real
     M = length(lambda)
     ne = length(Zne)
-    
+
     coef = Matrix{Complex{T}}(undef, M, ne)
-    
+
     for j in 1:M
         for i in 1:ne
-            coef[j, i] = 1.0 / (Zne[i] - lambda[j])
+            coef[j, i] = one(T) / (Zne[i] - lambda[j])
         end
         # Normalize
         coef[j, :] ./= sum(coef[j, :])
     end
-    
+
     return coef
 end
+
+# Legacy alias for backward compatibility
+const feast_bary_coef = feast_cauchy_weights
 
 function feast_info_symmetric(fpm::Vector{Int}, N::Int, M0::Int, M::Int,
                              Emin::T, Emax::T, loop::Int, epsout::T,
@@ -213,11 +276,11 @@ function feast_info_general(fpm::Vector{Int}, N::Int, M0::Int, M::Int,
                            Emid::Complex{T}, r::T, loop::Int, epsout::T,
                            info::Int) where T<:Real
     # Print FeastKit information for general problems
-    
+
     if fpm[1] == 0  # No output
         return
     end
-    
+
     println("FeastKit Eigenvalue Solver - General")
     println("="^50)
     println("Matrix size (N): ", N)
@@ -225,17 +288,19 @@ function feast_info_general(fpm::Vector{Int}, N::Int, M0::Int, M::Int,
     println("Eigenvalues found (M): ", M)
     println("Search contour center: ", Emid)
     println("Search contour radius: ", r)
-    println("Integration points: ", fpm[2])
+    println("Integration points: ", fpm[8], " (full contour)")  # fpm[8] for general problems
+    println("Ellipse ratio (a/b): ", fpm[18] / 100.0)
+    println("Rotation angle: ", fpm[19], " degrees")
     println("Refinement loops: ", loop)
     println("Final residual: ", epsout)
     println("Exit code (info): ", info)
-    
+
     if info == 0
         println("FeastKit converged successfully")
     else
         println("Warning: FeastKit terminated with error code: ", info)
     end
-    
+
     println("="^50)
 end
 

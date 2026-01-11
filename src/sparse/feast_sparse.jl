@@ -113,8 +113,8 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
 
     for j in 1:ncols
         b = view(rhs, :, j)
-        x_initial = zeros(CT, N)
-        x_sol, stats = gmres(op, b, x_initial;
+        # Note: Krylov.gmres doesn't support initial guess, starts from zero
+        x_sol, stats = gmres(op, b;
                              restart=true,
                              memory=max(gmres_restart, 2),
                              rtol=tol,
@@ -183,10 +183,14 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
     info_code = Int(Feast_SUCCESS)
     M_found = 0
 
+    # Allocate buffer for accumulated filtered subspace
+    Q_proj = zeros(Complex{T}, N, M0)
+
     for loop_idx in 0:maxloop
         loop_count = loop_idx
         fill!(zAq, zero(Complex{T}))
         fill!(zSq, zero(Complex{T}))
+        fill!(Q_proj, zero(Complex{T}))
 
         gmres_failed = false
 
@@ -222,6 +226,9 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                 end
             end
 
+            # Accumulate filtered subspace
+            @. Q_proj += weight * solutions
+
             mul!(moment, adjoint(Q_basis), solutions)
             @inbounds zAq .+= weight .* moment
             @inbounds zSq .+= (weight * z) .* moment
@@ -232,8 +239,9 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
         end
 
         try
-            Aq_real = Matrix{ReducedT}(real.(0.5 .* (zAq .+ adjoint(zAq))))
-            Sq_real = Matrix{ReducedT}(real.(0.5 .* (zSq .+ adjoint(zSq))))
+            # For half-contour integration, take real part directly
+            Aq_real = Matrix{ReducedT}(real.(zAq))
+            Sq_real = Matrix{ReducedT}(real.(zSq))
 
             # Try Symmetric solver first (more accurate), fall back to general if not positive definite
             # IMPORTANT: Solve Sq*x = lambda*Aq*x (not Aq*x = lambda*Sq*x)
@@ -255,33 +263,38 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                 end
             end
 
-            indices = Int[]
-            selected_lambda = Vector{T}()
-            for (i, val) in enumerate(lambda_red)
-                if Emin <= val <= Emax
-                    push!(indices, i)
-                    push!(selected_lambda, val)
-                end
+            # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q_basis
+            Q_proj_real = real.(Q_proj)
+            for idx in 1:M0
+                coeffs = Vector{T}(view(v_red, :, idx))
+                mul!(view(solutions, :, idx), Q_proj_real, coeffs)
+                lambda_vec[idx] = convert(T, lambda_red[idx])
             end
 
-            M = length(indices)
+            # Reorder: put eigenvalues inside interval first while maintaining pairing
+            inside_mask = [Emin <= lambda_vec[i] <= Emax for i in 1:M0]
+            inside_indices = findall(inside_mask)
+            outside_indices = findall(.!inside_mask)
+            perm = vcat(inside_indices, outside_indices)
+
+            # Apply permutation to maintain eigenvalue/eigenvector pairing
+            lambda_vec[1:M0] = lambda_vec[perm]
+            solutions[:, 1:M0] = solutions[:, perm]
+
+            M = length(inside_indices)
             if M == 0
                 info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
             end
 
-            for (idx, i) in enumerate(indices)
-                coeffs = Vector{T}(view(v_red, :, i))
-                mul!(view(solutions, :, idx), Q_basis, coeffs)
-                lambda_vec[idx] = convert(T, lambda_red[i])
-            end
-
+            # Normalize only eigenvectors inside interval (for residual computation)
             for j in 1:M
                 vec = view(solutions, :, j)
                 nrm = norm(vec)
                 nrm > 0 && (vec ./= nrm)
             end
 
+            # Compute residuals only for eigenvalues inside interval
             max_res = zero(T)
             for j in 1:M
                 q_col = view(solutions, :, j)
@@ -311,11 +324,8 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                 break
             end
 
-            Q_basis[:, 1:M] .= solutions[:, 1:M]
-            if M < M0
-                submatrix = view(Q_basis, :, M+1:M0)
-                _feast_seeded_subspace_complex!(submatrix)
-            end
+            # Use full M0 subspace for next iteration
+            Q_basis[:, 1:M0] .= solutions[:, 1:M0]
         catch err
             info_code = Int(Feast_ERROR_LAPACK)
             @warn "Reduced eigenvalue problem failed during sparse Hermitian FEAST" exception=err
@@ -627,7 +637,7 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     q = q_complex[:, 1:M]
     res = workspace.res[1:M]
 
-    return FeastResult{T, Complex{T}}(real.(lambda), q, M, res, info[], epsout[], loop[])
+    return FeastGeneralResult{T}(lambda, q, M, res, info[], epsout[], loop[])
 end
 
 function feast_gcsrgvx!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
@@ -935,7 +945,6 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
     shifted_operator = MatrixFreeShiftedOperator(N, zero(Complex{T}), A_matvec!, B_matvec!, T)
     rhs_real = zeros(T, N)
     rhs_complex = zeros(Complex{T}, N)
-    gmres_guess = zeros(Complex{T}, N)
     moment = Matrix{Complex{T}}(undef, M0, M0)
     residual_vec = zeros(T, N)
 
@@ -944,10 +953,14 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
     info_code = Int(Feast_SUCCESS)
     M_found = 0
 
+    # Allocate buffer for accumulated filtered subspace
+    Q_proj = zeros(Complex{T}, N, M0)
+
     for loop_idx in 0:maxloop
         loop_count = loop_idx
         fill!(Aq_block, zero(T))
         fill!(Sq_block, zero(T))
+        fill!(Q_proj, zero(Complex{T}))
 
         gmres_failed = false
         for e in 1:ne
@@ -957,13 +970,12 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
             for j in 1:M0
                 B_matvec!(rhs_real, view(Q_block, :, j))
                 _copyto_complex!(rhs_complex, rhs_real)
-                fill!(gmres_guess, zero(Complex{T}))
 
+                # Note: Krylov.gmres doesn't support initial guess, starts from zero
                 sol, stats = gmres(shifted_operator, rhs_complex;
-                                   x = gmres_guess,
                                    rtol = gmres_rtol,
                                    atol = gmres_atol,
-                                   restart = gmres_restart,
+                                   memory = gmres_restart,
                                    itmax = gmres_maxiter)
 
                 if !stats.solved
@@ -978,6 +990,9 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
 
             gmres_failed && break
 
+            # Accumulate filtered subspace
+            @. Q_proj += weight * workc_block
+
             moment .= transpose(Q_block) * workc_block
             Aq_block .+= real.(weight .* moment)
             Sq_block .+= real.((weight * Zne[e]) .* moment)
@@ -988,20 +1003,20 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
         end
 
         try
-            Aq_sym = 0.5 .* (Aq_block .+ transpose(Aq_block))
-            Sq_sym = 0.5 .* (Sq_block .+ transpose(Sq_block))
-
-            # Try Symmetric solver first (more accurate), fall back to general if not positive definite
+            # For half-contour integration, the moment matrices are already real.
+            # Use Symmetric wrapper directly - no need for 0.5*(A+A') symmetrization.
+            # IMPORTANT: Solve Sq*v = lambda*Aq*v (consistent with _feast_sparse_hermitian)
+            # Aq = sum(w * Q' * Y), Sq = sum(w * z * Q' * Y)
             lambda_red = T[]
             v_red = Matrix{T}(undef, 0, 0)
             try
-                F = eigen(Symmetric(Aq_sym), Symmetric(Sq_sym))
+                F = eigen(Symmetric(Sq_block), Symmetric(Aq_block))
                 lambda_red = F.values
                 v_red = F.vectors
             catch e
                 if isa(e, PosDefException) || isa(e, LAPACKException)
                     # Fall back to general eigenvalue solver if not positive definite
-                    F = eigen(Aq_sym, Sq_sym)
+                    F = eigen(Sq_block, Aq_block)
                     lambda_red = real.(F.values)
                     v_red = real.(F.vectors)
                 else
@@ -1009,35 +1024,38 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                 end
             end
 
-            selected = Vector{Int}()
-            selected_lambda = Vector{T}()
-            for i in 1:length(lambda_red)
-                val = lambda_red[i]
-                if Emin <= val <= Emax
-                    push!(selected, i)
-                    push!(selected_lambda, val)
-                end
+            # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q
+            Q_proj_real = real.(Q_proj)
+            for idx in 1:M0
+                coeffs = Vector{T}(view(v_red, :, idx))
+                mul!(view(q_vectors, :, idx), Q_proj_real, coeffs)
+                lambda_vec[idx] = convert(T, lambda_red[idx])
             end
 
-            M = length(selected)
+            # Reorder: put eigenvalues inside interval first while maintaining pairing
+            inside_mask = [Emin <= lambda_vec[i] <= Emax for i in 1:M0]
+            inside_indices = findall(inside_mask)
+            outside_indices = findall(.!inside_mask)
+            perm = vcat(inside_indices, outside_indices)
+
+            # Apply permutation to maintain eigenvalue/eigenvector pairing
+            lambda_vec[1:M0] = lambda_vec[perm]
+            q_vectors[:, 1:M0] = q_vectors[:, perm]
+
+            M = length(inside_indices)
             if M == 0
                 info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
             end
 
-            Q_block = view(Q, :, 1:M0)
-            for (idx, eig_idx) in enumerate(selected)
-                coeffs = Vector{T}(view(v_red, :, eig_idx))
-                mul!(view(q_vectors, :, idx), Q_block, coeffs)
-                lambda_vec[idx] = convert(T, selected_lambda[eig_idx])
-            end
-
+            # Normalize only eigenvectors inside interval (for residual computation)
             for j in 1:M
                 vec = view(q_vectors, :, j)
                 nrm = norm(vec)
                 nrm > 0 && (vec ./= nrm)
             end
 
+            # Compute residuals only for eigenvalues inside interval
             max_res = zero(T)
             for j in 1:M
                 q_col = view(q_vectors, :, j)
@@ -1061,14 +1079,8 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                 break
             end
 
-            Q[:, 1:M] .= q_vectors[:, 1:M]
-            if M < M0
-                for col in M+1:M0
-                    randn!(view(Q, :, col))
-                    col_norm = norm(view(Q, :, col))
-                    col_norm > 0 && (view(Q, :, col) ./= col_norm)
-                end
-            end
+            # Use full M0 subspace for next iteration
+            Q[:, 1:M0] .= q_vectors[:, 1:M0]
         catch err
             info_code = Int(Feast_ERROR_LAPACK)
             @warn "Reduced eigenvalue problem failed in matrix-free FEAST" exception=err

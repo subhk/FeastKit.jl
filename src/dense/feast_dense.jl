@@ -122,10 +122,14 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
     loop_count = 0
     M_found = 0
 
+    # Allocate buffer for accumulated filtered subspace
+    Q_proj = zeros(Complex{T}, N, M0)
+
     for loop_idx in 0:maxloop
         loop_count = loop_idx
         fill!(zAq, zero(Complex{T}))
         fill!(zSq, zero(Complex{T}))
+        fill!(Q_proj, zero(Complex{T}))
 
         solve_failed = false
 
@@ -170,6 +174,9 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
                 end
             end
 
+            # Accumulate filtered subspace (spectral projector applied to Q_basis)
+            @. Q_proj += weight * solutions
+
             mul!(moment, adjoint(Q_basis), solutions)
             @. zAq += weight * moment
             @. zSq += weight * z * moment
@@ -178,8 +185,11 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
         solve_failed && break
 
         try
-            Aq_real = Matrix{ReducedT}(real.(0.5 .* (zAq .+ adjoint(zAq))))
-            Sq_real = Matrix{ReducedT}(real.(0.5 .* (zSq .+ adjoint(zSq))))
+            # For half-contour integration, take real part directly
+            # The half-contour exploits symmetry: contribution from conjugate points
+            # combines to give a purely real result when taking Re(zAq)
+            Aq_real = Matrix{ReducedT}(real.(zAq))
+            Sq_real = Matrix{ReducedT}(real.(zSq))
 
             # Try Symmetric solver first (more accurate), fall back to general if not positive definite
             # IMPORTANT: Solve Sq*x = lambda*Aq*x (not Aq*x = lambda*Sq*x)
@@ -201,33 +211,39 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
                 end
             end
 
-            indices = Int[]
-            selected_lambda = Vector{T}()
-            for (i, val) in enumerate(lambda_red)
-                if Emin <= val <= Emax
-                    push!(indices, i)
-                    push!(selected_lambda, val)
-                end
+            # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q_basis
+            # Q_proj = spectral projector applied to Q_basis via contour integration
+            Q_proj_real = real.(Q_proj)
+            for idx in 1:M0
+                coeffs = Vector{T}(view(v_red, :, idx))
+                mul!(view(solutions, :, idx), Q_proj_real, coeffs)
+                lambda_vec[idx] = convert(T, lambda_red[idx])
             end
 
-            M = length(indices)
+            # Reorder: put eigenvalues inside interval first while maintaining pairing
+            inside_mask = [Emin <= lambda_vec[i] <= Emax for i in 1:M0]
+            inside_indices = findall(inside_mask)
+            outside_indices = findall(.!inside_mask)
+            perm = vcat(inside_indices, outside_indices)
+
+            # Apply permutation to maintain eigenvalue/eigenvector pairing
+            lambda_vec[1:M0] = lambda_vec[perm]
+            solutions[:, 1:M0] = solutions[:, perm]
+
+            M = length(inside_indices)
             if M == 0
                 info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
             end
 
-            for (idx, eig_idx) in enumerate(indices)
-                coeffs = Vector{T}(view(v_red, :, eig_idx))
-                mul!(view(solutions, :, idx), Q_basis, coeffs)
-                lambda_vec[idx] = convert(T, lambda_red[eig_idx])
-            end
-
+            # Normalize only eigenvectors inside interval (for residual computation)
             for j in 1:M
                 vec = view(solutions, :, j)
                 nrm = norm(vec)
                 nrm > 0 && (vec ./= nrm)
             end
 
+            # Compute residuals only for eigenvalues inside interval
             max_res = zero(T)
             for j in 1:M
                 q_col = view(solutions, :, j)
@@ -255,11 +271,8 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
                 break
             end
 
-            Q_basis[:, 1:M] .= solutions[:, 1:M]
-            if M < M0
-                seed_view = view(Q_basis, :, M+1:M0)
-                _feast_seeded_subspace_complex!(seed_view)
-            end
+            # Use full M0 subspace for next iteration
+            Q_basis[:, 1:M0] .= solutions[:, 1:M0]
         catch err
             info_code = Int(Feast_ERROR_LAPACK)
             @warn "Reduced dense Hermitian eigenproblem failed" exception=err
@@ -434,15 +447,7 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
                                                shifted_mul!, solver_choice, tol_value,
                                                solver_maxiter, solver_restart)
                 if !success
-                    temp_matrix .= current_shift[] .* B_iter .- A_iter
-                    try
-                        LU_factorization = lu!(temp_matrix)
-                        workspace.workc[:, 1:M0] .= LU_factorization \ rhs_copy
-                    catch e
-                        info[] = Int(Feast_ERROR_LAPACK)
-                        break
-                    end
-                else
+                    # Fall back to direct solve if iterative solver failed
                     temp_matrix .= current_shift[] .* B_iter .- A_iter
                     try
                         LU_factorization = lu!(temp_matrix)
@@ -452,6 +457,7 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
                         break
                     end
                 end
+                # If iterative solve succeeded, solution is already in workspace.workc
             end
 
         elseif ijob[] == Int(Feast_RCI_MULT_B)
@@ -481,7 +487,7 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
     q = q_complex[:, 1:M]
     res = workspace.res[1:M]
     
-    return FeastResult{T, Complex{T}}(real.(lambda), q, M, res, info[], epsout[], loop[])
+    return FeastGeneralResult{T}(lambda, q, M, res, info[], epsout[], loop[])
 end
 
 # Polynomial helpers
@@ -621,19 +627,31 @@ function feast_pep!(A::Vector{Matrix{Complex{T}}}, d::Int,
     A_lin = zeros(Complex{T}, DN, DN)
     B_lin = zeros(Complex{T}, DN, DN)
     
-    # Fill companion matrices
+    # Fill companion matrices using first companion linearization
+    # For P(λ) = A[1] + λ*A[2] + ... + λ^d*A[d+1] where A[k] corresponds to λ^{k-1}
+    #
+    # A_lin has identity blocks on super-diagonal (blocks (i-1, i) for i=1:d-1)
+    # and -A[1], -A[2], ..., -A[d] (i.e., -A_0 to -A_{d-1}) in the last block row
+    #
+    # B_lin has identity blocks on diagonal (blocks (i, i) for i=0:d-2)
+    # and A[d+1] (i.e., A_d) in the last diagonal block
+
+    # Super-diagonal identity blocks in A_lin
     for i in 1:d-1
         A_lin[(i-1)*N+1:i*N, i*N+1:(i+1)*N] .= I(N)
     end
-    
-    for j in 1:d+1
+
+    # Last row blocks: -A[1] through -A[d] (coefficients of λ^0 through λ^{d-1})
+    for j in 1:d
         A_lin[(d-1)*N+1:d*N, (j-1)*N+1:j*N] .= -A[j]
     end
-    
-    # B matrix
+
+    # Diagonal identity blocks in B_lin (first d-1 blocks)
     for i in 1:d-1
-        B_lin[i*N+1:(i+1)*N, i*N+1:(i+1)*N] .= I(N)
+        B_lin[(i-1)*N+1:i*N, (i-1)*N+1:i*N] .= I(N)
     end
+
+    # Last diagonal block: A[d+1] (coefficient of λ^d)
     B_lin[(d-1)*N+1:d*N, (d-1)*N+1:d*N] .= A[d+1]
     
     # Solve linearized problem
@@ -651,7 +669,11 @@ end
 # Standard eigenvalue problem variants (B = I)
 
 function feast_syev!(A::Matrix{T},
-                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                     Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                     solver::Symbol = :direct,
+                     solver_tol::Real = 0.0,
+                     solver_maxiter::Int = 500,
+                     solver_restart::Int = 30) where T<:Real
     # Feast for dense real symmetric standard eigenvalue problem
     # Solves: A*q = lambda*q where A is symmetric
     # This is equivalent to feast_sygv! with B = I
@@ -663,7 +685,9 @@ function feast_syev!(A::Matrix{T},
     B = Matrix{T}(I, N, N)
 
     # Call generalized version with B = I
-    return feast_sygv!(A, B, Emin, Emax, M0, fpm)
+    return feast_sygv!(A, B, Emin, Emax, M0, fpm;
+                       solver=solver, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
 end
 
 function feast_hegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},

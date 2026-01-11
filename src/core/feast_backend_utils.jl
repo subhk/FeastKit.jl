@@ -1,7 +1,8 @@
 # Utility functions for parallel backend management and consistency
 
-# Convenience wrapper so `nworkers()` is available when `Distributed` isn't imported by users
+# Convenience wrappers so Distributed functions are available when `Distributed` isn't imported by users
 nworkers() = Distributed.nworkers()
+workers() = Distributed.workers()
 
 # Check if MPI is available
 function mpi_available()
@@ -89,7 +90,12 @@ end
 function feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads)
     if backend == :mpi && mpi_available()
         if eltype(A) <: Real && eltype(B) <: Real
-            return mpi_feast(A, B, interval, M0=M0, fpm=fpm, comm=comm)
+            # Handle comm=nothing by omitting the keyword to use MPI.COMM_WORLD default
+            if comm === nothing
+                return mpi_feast(A, B, interval, M0=M0, fpm=fpm)
+            else
+                return mpi_feast(A, B, interval, M0=M0, fpm=fpm, comm=comm)
+            end
         else
             @warn "MPI backend currently supports real symmetric problems; falling back to serial execution"
         end
@@ -149,7 +155,12 @@ function feast_serial(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{T,T}
         if isa(A, Matrix) && isa(B, Matrix)
             return _direct_real_dense_feast(A, B, Emin, Emax, M0)
         elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
-            return feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
+            # Use standard eigenvalue solver if B is identity (optimization)
+            if _is_identity_matrix(B)
+                return feast_scsrev!(A, Emin, Emax, M0, fpm)
+            else
+                return feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
+            end
         else
             throw(ArgumentError("Unsupported matrix storage types for real symmetric problems: $(typeof(A)), $(typeof(B))"))
         end
@@ -157,6 +168,7 @@ function feast_serial(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{T,T}
         if isa(A, Matrix) && isa(B, Matrix)
             return _direct_complex_dense_feast(A, B, Emin, Emax, M0)
         elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
+            # Use standard eigenvalue solver if B is identity (optimization)
             if _is_identity_matrix(B)
                 return feast_hcsrev!(A, Emin, Emax, M0, fpm)
             else

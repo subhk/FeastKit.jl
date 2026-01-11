@@ -68,13 +68,18 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
             factorized = false
             z = Ze[]
             fill_shifted_banded!(banded_factors, A, B, kla, klb, kl, z)
-            _, banded_ipiv_tmp, info_lapack = LinearAlgebra.LAPACK.gbtrf!(kl, ku, N, banded_factors)
-            if info_lapack != 0
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            try
+                # gbtrf! returns (AB, ipiv), not (AB, ipiv, info)
+                _, banded_ipiv_tmp = LinearAlgebra.LAPACK.gbtrf!(kl, ku, N, banded_factors)
+                banded_ipiv = banded_ipiv_tmp
+                factorized = true
+            catch e
+                if isa(e, LinearAlgebra.SingularException) || isa(e, LinearAlgebra.LAPACKException)
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+                rethrow(e)
             end
-            banded_ipiv = banded_ipiv_tmp
-            factorized = true
 
         elseif ijob[] == Int(Feast_RCI_SOLVE)
             if !factorized
@@ -86,10 +91,15 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
                 symmetric_banded_matvec!(view(workspace.workc, :, col), B, klb, view(workspace.work, :, col))
             end
 
-            info_lapack = LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, banded_factors, banded_ipiv, view(workspace.workc, :, 1:M0))
-            if info_lapack != 0
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
+            try
+                # gbtrs! requires m parameter and returns the solution matrix (not info code)
+                LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, N, banded_factors, banded_ipiv, view(workspace.workc, :, 1:M0))
+            catch e
+                if isa(e, LinearAlgebra.SingularException) || isa(e, LinearAlgebra.LAPACKException)
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+                rethrow(e)
             end
 
         elseif ijob[] == Int(Feast_RCI_MULT_A)

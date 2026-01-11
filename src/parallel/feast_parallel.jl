@@ -43,11 +43,15 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
     zAq = zeros(Complex{T}, M0, M0)
     zSq = zeros(Complex{T}, M0, M0)
 
+    # Filtered subspace accumulator (spectral projector applied to Q)
+    Q_proj = zeros(Complex{T}, N, M0)
+
     # Main Feast refinement loop
     for loop in 1:max_loops
-        # Reset complex moment matrices
+        # Reset complex moment matrices and Q_proj
         fill!(zAq, zero(Complex{T}))
         fill!(zSq, zero(Complex{T}))
+        fill!(Q_proj, zero(Complex{T}))
 
         # Parallel computation of moments for each contour point
         if use_threads && Threads.nthreads() > 1
@@ -59,20 +63,20 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
             moments = pfeast_compute_moments_distributed(A, B, workspace.work, contour, M0)
         end
 
-        # Accumulate complex moments
-        for (aq_contrib, sq_contrib) in moments
+        # Accumulate complex moments AND Q_proj
+        for (aq_contrib, sq_contrib, qproj_contrib) in moments
             zAq .+= aq_contrib
             zSq .+= sq_contrib
+            Q_proj .+= qproj_contrib
         end
 
         # Solve reduced eigenvalue problem
         try
-            # Extract real symmetric part (matches dense solver approach)
-            # Aq_real = real(0.5 * (zAq + zAq'))
-            Aq .= real.(0.5 .* (zAq .+ adjoint(zAq)))
-            Sq .= real.(0.5 .* (zSq .+ adjoint(zSq)))
+            # For half-contour integration, take real part directly (no 0.5 symmetrization needed)
+            Aq .= real.(zAq)
+            Sq .= real.(zSq)
 
-            # Symmetrize reduced matrices
+            # Symmetrize reduced matrices using wrapper
             Aq_sym = Symmetric(Aq)
             Sq_sym = Symmetric(Sq)
 
@@ -88,24 +92,31 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
             lambda_red = real.(F.values)
             v_red = real.(F.vectors)
 
-            # Filter eigenvalues in the search interval
-            M = 0
-            valid_indices = Int[]
-            for i in 1:M0
-                if feast_inside_contour(lambda_red[i], Emin, Emax)
-                    M += 1
-                    push!(valid_indices, i)
-                end
+            # Get real part of filtered subspace for projection
+            Q_proj_real = real.(Q_proj)
+
+            # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q
+            # This is the core FEAST algorithm - use spectral projector output
+            for idx in 1:M0
+                workspace.q[:, idx] = Q_proj_real * view(v_red, :, idx)
+                workspace.lambda[idx] = lambda_red[idx]
             end
+
+            # Reorder: put eigenvalues inside interval first while maintaining pairing
+            inside_mask = [Emin <= workspace.lambda[i] <= Emax for i in 1:M0]
+            inside_indices = findall(inside_mask)
+            outside_indices = findall(.!inside_mask)
+            perm = vcat(inside_indices, outside_indices)
+
+            workspace.lambda[1:M0] = workspace.lambda[perm]
+            workspace.q[:, 1:M0] = workspace.q[:, perm]
+
+            M = length(inside_indices)
 
             if M == 0
                 return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[],
                                        Int(Feast_ERROR_NO_CONVERGENCE), zero(T), loop)
             end
-
-            # Update eigenvectors
-            workspace.lambda[1:M] = lambda_red[valid_indices]
-            workspace.q[:, 1:M] = workspace.work * v_red[:, valid_indices]
 
             # Normalize eigenvectors (matches dense solver)
             for j in 1:M
@@ -118,16 +129,16 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
             # Compute residuals
             feast_residual!(A, B, workspace.lambda, workspace.q, workspace.res, M)
             epsout = maximum(workspace.res[1:M])
-            
+
             # Check convergence
             if epsout <= eps_tolerance
                 feast_sort!(workspace.lambda, workspace.q, workspace.res, M)
-                return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M, 
+                return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M,
                                        workspace.res[1:M], Int(Feast_SUCCESS), epsout, loop)
             end
-            
-            # Prepare for next iteration
-            workspace.work[:, 1:M] = workspace.q[:, 1:M]
+
+            # Prepare for next iteration - update ALL M0 columns to maintain subspace
+            workspace.work[:, 1:M0] = workspace.q[:, 1:M0]
             
         catch e
             return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
@@ -137,12 +148,14 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
     
     # Maximum iterations reached
     M = count(i -> feast_inside_contour(workspace.lambda[i], Emin, Emax), 1:M0)
-    return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M, 
-                           workspace.res[1:M], Int(Feast_ERROR_NO_CONVERGENCE), 
-                           maximum(workspace.res[1:M]), max_loops)
+    # Handle case where no eigenvalues found (avoid maximum on empty array)
+    final_epsout = M > 0 ? maximum(workspace.res[1:M]) : zero(T)
+    return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M,
+                           workspace.res[1:M], Int(Feast_ERROR_NO_CONVERGENCE),
+                           final_epsout, max_loops)
 end
 
-# Threaded computation of moments (returns complex moments for proper symmetrization)
+# Threaded computation of moments (returns complex moments and Q_proj contributions)
 # Each contour point is assigned to a different thread for parallel execution
 function pfeast_compute_moments_threaded(A::Matrix{T}, B::Matrix{T},
                                         work::Matrix{T}, contour::FeastContour{T},
@@ -151,8 +164,9 @@ function pfeast_compute_moments_threaded(A::Matrix{T}, B::Matrix{T},
     N = size(A, 1)
     nthreads = Threads.nthreads()
 
-    # Pre-allocate thread-local storage for complex moments
-    moments = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, ne)
+    # Pre-allocate thread-local storage for complex moments AND Q_proj contributions
+    # Now returns tuple of (Aq, Sq, Q_proj_contribution)
+    moments = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, ne)
 
     # Track which thread processes each contour point (for verification)
     thread_assignments = zeros(Int, ne)
@@ -168,6 +182,7 @@ function pfeast_compute_moments_threaded(A::Matrix{T}, B::Matrix{T},
         # Local complex moment matrices for this thread
         Aq_local = zeros(Complex{T}, M0, M0)
         Sq_local = zeros(Complex{T}, M0, M0)
+        Q_proj_local = zeros(Complex{T}, N, M0)
 
         # Form and factorize (z*B - A)
         system_matrix = z * B - A
@@ -189,12 +204,15 @@ function pfeast_compute_moments_threaded(A::Matrix{T}, B::Matrix{T},
             Aq_local .= weight .* temp
             Sq_local .= weight * z .* temp
 
-            moments[e] = (Aq_local, Sq_local)
+            # Accumulate filtered subspace contribution
+            Q_proj_local .= weight .* workc_local
+
+            moments[e] = (Aq_local, Sq_local, Q_proj_local)
 
         catch err
             # Handle factorization failure
             @warn "Factorization failed for contour point $e: $err"
-            moments[e] = (zeros(Complex{T}, M0, M0), zeros(Complex{T}, M0, M0))
+            moments[e] = (zeros(Complex{T}, M0, M0), zeros(Complex{T}, M0, M0), zeros(Complex{T}, N, M0))
         end
     end
 
@@ -248,7 +266,7 @@ function pfeast_show_distribution(ne::Int; use_threads::Bool=true)
     end
 end
 
-# Distributed computation of moments (returns complex moments)
+# Distributed computation of moments (returns complex moments and Q_proj)
 function pfeast_compute_moments_distributed(A::Matrix{T}, B::Matrix{T},
                                            work::Matrix{T}, contour::FeastContour{T},
                                            M0::Int) where T<:Real
@@ -272,8 +290,8 @@ function pfeast_compute_moments_distributed(A::Matrix{T}, B::Matrix{T},
         end
     end
 
-    # Collect results (complex moments)
-    moments = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, ne)
+    # Collect results (complex moments and Q_proj)
+    moments = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, ne)
     for (i, future) in enumerate(moment_futures)
         chunk_moments = fetch(future)
         chunk = work_chunks[i]
@@ -285,12 +303,12 @@ function pfeast_compute_moments_distributed(A::Matrix{T}, B::Matrix{T},
     return moments
 end
 
-# Serial fallback computation (returns complex moments)
+# Serial fallback computation (returns complex moments and Q_proj)
 function pfeast_compute_moments_serial(A::Matrix{T}, B::Matrix{T},
                                       work::Matrix{T}, contour::FeastContour{T},
                                       M0::Int) where T<:Real
     ne = length(contour.Zne)
-    moments = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, ne)
+    moments = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, ne)
 
     for e in 1:ne
         moments[e] = pfeast_solve_single_point(A, B, work, contour.Zne[e],
@@ -300,12 +318,12 @@ function pfeast_compute_moments_serial(A::Matrix{T}, B::Matrix{T},
     return moments
 end
 
-# Solve a chunk of contour points on a worker (returns complex moments)
+# Solve a chunk of contour points on a worker (returns complex moments and Q_proj)
 function pfeast_solve_contour_chunk(A::Matrix{T}, B::Matrix{T},
                                    work::Matrix{T}, contour_nodes::Vector{Complex{T}},
                                    contour_weights::Vector{Complex{T}},
                                    chunk_indices::Vector{Int}, M0::Int) where T<:Real
-    chunk_moments = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, length(chunk_indices))
+    chunk_moments = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, length(chunk_indices))
 
     for (i, e) in enumerate(chunk_indices)
         z = contour_nodes[e]
@@ -316,14 +334,15 @@ function pfeast_solve_contour_chunk(A::Matrix{T}, B::Matrix{T},
     return chunk_moments
 end
 
-# Solve for a single contour point (returns complex moments)
+# Solve for a single contour point (returns complex moments and Q_proj contribution)
 function pfeast_solve_single_point(A::Matrix{T}, B::Matrix{T}, work::Matrix{T},
                                   z::Complex{T}, w::Complex{T}, M0::Int) where T<:Real
     N = size(A, 1)
 
-    # Local complex moment matrices
+    # Local complex moment matrices and Q_proj contribution
     Aq_local = zeros(Complex{T}, M0, M0)
     Sq_local = zeros(Complex{T}, M0, M0)
+    Q_proj_local = zeros(Complex{T}, N, M0)
 
     try
         # Form and factorize (z*B - A)
@@ -342,12 +361,15 @@ function pfeast_solve_single_point(A::Matrix{T}, B::Matrix{T}, work::Matrix{T},
         Aq_local .= weight .* temp
         Sq_local .= weight * z .* temp
 
+        # Accumulate filtered subspace contribution
+        Q_proj_local .= weight .* workc_local
+
     catch err
         @warn "Linear solve failed for contour point z=$z: $err"
         # Return zero contribution
     end
 
-    return (Aq_local, Sq_local)
+    return (Aq_local, Sq_local, Q_proj_local)
 end
 
 # Distribute contour points among workers
@@ -394,9 +416,15 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     end
     eps_tolerance = feast_tolerance(fpm)
     max_loops = fpm[4]
-    
+
+    # Filtered subspace accumulator (spectral projector applied to Q)
+    Q_proj = zeros(T, N, M0)
+
     # Main Feast refinement loop
     for loop in 1:max_loops
+        # Reset Q_proj for this iteration
+        fill!(Q_proj, zero(T))
+
         # Compute moments in parallel
         if use_threads && Threads.nthreads() > 1
             # Only print verbose output on first iteration to avoid spam
@@ -404,20 +432,21 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
         else
             moments = pfeast_compute_sparse_moments_distributed(A, B, workspace.work, contour, M0)
         end
-        
-        # Accumulate moments
+
+        # Accumulate moments AND Q_proj
         Aq = zeros(T, M0, M0)
         Sq = zeros(T, M0, M0)
-        for (aq_contrib, sq_contrib) in moments
+        for (aq_contrib, sq_contrib, qproj_contrib) in moments
             Aq .+= aq_contrib
             Sq .+= sq_contrib
+            Q_proj .+= qproj_contrib
         end
-        
+
         # Solve reduced eigenvalue problem and check convergence
         try
-            # Symmetrize reduced matrices (matches dense solver approach)
-            Aq_sym = Symmetric(0.5 .* (Aq .+ Aq'))
-            Sq_sym = Symmetric(0.5 .* (Sq .+ Sq'))
+            # Use Symmetric wrapper directly - moments already computed correctly
+            Aq_sym = Symmetric(Aq)
+            Sq_sym = Symmetric(Sq)
 
             # IMPORTANT: Solve Sq*x = lambda*Aq*x (not Aq*x = lambda*Sq*x)
             F = try
@@ -430,24 +459,27 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             lambda_red = real.(F.values)
             v_red = real.(F.vectors)
 
-            # Filter and extract eigenvalues
-            M = 0
-            valid_indices = Int[]
-            for i in 1:M0
-                if feast_inside_contour(lambda_red[i], Emin, Emax)
-                    M += 1
-                    push!(valid_indices, i)
-                end
+            # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q
+            for idx in 1:M0
+                workspace.q[:, idx] = Q_proj * view(v_red, :, idx)
+                workspace.lambda[idx] = lambda_red[idx]
             end
+
+            # Reorder: put eigenvalues inside interval first while maintaining pairing
+            inside_mask = [Emin <= workspace.lambda[i] <= Emax for i in 1:M0]
+            inside_indices = findall(inside_mask)
+            outside_indices = findall(.!inside_mask)
+            perm = vcat(inside_indices, outside_indices)
+
+            workspace.lambda[1:M0] = workspace.lambda[perm]
+            workspace.q[:, 1:M0] = workspace.q[:, perm]
+
+            M = length(inside_indices)
 
             if M == 0
                 return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[],
                                        Int(Feast_ERROR_NO_CONVERGENCE), zero(T), loop)
             end
-
-            # Update solution
-            workspace.lambda[1:M] = lambda_red[valid_indices]
-            workspace.q[:, 1:M] = workspace.work * v_red[:, valid_indices]
 
             # Normalize eigenvectors (matches dense solver)
             for j in 1:M
@@ -460,14 +492,15 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             # Check convergence
             feast_residual!(A, B, workspace.lambda, workspace.q, workspace.res, M)
             epsout = maximum(workspace.res[1:M])
-            
+
             if epsout <= eps_tolerance
                 feast_sort!(workspace.lambda, workspace.q, workspace.res, M)
-                return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M, 
+                return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M,
                                        workspace.res[1:M], Int(Feast_SUCCESS), epsout, loop)
             end
-            
-            workspace.work[:, 1:M] = workspace.q[:, 1:M]
+
+            # Prepare for next iteration - update ALL M0 columns to maintain subspace
+            workspace.work[:, 1:M0] = workspace.q[:, 1:M0]
             
         catch e
             return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
@@ -477,19 +510,22 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     
     # Did not converge
     M = count(i -> feast_inside_contour(workspace.lambda[i], Emin, Emax), 1:M0)
-    return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M, 
-                           workspace.res[1:M], Int(Feast_ERROR_NO_CONVERGENCE), 
-                           maximum(workspace.res[1:M]), max_loops)
+    # Handle case where no eigenvalues found (avoid maximum on empty array)
+    final_epsout = M > 0 ? maximum(workspace.res[1:M]) : zero(T)
+    return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M,
+                           workspace.res[1:M], Int(Feast_ERROR_NO_CONVERGENCE),
+                           final_epsout, max_loops)
 end
 
-# Threaded sparse moment computation
+# Threaded sparse moment computation (returns moments and Q_proj)
 function pfeast_compute_sparse_moments_threaded(A::SparseMatrixCSC{T,Int},
                                                B::SparseMatrixCSC{T,Int},
                                                work::Matrix{T}, contour::FeastContour{T},
                                                M0::Int; verbose::Bool=false) where T<:Real
     ne = length(contour.Zne)
+    N = size(A, 1)
     nthreads = Threads.nthreads()
-    moments = Vector{Tuple{Matrix{T}, Matrix{T}}}(undef, ne)
+    moments = Vector{Tuple{Matrix{T}, Matrix{T}, Matrix{T}}}(undef, ne)
     thread_assignments = zeros(Int, ne)
 
     Threads.@threads for e in 1:ne
@@ -499,9 +535,10 @@ function pfeast_compute_sparse_moments_threaded(A::SparseMatrixCSC{T,Int},
         z = contour.Zne[e]
         w = contour.Wne[e]
 
-        # Local moment matrices
+        # Local moment matrices and Q_proj contribution
         Aq_local = zeros(T, M0, M0)
         Sq_local = zeros(T, M0, M0)
+        Q_proj_local = zeros(T, N, M0)
 
         try
             # Form sparse system matrix
@@ -517,18 +554,19 @@ function pfeast_compute_sparse_moments_threaded(A::SparseMatrixCSC{T,Int},
             workc_local = F \ rhs
 
             # Compute moment contribution with factor of 2 for half-contour symmetry
-            # Matches Fortran: Aq += (2 * Wne[e]) * (Q0' * Y)
-            #                  Sq += (2 * Wne[e] * Zne[e]) * (Q0' * Y)
             temp = work[:, 1:M0]' * workc_local
             weight = 2 * w  # Factor of 2 for conjugate half-contour
             Aq_local .= real.(weight .* temp)
             Sq_local .= real.(weight * z .* temp)
 
-            moments[e] = (Aq_local, Sq_local)
+            # Accumulate filtered subspace contribution
+            Q_proj_local .= real.(weight .* workc_local)
+
+            moments[e] = (Aq_local, Sq_local, Q_proj_local)
 
         catch err
             @warn "Sparse solve failed for contour point $e: $err"
-            moments[e] = (zeros(T, M0, M0), zeros(T, M0, M0))
+            moments[e] = (zeros(T, M0, M0), zeros(T, M0, M0), zeros(T, N, M0))
         end
     end
 
@@ -546,31 +584,31 @@ function pfeast_compute_sparse_moments_threaded(A::SparseMatrixCSC{T,Int},
     return moments
 end
 
-# Distributed sparse moment computation
-function pfeast_compute_sparse_moments_distributed(A::SparseMatrixCSC{T,Int}, 
+# Distributed sparse moment computation (returns moments and Q_proj)
+function pfeast_compute_sparse_moments_distributed(A::SparseMatrixCSC{T,Int},
                                                   B::SparseMatrixCSC{T,Int},
-                                                  work::Matrix{T}, contour::FeastContour{T}, 
+                                                  work::Matrix{T}, contour::FeastContour{T},
                                                   M0::Int) where T<:Real
     ne = length(contour.Zne)
-    
+
     if nworkers() == 1
         return pfeast_compute_sparse_moments_serial(A, B, work, contour, M0)
     end
-    
+
     # Distribute work
     work_chunks = distribute_contour_points(ne, nworkers())
-    
+
     # Parallel computation
     moment_futures = Vector{Future}(undef, length(work_chunks))
-    
+
     for (i, chunk) in enumerate(work_chunks)
         moment_futures[i] = @spawnat workers()[i] begin
             pfeast_solve_sparse_chunk(A, B, work, contour.Zne, contour.Wne, chunk, M0)
         end
     end
-    
-    # Collect results
-    moments = Vector{Tuple{Matrix{T}, Matrix{T}}}(undef, ne)
+
+    # Collect results (moments and Q_proj)
+    moments = Vector{Tuple{Matrix{T}, Matrix{T}, Matrix{T}}}(undef, ne)
     for (i, future) in enumerate(moment_futures)
         chunk_moments = fetch(future)
         chunk = work_chunks[i]
@@ -578,51 +616,53 @@ function pfeast_compute_sparse_moments_distributed(A::SparseMatrixCSC{T,Int},
             moments[e] = chunk_moments[j]
         end
     end
-    
+
     return moments
 end
 
-# Serial sparse computation
-function pfeast_compute_sparse_moments_serial(A::SparseMatrixCSC{T,Int}, 
+# Serial sparse computation (returns moments and Q_proj)
+function pfeast_compute_sparse_moments_serial(A::SparseMatrixCSC{T,Int},
                                              B::SparseMatrixCSC{T,Int},
-                                             work::Matrix{T}, contour::FeastContour{T}, 
+                                             work::Matrix{T}, contour::FeastContour{T},
                                              M0::Int) where T<:Real
     ne = length(contour.Zne)
-    moments = Vector{Tuple{Matrix{T}, Matrix{T}}}(undef, ne)
-    
+    moments = Vector{Tuple{Matrix{T}, Matrix{T}, Matrix{T}}}(undef, ne)
+
     for e in 1:ne
         z = contour.Zne[e]
         w = contour.Wne[e]
         moments[e] = pfeast_solve_sparse_single_point(A, B, work, z, w, M0)
     end
-    
+
     return moments
 end
 
-# Solve sparse chunk on worker
-function pfeast_solve_sparse_chunk(A::SparseMatrixCSC{T,Int}, 
+# Solve sparse chunk on worker (returns moments and Q_proj)
+function pfeast_solve_sparse_chunk(A::SparseMatrixCSC{T,Int},
                                   B::SparseMatrixCSC{T,Int},
                                   work::Matrix{T}, contour_nodes::Vector{Complex{T}},
-                                  contour_weights::Vector{Complex{T}}, 
+                                  contour_weights::Vector{Complex{T}},
                                   chunk_indices::Vector{Int}, M0::Int) where T<:Real
-    chunk_moments = Vector{Tuple{Matrix{T}, Matrix{T}}}(undef, length(chunk_indices))
-    
+    chunk_moments = Vector{Tuple{Matrix{T}, Matrix{T}, Matrix{T}}}(undef, length(chunk_indices))
+
     for (i, e) in enumerate(chunk_indices)
         z = contour_nodes[e]
         w = contour_weights[e]
         chunk_moments[i] = pfeast_solve_sparse_single_point(A, B, work, z, w, M0)
     end
-    
+
     return chunk_moments
 end
 
-# Solve single sparse point
+# Solve single sparse point (returns moments and Q_proj contribution)
 function pfeast_solve_sparse_single_point(A::SparseMatrixCSC{T,Int},
                                          B::SparseMatrixCSC{T,Int},
                                          work::Matrix{T}, z::Complex{T}, w::Complex{T},
                                          M0::Int) where T<:Real
+    N = size(A, 1)
     Aq_local = zeros(T, M0, M0)
     Sq_local = zeros(T, M0, M0)
+    Q_proj_local = zeros(T, N, M0)
 
     try
         # Form and solve sparse system
@@ -641,11 +681,14 @@ function pfeast_solve_sparse_single_point(A::SparseMatrixCSC{T,Int},
         Aq_local .= real.(weight .* temp)
         Sq_local .= real.(weight * z .* temp)
 
+        # Accumulate filtered subspace contribution
+        Q_proj_local .= real.(weight .* workc_local)
+
     catch err
         @warn "Sparse linear solve failed: $err"
     end
 
-    return (Aq_local, Sq_local)
+    return (Aq_local, Sq_local, Q_proj_local)
 end
 
 # Parallel performance monitoring
@@ -666,9 +709,9 @@ function pfeast_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple,
     serial_time = @elapsed begin
         result_serial = feast(A, B, interval, M0=M0)
     end
-    println("Time: $(serial_time:.3f) seconds")
+    println("Time: $(round(serial_time, digits=3)) seconds")
     println("Eigenvalues found: $(result_serial.M)")
-    
+
     # Parallel timing (threaded)
     if use_threads && Threads.nthreads() > 1
         println("\nParallel execution (threads):")
@@ -679,11 +722,11 @@ function pfeast_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple,
                 result_parallel = pfeast_sygv!(copy(A), copy(B), interval[1], interval[2], M0, zeros(Int, 64), use_threads=true)
             end
         end
-        println("Time: $(parallel_time:.3f) seconds")
+        println("Time: $(round(parallel_time, digits=3)) seconds")
         println("Eigenvalues found: $(result_parallel.M)")
-        println("Speedup: $(serial_time/parallel_time:.2f)x")
+        println("Speedup: $(round(serial_time/parallel_time, digits=2))x")
     end
-    
+
     # Parallel timing (distributed)
     if nworkers() > 1
         println("\nParallel execution (distributed):")
@@ -694,9 +737,9 @@ function pfeast_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple,
                 result_distributed = pfeast_sygv!(copy(A), copy(B), interval[1], interval[2], M0, zeros(Int, 64), use_threads=false)
             end
         end
-        println("Time: $(distributed_time:.3f) seconds")
+        println("Time: $(round(distributed_time, digits=3)) seconds")
         println("Eigenvalues found: $(result_distributed.M)")
-        println("Speedup: $(serial_time/distributed_time:.2f)x")
+        println("Speedup: $(round(serial_time/distributed_time, digits=2))x")
     end
     
     return nothing

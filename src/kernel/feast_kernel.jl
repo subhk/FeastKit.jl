@@ -79,6 +79,8 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         end
 
         state[:Q0] = copy(work[:, 1:M0])
+        # Initialize Q_proj buffer for accumulating filtered subspace
+        state[:Q_proj] = zeros(Complex{T}, N, M0)
 
         Ze[] = contour.Zne[1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
@@ -117,8 +119,24 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             copy(work[:, 1:M0])
         end
         M_current = size(Q0, 2)
-        temp = Q0' * workc[:, 1:M_current]
+
+        # Get or initialize Q_proj buffer for filtered subspace
+        Q_proj = get!(state, :Q_proj) do
+            zeros(Complex{T}, N, M_current)
+        end
+
+        # Reset Q_proj at start of new contour loop
+        if e == 1
+            fill!(Q_proj, zero(Complex{T}))
+        end
+
         weight = 2 * Wne[e]  # Account for conjugate half-contour
+
+        # Accumulate filtered subspace (spectral projector applied to Q0)
+        Q_proj[:, 1:M_current] .+= weight .* workc[:, 1:M_current]
+
+        # Accumulate moment matrices
+        temp = Q0' * workc[:, 1:M_current]
         Aq[1:M_current, 1:M_current] .+= real(weight * temp)
         Sq[1:M_current, 1:M_current] .+= real(weight * Zne[e] * temp)
 
@@ -134,18 +152,30 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             state[:e] = 1
 
             try
-                F = eigen(Aq[1:M_current, 1:M_current], Sq[1:M_current, 1:M_current])
+                # Solve generalized eigenvalue problem: Sq*v = lambda*Aq*v
+                # This matches Fortran FEAST which uses ZHEGV(1,'V','U',M0,zSq,M0,zAq,...)
+                F = eigen(Sq[1:M_current, 1:M_current], Aq[1:M_current, 1:M_current])
                 lambda_red = real.(F.values)
                 v_red = real.(F.vectors)
 
-                M = 0
-                for i in 1:M_current
-                    if feast_inside_contour(lambda_red[i], Emin, Emax)
-                        M += 1
-                        lambda[M] = lambda_red[i]
-                        q[:, M] = Q0 * v_red[:, i]
-                    end
-                end
+                # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q0
+                # Q_proj = spectral projector applied to Q0 via contour integration
+                Q_proj = state[:Q_proj]
+                Q_proj_real = real.(Q_proj[:, 1:M_current])
+                q[:, 1:M_current] = Q_proj_real * v_red[:, 1:M_current]
+                lambda[1:M_current] = lambda_red[1:M_current]
+
+                # Reorder: put eigenvalues inside the interval first
+                # This keeps lambda[i] paired with q[:, i]
+                inside_mask = [feast_inside_contour(lambda[i], Emin, Emax) for i in 1:M_current]
+                inside_indices = findall(inside_mask)
+                outside_indices = findall(.!inside_mask)
+                perm = vcat(inside_indices, outside_indices)
+
+                lambda[1:M_current] = lambda[perm]
+                q[:, 1:M_current] = q[:, perm]
+
+                M = length(inside_indices)
 
                 fpm[52] = M  # Store M in fpm
                 state[:M] = M
@@ -193,7 +223,9 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             loop[] += 1
             fill!(Aq, zero(T))
             fill!(Sq, zero(T))
-            work[:, 1:M] = q[:, 1:M]
+            # Use full subspace (M0 columns) for next iteration
+            # to maintain orthogonality and prevent subspace collapse
+            work[:, 1:M0] = q[:, 1:M0]
 
             # Get contour for next refinement loop
             contour = feast_get_custom_contour(fpm)
@@ -266,9 +298,6 @@ function feast_grcix!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         feast_grci!(ijob, N, Ze, work, workc, Aq, Sq, fpm, epsout, loop,
                     Emid, r, M0, lambda, q, mode, res, info)
     end
-end
-@static if !@isdefined(_feast_hrci_state)
-    global _feast_hrci_state = Dict{UInt64, Dict{Symbol, Any}}()
 end
 @static if !@isdefined(_feast_hrci_state)
     global _feast_hrci_state = Dict{UInt64, Dict{Symbol, Any}}()
@@ -351,6 +380,8 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
         # Save initial subspace for moment accumulation
         state[:Q0] = copy(workc[:, 1:M0])
+        # Initialize Q_proj buffer for accumulating filtered subspace
+        state[:Q_proj] = zeros(Complex{T}, N, M0)
 
         Ze[] = state[:Zne][1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
@@ -391,9 +422,24 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             copy(workc[:, 1:M0])
         end
         M_current = size(Q0, 2)  # Current subspace size (M0 initially, M during refinement)
+
+        # Get or initialize Q_proj buffer for filtered subspace
+        Q_proj = get!(state, :Q_proj) do
+            zeros(Complex{T}, N, M_current)
+        end
+
+        # Reset Q_proj at start of new contour loop
+        if e == 1
+            fill!(Q_proj, zero(Complex{T}))
+        end
+
+        weight = 2 * Wne[e]
+
+        # Accumulate filtered subspace (spectral projector applied to Q0)
+        Q_proj[:, 1:M_current] .+= weight .* workc[:, 1:M_current]
+
         # Accumulate moments: Q0' * Y where Y is the solution
         temp = Q0' * workc[:, 1:M_current]
-        weight = 2 * Wne[e]
         zAq[1:M_current, 1:M_current] .+= weight * temp
         zSq[1:M_current, 1:M_current] .+= weight * Zne[e] * temp
 
@@ -411,18 +457,27 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 end
                 M_current = size(Q0, 2)  # Current subspace size
 
+                # Solve generalized eigenvalue problem: Sq*v = lambda*Aq*v
                 F = eigen(zSq[1:M_current, 1:M_current], zAq[1:M_current, 1:M_current])
                 lambda_red = real.(F.values)
                 v_red = F.vectors
 
-                M = 0
-                for i in 1:M_current
-                    if feast_inside_contour(lambda_red[i], Emin, Emax)
-                        M += 1
-                        lambda[M] = lambda_red[i]
-                        q[:, M] = Q0 * v_red[:, i]
-                    end
-                end
+                # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q0
+                Q_proj = state[:Q_proj]
+                Q_proj_real = real.(Q_proj[:, 1:M_current])
+                q[:, 1:M_current] = Q_proj_real * v_red[:, 1:M_current]
+                lambda[1:M_current] = lambda_red[1:M_current]
+
+                # Reorder: put eigenvalues inside the interval first
+                inside_mask = [feast_inside_contour(lambda[i], Emin, Emax) for i in 1:M_current]
+                inside_indices = findall(inside_mask)
+                outside_indices = findall(.!inside_mask)
+                perm = vcat(inside_indices, outside_indices)
+
+                lambda[1:M_current] = lambda[perm]
+                q[:, 1:M_current] = q[:, perm]
+
+                M = length(inside_indices)
 
                 state[:M] = M
 
@@ -464,9 +519,10 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             loop[] += 1
             fill!(zAq, zero(Complex{T}))
             fill!(zSq, zero(Complex{T}))
-            workc[:, 1:M] = q[:, 1:M]
-            # Update Q0 for next refinement iteration
-            state[:Q0] = copy(q[:, 1:M])
+            # Use full subspace (M0 columns) for next iteration
+            workc[:, 1:M0] = q[:, 1:M0]
+            # Update Q0 for next refinement iteration with full subspace
+            state[:Q0] = copy(q[:, 1:M0])
             Ze[] = state[:Zne][1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return
@@ -660,7 +716,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
     if ijob[] == Int(Feast_RCI_MULT_A)
         # Check if this is for projection or residual
-        if get(fpm, 54, 0) == 1
+        if fpm[54] == 1
             # Computing zAq = Q^H * A * Q
             Aq[1:M0, 1:M0] = q[:, 1:M0]' * workc[:, 1:M0]
             fpm[54] = 0  # Clear flag
@@ -693,24 +749,39 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                     return
                 end
 
-                # Compute eigenvectors: q_new = Q * v_red
-                # Store in workc temporarily
+                # Project ALL M0 eigenvectors to maintain full subspace
+                # q_new = Q * v_red (where Q is the accumulated filtered subspace)
                 fill!(workc, zero(Complex{T}))
-                for (idx, i) in enumerate(indices)
+                for idx in 1:M0
                     for k in 1:N
                         for j in 1:M0
-                            workc[k, idx] += q[k, j] * v_red[j, i]
+                            workc[k, idx] += q[k, j] * v_red[j, idx]
                         end
                     end
-                    # Normalize
+                end
+
+                # Reorder: put eigenvalues inside contour first
+                outside_indices = setdiff(1:M0, indices)
+                perm = vcat(indices, outside_indices)
+
+                # Apply permutation and store eigenvalues
+                lambda_temp = copy(lambda_red)
+                workc_temp = copy(workc[:, 1:M0])
+                for (new_idx, old_idx) in enumerate(perm)
+                    lambda[new_idx] = lambda_temp[old_idx]
+                    workc[:, new_idx] = workc_temp[:, old_idx]
+                end
+
+                # Normalize eigenvectors
+                for idx in 1:M0
                     q_norm = norm(view(workc, :, idx))
                     if q_norm > 0
                         workc[:, idx] ./= q_norm
                     end
                 end
 
-                # Copy back to q
-                q[:, 1:M] = workc[:, 1:M]
+                # Copy all M0 back to q for next iteration
+                q[:, 1:M0] = workc[:, 1:M0]
 
                 # Now compute residuals: need A*q_new
                 fill!(workc, zero(Complex{T}))  # Will receive A*q
@@ -761,23 +832,17 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 # Start new refinement loop
                 loop[] += 1
 
-                # Save current eigenvectors before clearing q
-                q_saved = copy(q[:, 1:M])
+                # Use ALL M0 eigenvectors from q for next iteration
+                # (q already contains the properly reordered eigenvectors)
+                q_saved = copy(q[:, 1:M0])
 
-                # Reset for next iteration
+                # Reset accumulators for next iteration
                 fill!(Aq, zero(Complex{T}))
                 fill!(Sq, zero(Complex{T}))
                 fill!(q, zero(Complex{T}))  # q will accumulate new subspace
 
-                # Use previous eigenvectors as initial guess for workc
-                workc[:, 1:M] = q_saved
-                # Fill rest with random vectors
-                for j in M+1:M0
-                    for i in 1:N
-                        workc[i, j] = Complex{T}(randn(T), randn(T))
-                    end
-                    workc[:, j] ./= norm(workc[:, j])
-                end
+                # Use all previous eigenvectors as initial guess
+                workc[:, 1:M0] = q_saved
 
                 # Get contour for next refinement loop
                 contour = feast_get_custom_contour(fpm)

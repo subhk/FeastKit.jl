@@ -384,9 +384,11 @@ function feastdefault!(fpm::Vector{Int})
 end
 
 # Get tolerance for convergence
+# fpm[3] is the tolerance exponent: tolerance = 10^(-fpm[3])
+# Valid range is [0, 16] matching feastdefault! validation
 function feast_tolerance(fpm::Vector{Int})
-    if fpm[3] < 1 || fpm[3] > 15
-        return 1e-12  # Default tolerance
+    if fpm[3] < 0 || fpm[3] > 16
+        return 1e-12  # Default tolerance for out-of-range values
     end
     return 10.0^(-fpm[3])
 end
@@ -400,9 +402,15 @@ function feast_epsilon(::Type{Float32})
     return eps(Float32)
 end
 
-# Check if we should use custom contour
+# Check if a custom contour mode is active
+# Note: This is a simple check based on fpm[29] which indicates custom contour type:
+#   fpm[29] = 0: default contour (ellipsoid based on Emin, Emax, fpm[18], etc.)
+#   fpm[29] = 1: custom contour generated using default parameters
+# For a complete check whether a custom contour object exists, use:
+#   feast_get_custom_contour(fpm) !== nothing  (from feast_aux.jl)
+# Note: fpm[15] is for contour schemes (two-sided vs one-sided), not custom contours
 function feast_use_custom_contour(fpm::Vector{Int})
-    return fpm[15] != 0
+    return fpm[29] != 0
 end
 
 # Get number of integration points

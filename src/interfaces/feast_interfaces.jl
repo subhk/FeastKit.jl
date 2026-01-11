@@ -123,6 +123,8 @@ function feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
     ishermitian(A) || throw(ArgumentError("feast expects a Hermitian matrix A when using real intervals; call feast_general for non-Hermitian problems"))
     ishermitian(B) || throw(ArgumentError("B must be Hermitian positive definite for complex generalized problems"))
 
+    feast_validate_interval(A, interval)
+
     params = _ensure_feast_parameters(fpm)
     N = size(A, 1)
     M0 = min(M0, N)
@@ -231,30 +233,41 @@ end
 function feast_banded(A::Matrix{T}, kla::Int, interval::Tuple{T,T};
                      B::Union{Matrix{T}, Nothing} = nothing, klb::Int = 0,
                      M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing) where T<:Real
-    # Feast interface for banded matrices
-    
+    # Feast interface for real symmetric banded matrices
+
     Emin, Emax = interval
-    
+
     # Initialize Feast parameters if not provided
-    if fpm === nothing
-        fpm = zeros(Int, 64)
-        feastinit!(fpm)
-    end
-    
+    params = _ensure_feast_parameters(fpm)
+
     if B === nothing
-        # Standard eigenvalue problem
-        if T <: Real
-            # Create identity in banded format
-            N = size(A, 2)
-            B_banded = zeros(T, 1, N)
-            B_banded[1, :] .= one(T)
-            return feast_sbgv!(copy(A), B_banded, kla, 0, Emin, Emax, M0, fpm)
-        else
-            return feast_hbev!(copy(A), kla, Emin, Emax, M0, fpm)
-        end
+        # Standard eigenvalue problem - create identity in banded format
+        N = size(A, 2)
+        B_banded = zeros(T, 1, N)
+        B_banded[1, :] .= one(T)
+        return feast_sbgv!(copy(A), B_banded, kla, 0, Emin, Emax, M0, params)
     else
         # Generalized eigenvalue problem
-        return feast_sbgv!(copy(A), copy(B), kla, klb, Emin, Emax, M0, fpm)
+        return feast_sbgv!(copy(A), copy(B), kla, klb, Emin, Emax, M0, params)
+    end
+end
+
+function feast_banded(A::Matrix{Complex{T}}, kla::Int, interval::Tuple{T,T};
+                     B::Union{Matrix{Complex{T}}, Nothing} = nothing, klb::Int = 0,
+                     M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing) where T<:Real
+    # Feast interface for complex Hermitian banded matrices
+
+    Emin, Emax = interval
+
+    # Initialize Feast parameters if not provided
+    params = _ensure_feast_parameters(fpm)
+
+    if B === nothing
+        # Standard eigenvalue problem
+        return feast_hbev!(copy(A), kla, Emin, Emax, M0, params)
+    else
+        # Generalized eigenvalue problem
+        return feast_hbgv!(copy(A), copy(B), kla, klb, Emin, Emax, M0, params)
     end
 end
 
@@ -382,29 +395,60 @@ end
 
 function feast_validate_interval(A::AbstractMatrix{T}, interval::Tuple{T,T}) where T<:Real
     # Validate that the search interval makes sense
-    
+
     Emin, Emax = interval
-    
+
     if Emin >= Emax
         throw(ArgumentError("Invalid interval: Emin must be less than Emax"))
     end
-    
+
     # Rough estimate of eigenvalue bounds using Gershgorin circles
     N = size(A, 1)
     min_est = typemax(T)
     max_est = typemin(T)
-    
+
     for i in 1:N
         center = real(A[i, i])
         radius = sum(abs(A[i, j]) for j in 1:N if j != i)
         min_est = min(min_est, center - radius)
         max_est = max(max_est, center + radius)
     end
-    
+
     if Emax < min_est || Emin > max_est
         @warn "Search interval [$Emin, $Emax] may not contain eigenvalues. " *
               "Estimated eigenvalue range: [$(min_est), $(max_est)]"
     end
-    
+
+    return (min_est, max_est)
+end
+
+function feast_validate_interval(A::AbstractMatrix{Complex{T}}, interval::Tuple{T,T}) where T<:Real
+    # Validate that the search interval makes sense for Hermitian matrices
+    # Eigenvalues of Hermitian matrices are real, so Gershgorin bounds apply
+
+    Emin, Emax = interval
+
+    if Emin >= Emax
+        throw(ArgumentError("Invalid interval: Emin must be less than Emax"))
+    end
+
+    # Rough estimate of eigenvalue bounds using Gershgorin circles
+    # For Hermitian matrices, diagonal elements are real (or should be)
+    N = size(A, 1)
+    min_est = typemax(T)
+    max_est = typemin(T)
+
+    for i in 1:N
+        center = real(A[i, i])  # Diagonal of Hermitian matrix is real
+        radius = sum(abs(A[i, j]) for j in 1:N if j != i)
+        min_est = min(min_est, center - radius)
+        max_est = max(max_est, center + radius)
+    end
+
+    if Emax < min_est || Emin > max_est
+        @warn "Search interval [$Emin, $Emax] may not contain eigenvalues. " *
+              "Estimated eigenvalue range: [$(min_est), $(max_est)]"
+    end
+
     return (min_est, max_est)
 end

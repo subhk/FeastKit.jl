@@ -10,35 +10,35 @@ mutable struct ParallelFeastState{T<:Real}
     epsout::T
     mode::Int
     info::Int
-    
+
     # Parallel-specific state
     contour_points::Vector{Complex{T}}
     contour_weights::Vector{Complex{T}}
     current_point::Int
     total_points::Int
-    
-    # Parallel computation results storage
-    moment_contributions::Vector{Tuple{Matrix{T}, Matrix{T}}}
-    
+
+    # Parallel computation results storage (complex to match pfeast_solve_single_point return type)
+    moment_contributions::Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}}}
+
     # Worker management
     use_parallel::Bool
     use_threads::Bool
-    
+
     function ParallelFeastState{T}(ne::Int, M0::Int, use_parallel::Bool=true, use_threads::Bool=true) where T<:Real
         new(
             -1,                                    # ijob (initialize)
-            zero(Complex{T}),                      # Ze 
+            zero(Complex{T}),                      # Ze
             0,                                     # loop
-            zero(T),                              # epsout
+            zero(T),                               # epsout
             0,                                     # mode
             0,                                     # info
-            Vector{Complex{T}}(undef, ne),        # contour_points
-            Vector{Complex{T}}(undef, ne),        # contour_weights
+            Vector{Complex{T}}(undef, ne),         # contour_points
+            Vector{Complex{T}}(undef, ne),         # contour_weights
             1,                                     # current_point
             ne,                                    # total_points
-            Vector{Tuple{Matrix{T}, Matrix{T}}}(undef, ne),  # moment_contributions
+            Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, ne),  # moment_contributions (complex)
             use_parallel,                          # use_parallel
-            use_threads                           # use_threads
+            use_threads                            # use_threads
         )
     end
 end
@@ -90,9 +90,9 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
         fill!(q, zero(T))
         fill!(res, zero(T))
         
-        # Initialize moment contributions storage
+        # Initialize moment contributions storage (complex)
         for i in 1:state.total_points
-            state.moment_contributions[i] = (zeros(T, M0, M0), zeros(T, M0, M0))
+            state.moment_contributions[i] = (zeros(Complex{T}, M0, M0), zeros(Complex{T}, M0, M0))
         end
         
         state.loop = 0
@@ -119,17 +119,21 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
     
     if state.ijob == Int(Feast_RCI_PARALLEL_ACCUMULATE)
         # Accumulate results from parallel computation
-        # Reset moment matrices
-        fill!(Aq, zero(T))
-        fill!(Sq, zero(T))
-        
-        # Sum contributions from all contour points
+        # Moments are stored as complex; extract real symmetric part
+
+        # Accumulate complex moments first
+        zAq = zeros(Complex{T}, size(Aq))
+        zSq = zeros(Complex{T}, size(Sq))
         for i in 1:state.total_points
             Aq_contrib, Sq_contrib = state.moment_contributions[i]
-            Aq .+= Aq_contrib
-            Sq .+= Sq_contrib
+            zAq .+= Aq_contrib
+            zSq .+= Sq_contrib
         end
-        
+
+        # Extract real symmetric part (matches dense solver approach in feast_parallel.jl)
+        Aq .= real.(0.5 .* (zAq .+ adjoint(zAq)))
+        Sq .= real.(0.5 .* (zSq .+ adjoint(zSq)))
+
         # Proceed to eigenvalue computation
         state.ijob = Int(Feast_RCI_EIGEN_SOLVE)
         return
@@ -137,8 +141,10 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
     
     if state.ijob == Int(Feast_RCI_EIGEN_SOLVE)
         # Solve reduced eigenvalue problem
+        # IMPORTANT: Solve Sq*v = lambda*Aq*v (not Aq*v = lambda*Sq*v)
+        # Aq = sum(w * Q' * Y), Sq = sum(w * z * Q' * Y)
         try
-            F = eigen(Aq[1:M0, 1:M0], Sq[1:M0, 1:M0])
+            F = eigen(Sq[1:M0, 1:M0], Aq[1:M0, 1:M0])
             lambda_red = real.(F.values)
             v_red = real.(F.vectors)
             
@@ -229,19 +235,21 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
     
     if state.ijob == Int(Feast_RCI_SOLVE)
         # User has solved linear systems for current point
+        # workc contains Y = (z*B - A)^{-1} * (B*Q) where Q = work[:, 1:M0]
         e = state.current_point
         w = state.contour_weights[e]
         z = state.contour_points[e]
-        
+
+        # Compute moment contribution: Q' * Y (M0 × M0 matrix)
+        # Factor of 2 for half-contour symmetry (conjugate half handled implicitly)
+        temp = work[:, 1:M0]' * workc[:, 1:M0]
+        weight = 2 * w
+
         # Update reduced matrices
-        for j in 1:M0
-            for i in 1:M0
-                moment_val = real(w * workc[i,j])
-                Aq[i,j] += moment_val
-                Sq[i,j] += moment_val * real(z)
-            end
-        end
-        
+        # IMPORTANT: Sq uses real(w * z * ...), NOT real(w * ...) * real(z)
+        Aq .+= real.(weight .* temp)
+        Sq .+= real.((weight * z) .* temp)
+
         # Move to next integration point
         state.current_point += 1
         
@@ -278,13 +286,14 @@ function pfeast_compute_all_contour_points!(state::ParallelFeastState{T},
     elseif nworkers() > 1
         # Use distributed computing
         work_chunks = distribute_contour_points(ne, nworkers())
-        
+
         # Parallel computation
         moment_futures = Vector{Future}(undef, length(work_chunks))
-        
+
         for (i, chunk) in enumerate(work_chunks)
             moment_futures[i] = @spawnat workers()[i] begin
-                chunk_results = Vector{Tuple{Matrix{T}, Matrix{T}}}(undef, length(chunk))
+                # Use Complex{T} to match pfeast_solve_single_point return type
+                chunk_results = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, length(chunk))
                 for (j, e) in enumerate(chunk)
                     z = state.contour_points[e]
                     w = state.contour_weights[e]
@@ -293,7 +302,7 @@ function pfeast_compute_all_contour_points!(state::ParallelFeastState{T},
                 chunk_results
             end
         end
-        
+
         # Collect results
         for (i, future) in enumerate(moment_futures)
             chunk_results = fetch(future)
@@ -398,36 +407,36 @@ function pfeast_rci_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tu
         thread_time = @elapsed begin
             result_thread = feast_parallel(A, B, interval, M0=M0, use_threads=true)
         end
-        println("Time: $(thread_time:.3f) seconds")
+        println("Time: $(round(thread_time, digits=3)) seconds")
         println("Eigenvalues found: $(result_thread.M)")
         println("Convergence loops: $(result_thread.loop)")
     end
-    
+
     # Parallel with processes
     if nworkers() > 1
         println("\nParallel FeastKit (distributed):")
         dist_time = @elapsed begin
             result_dist = feast_parallel(A, B, interval, M0=M0, use_threads=false)
         end
-        println("Time: $(dist_time:.3f) seconds")
+        println("Time: $(round(dist_time, digits=3)) seconds")
         println("Eigenvalues found: $(result_dist.M)")
         println("Convergence loops: $(result_dist.loop)")
     end
-    
+
     # Serial comparison
     if compare_serial
         println("\nSerial FeastKit:")
         serial_time = @elapsed begin
             result_serial = feast(A, B, interval, M0=M0)
         end
-        println("Time: $(serial_time:.3f) seconds")
+        println("Time: $(round(serial_time, digits=3)) seconds")
         println("Eigenvalues found: $(result_serial.M)")
-        
+
         if Threads.nthreads() > 1 && @isdefined(thread_time)
-            println("Thread speedup: $(serial_time/thread_time:.2f)x")
+            println("Thread speedup: $(round(serial_time/thread_time, digits=2))x")
         end
         if nworkers() > 1 && @isdefined(dist_time)
-            println("Distributed speedup: $(serial_time/dist_time:.2f)x")
+            println("Distributed speedup: $(round(serial_time/dist_time, digits=2))x")
         end
     end
     

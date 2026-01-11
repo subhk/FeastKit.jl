@@ -16,26 +16,26 @@ function feast_hybrid(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     # Each MPI rank uses multiple threads for its local contour points
     
     rank = MPI.Comm_rank(comm)
-    size = MPI.Comm_size(comm)
-    
+    nprocs = MPI.Comm_size(comm)
+
     if fpm === nothing
         fpm = zeros(Int, 64)
         feastinit!(fpm)
     end
-    
+
     # Generate contour on root and broadcast
     contour = nothing
     if rank == 0
         contour = feast_contour(interval[1], interval[2], fpm)
     end
-    
+
     ne = MPI.bcast(rank == 0 ? length(contour.Zne) : 0, 0, comm)
     Zne_global = MPI.bcast(rank == 0 ? contour.Zne : Vector{Complex{T}}(undef, ne), 0, comm)
     Wne_global = MPI.bcast(rank == 0 ? contour.Wne : Vector{Complex{T}}(undef, ne), 0, comm)
-    
+
     # Distribute contour points among MPI ranks
-    points_per_rank = div(ne, size)
-    remainder = ne % size
+    points_per_rank = div(ne, nprocs)
+    remainder = ne % nprocs
     
     start_idx = rank * points_per_rank + min(rank, remainder) + 1
     local_count = points_per_rank + (rank < remainder ? 1 : 0)
@@ -71,51 +71,55 @@ function feast_hybrid(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         global_Sq = MPI.Allreduce(local_Sq, MPI.SUM, comm)
         
         # Solve reduced eigenvalue problem
+        # IMPORTANT: Solve Sq*v = lambda*Aq*v (consistent with FEAST algorithm)
         try
-            F = eigen(global_Aq, global_Sq)
+            F = eigen(global_Sq, global_Aq)
             lambda_red = real.(F.values)
             v_red = real.(F.vectors)
-            
-            M = 0
-            valid_indices = Int[]
-            for i in 1:M0
-                if feast_inside_contour(lambda_red[i], interval[1], interval[2])
-                    M += 1
-                    push!(valid_indices, i)
-                end
-            end
-            
+
+            # Project ALL eigenvectors and store ALL eigenvalues
+            workspace.q[:, 1:M0] = workspace.work * v_red[:, 1:M0]
+            workspace.lambda[1:M0] = lambda_red[1:M0]
+
+            # Reorder: put eigenvalues inside the interval first
+            inside_mask = [feast_inside_contour(workspace.lambda[i], interval[1], interval[2]) for i in 1:M0]
+            inside_indices = findall(inside_mask)
+            outside_indices = findall(.!inside_mask)
+            perm = vcat(inside_indices, outside_indices)
+
+            workspace.lambda[1:M0] = workspace.lambda[perm]
+            workspace.q[:, 1:M0] = workspace.q[:, perm]
+
+            M = length(inside_indices)
+
             if M == 0
                 # No eigenvalues found
-                return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
+                return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[],
                                        Int(Feast_ERROR_NO_CONVERGENCE), zero(T), loop)
             end
-            
-            workspace.lambda[1:M] = lambda_red[valid_indices]
-            workspace.q[:, 1:M] = workspace.work * v_red[:, valid_indices]
-            
-            # Compute residuals
+
+            # Compute residuals only for eigenvalues inside interval
             mpi_compute_residuals!(A, B, workspace.lambda, workspace.q,
                                  workspace.res, M, comm)
-            
+
             epsout = maximum(workspace.res[1:M])
-            
+
             if epsout <= eps_tolerance
                 # Converged
                 feast_sort!(workspace.lambda, workspace.q, workspace.res, M)
                 return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M,
                                        workspace.res[1:M], Int(Feast_SUCCESS), epsout, loop)
             end
-            
-            # Prepare for next iteration
-            workspace.work[:, 1:M] = workspace.q[:, 1:M]
-            
+
+            # Prepare for next iteration - use full M0 subspace
+            workspace.work[:, 1:M0] = workspace.q[:, 1:M0]
+
         catch e
-            return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
+            return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[],
                                    Int(Feast_ERROR_LAPACK), zero(T), loop)
         end
     end
-    
+
     # Did not converge
     M = count(i -> feast_inside_contour(workspace.lambda[i], interval[1], interval[2]), 1:M0)
     return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M,
@@ -150,11 +154,12 @@ function hybrid_compute_threaded_moments(A::AbstractMatrix{T}, B::AbstractMatrix
             workc_local = F \ rhs
             
             # Accumulate to thread-local storage
+            # IMPORTANT: Sq requires real(w * z * inner_product), NOT real(w * inner_product) * real(z)
             for j in 1:M0
                 for i in 1:M0
-                    moment_val = real(w * dot(work[:, i], workc_local[:, j]))
-                    thread_contributions[tid][i, j] += moment_val
-                    thread_sq_contributions[tid][i, j] += moment_val * real(z)
+                    inner_product = dot(work[:, i], workc_local[:, j])
+                    thread_contributions[tid][i, j] += real(w * inner_product)
+                    thread_sq_contributions[tid][i, j] += real(w * z * inner_product)
                 end
             end
             

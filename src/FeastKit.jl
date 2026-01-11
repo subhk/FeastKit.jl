@@ -44,14 +44,16 @@ export Feast_SUCCESS, Feast_ERROR_N, Feast_ERROR_M0, Feast_ERROR_EMIN_EMAX,
        Feast_ERROR_EMID_R, Feast_ERROR_NO_CONVERGENCE, Feast_ERROR_MEMORY,
        Feast_ERROR_INTERNAL, Feast_ERROR_LAPACK, Feast_ERROR_FPM
 export Feast_RCI_INIT, Feast_RCI_DONE, Feast_RCI_FACTORIZE, Feast_RCI_SOLVE,
-       Feast_RCI_SOLVE_TRANSPOSE, Feast_RCI_MULT_A, Feast_RCI_MULT_B
+       Feast_RCI_FACTORIZE_T, Feast_RCI_SOLVE_T, Feast_RCI_SOLVE_TRANSPOSE,
+       Feast_RCI_MULT_A, Feast_RCI_MULT_A_H, Feast_RCI_MULT_B, Feast_RCI_MULT_B_H,
+       Feast_RCI_BIORTHOG, Feast_RCI_REDUCED_SYSTEM
 export feast_sparse_info
 export nworkers
 export eigvals_feast, eigen_feast
 export feast_parallel_info, feast_parallel_comparison
 export determine_parallel_backend, mpi_available, feast_parallel_capabilities
 export feast_with_backend, feast_serial
-export FeastResult, FeastParameters, FeastWorkspaceReal, FeastWorkspaceComplex
+export FeastResult, FeastGeneralResult, FeastParameters, FeastWorkspaceReal, FeastWorkspaceComplex
 # Matrix-free interface exports
 export MatrixFreeOperator, MatrixVecFunction, LinearOperator
 export feast_matfree_srci!, feast_matfree_grci!

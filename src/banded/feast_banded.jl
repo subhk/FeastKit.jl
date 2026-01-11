@@ -29,8 +29,9 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
         throw(ArgumentError("Unsupported solver '$solver'. Use :direct or :gmres."))
 
     if solver_choice != :direct
-        A_full = banded_to_full(A, kla, N)
-        B_full = banded_to_full(B, klb, N)
+        # banded_to_full only fills the stored band; symmetrize for symmetric matrices
+        A_full = Matrix(Symmetric(banded_to_full(A, kla, N)))
+        B_full = Matrix(Symmetric(banded_to_full(B, klb, N)))
         return feast_sygv!(A_full, B_full, Emin, Emax, M0, fpm;
                            solver=solver_choice,
                            solver_tol=solver_tol,

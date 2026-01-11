@@ -1,5 +1,246 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Polynomial Problems · FeastKit.jl</title><meta name="title" content="Polynomial Problems · FeastKit.jl"/><meta property="og:title" content="Polynomial Problems · FeastKit.jl"/><meta property="twitter:title" content="Polynomial Problems · FeastKit.jl"/><meta name="description" content="Documentation for FeastKit.jl."/><meta property="og:description" content="Documentation for FeastKit.jl."/><meta property="twitter:description" content="Documentation for FeastKit.jl."/><meta property="og:url" content="https://subhk.github.io/FeastKit.jl/stable/polynomial_problems/"/><meta property="twitter:url" content="https://subhk.github.io/FeastKit.jl/stable/polynomial_problems/"/><link rel="canonical" href="https://subhk.github.io/FeastKit.jl/stable/polynomial_problems/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">FeastKit.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../zero_to_feast/">Zero to FeastKit</a></li><li><a class="tocitem" href="../getting_started/">Getting Started</a></li><li><span class="tocitem">User Guide</span><ul><li><a class="tocitem" href="../examples/">Examples</a></li><li><a class="tocitem" href="../matrix_free_interface/">Matrix-Free Interface</a></li><li><a class="tocitem" href="../performance/">Performance Tips</a></li><li><a class="tocitem" href="../custom_contours/">Custom Contours</a></li><li><a class="tocitem" href="../complex_eigenvalues/">Complex Eigenvalues</a></li><li class="is-active"><a class="tocitem" href>Polynomial Problems</a></li><li><a class="tocitem" href="../parallel_computing/">Parallel Computing</a></li></ul></li><li><a class="tocitem" href="../api_reference/">API Reference</a></li><li><span class="tocitem">Project</span><ul><li><a class="tocitem" href="../contributing/">Contributing</a></li><li><a class="tocitem" href="../developer_guide/">Developer Guide</a></li><li><a class="tocitem" href="../testing/">Testing</a></li><li><a class="tocitem" href="../license/">License</a></li><li><a class="tocitem" href="../changelog/">Changelog</a></li><li><a class="tocitem" href="../bibliography/">Bibliography</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">User Guide</a></li><li class="is-active"><a href>Polynomial Problems</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Polynomial Problems</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl/blob/main/docs/src/polynomial_problems.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Polynomial-Eigenvalue-Problems"><a class="docs-heading-anchor" href="#Polynomial-Eigenvalue-Problems">Polynomial Eigenvalue Problems</a><a id="Polynomial-Eigenvalue-Problems-1"></a><a class="docs-heading-anchor-permalink" href="#Polynomial-Eigenvalue-Problems" title="Permalink"></a></h1><p>Solve P(λ) x = 0 where P(λ) = A0 + λ A1 + λ² A2 + ...</p><pre><code class="language-julia hljs">using FeastKit
-coeffs = [A0, A1, A2]  # Complex or real matrices
-center, radius = 0.0 + 0.0im, 1.0
-res = feast_polynomial(coeffs, center, radius, M0=20)</code></pre><p>Tip: Scale/shift to keep eigenvalues inside a reasonably sized circle.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../complex_eigenvalues/">« Complex Eigenvalues</a><a class="docs-footer-nextpage" href="../parallel_computing/">Parallel Computing »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Friday 19 December 2025 18:14">Friday 19 December 2025</span>. Using Julia version 1.12.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Polynomial Problems · FeastKit.jl</title><meta name="title" content="Polynomial Problems · FeastKit.jl"/><meta property="og:title" content="Polynomial Problems · FeastKit.jl"/><meta property="twitter:title" content="Polynomial Problems · FeastKit.jl"/><meta name="description" content="Documentation for FeastKit.jl."/><meta property="og:description" content="Documentation for FeastKit.jl."/><meta property="twitter:description" content="Documentation for FeastKit.jl."/><meta property="og:url" content="https://subhk.github.io/FeastKit.jl/stable/polynomial_problems/"/><meta property="twitter:url" content="https://subhk.github.io/FeastKit.jl/stable/polynomial_problems/"/><link rel="canonical" href="https://subhk.github.io/FeastKit.jl/stable/polynomial_problems/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">FeastKit.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../zero_to_feast/">Zero to FeastKit</a></li><li><a class="tocitem" href="../getting_started/">Getting Started</a></li><li><span class="tocitem">User Guide</span><ul><li><a class="tocitem" href="../examples/">Examples</a></li><li><a class="tocitem" href="../matrix_free_interface/">Matrix-Free Interface</a></li><li><a class="tocitem" href="../performance/">Performance Tips</a></li><li><a class="tocitem" href="../custom_contours/">Custom Contours</a></li><li><a class="tocitem" href="../complex_eigenvalues/">Complex Eigenvalues</a></li><li class="is-active"><a class="tocitem" href>Polynomial Problems</a><ul class="internal"><li><a class="tocitem" href="#Table-of-Contents"><span>Table of Contents</span></a></li><li><a class="tocitem" href="#Overview"><span>Overview</span></a></li><li><a class="tocitem" href="#Mathematical-Background"><span>Mathematical Background</span></a></li><li><a class="tocitem" href="#Basic-Usage"><span>Basic Usage</span></a></li><li><a class="tocitem" href="#Problem-Types"><span>Problem Types</span></a></li><li><a class="tocitem" href="#Examples"><span>Examples</span></a></li><li><a class="tocitem" href="#Advanced-Topics"><span>Advanced Topics</span></a></li><li><a class="tocitem" href="#Troubleshooting"><span>Troubleshooting</span></a></li><li><a class="tocitem" href="#API-Reference"><span>API Reference</span></a></li><li><a class="tocitem" href="#See-Also"><span>See Also</span></a></li></ul></li><li><a class="tocitem" href="../parallel_computing/">Parallel Computing</a></li></ul></li><li><a class="tocitem" href="../api_reference/">API Reference</a></li><li><span class="tocitem">Project</span><ul><li><a class="tocitem" href="../contributing/">Contributing</a></li><li><a class="tocitem" href="../developer_guide/">Developer Guide</a></li><li><a class="tocitem" href="../testing/">Testing</a></li><li><a class="tocitem" href="../license/">License</a></li><li><a class="tocitem" href="../changelog/">Changelog</a></li><li><a class="tocitem" href="../bibliography/">Bibliography</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">User Guide</a></li><li class="is-active"><a href>Polynomial Problems</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Polynomial Problems</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl/blob/main/docs/src/polynomial_problems.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Polynomial-Eigenvalue-Problems"><a class="docs-heading-anchor" href="#Polynomial-Eigenvalue-Problems">Polynomial Eigenvalue Problems</a><a id="Polynomial-Eigenvalue-Problems-1"></a><a class="docs-heading-anchor-permalink" href="#Polynomial-Eigenvalue-Problems" title="Permalink"></a></h1><p>FeastKit.jl supports polynomial eigenvalue problems (PEPs) of the form:</p><p><strong>P(λ) x = (A₀ + λ A₁ + λ² A₂ + ... + λᵖ Aₚ) x = 0</strong></p><p>This guide covers the theory, implementation, and practical usage of FeastKit&#39;s polynomial eigenvalue solvers.</p><h2 id="Table-of-Contents"><a class="docs-heading-anchor" href="#Table-of-Contents">Table of Contents</a><a id="Table-of-Contents-1"></a><a class="docs-heading-anchor-permalink" href="#Table-of-Contents" title="Permalink"></a></h2><ul><li><a href="#overview">Overview</a></li><li><a href="#mathematical-background">Mathematical Background</a></li><li><a href="#basic-usage">Basic Usage</a></li><li><a href="#problem-types">Problem Types</a></li><li><a href="#examples">Examples</a></li><li><a href="#advanced-topics">Advanced Topics</a></li><li><a href="#troubleshooting">Troubleshooting</a></li></ul><hr/><h2 id="Overview"><a class="docs-heading-anchor" href="#Overview">Overview</a><a id="Overview-1"></a><a class="docs-heading-anchor-permalink" href="#Overview" title="Permalink"></a></h2><p>Polynomial eigenvalue problems arise in many applications:</p><table><tr><th style="text-align: right">Application</th><th style="text-align: right">Problem Type</th><th style="text-align: right">Degree</th></tr><tr><td style="text-align: right">Structural dynamics with damping</td><td style="text-align: right">Quadratic (QEP)</td><td style="text-align: right">2</td></tr><tr><td style="text-align: right">Gyroscopic systems</td><td style="text-align: right">Quadratic</td><td style="text-align: right">2</td></tr><tr><td style="text-align: right">Delay differential equations</td><td style="text-align: right">Higher-order</td><td style="text-align: right">Variable</td></tr><tr><td style="text-align: right">Acoustic waveguides</td><td style="text-align: right">Quadratic</td><td style="text-align: right">2</td></tr><tr><td style="text-align: right">Viscoelastic materials</td><td style="text-align: right">Rational/Polynomial</td><td style="text-align: right">Variable</td></tr></table><h3 id="Why-Not-Linearize?"><a class="docs-heading-anchor" href="#Why-Not-Linearize?">Why Not Linearize?</a><a id="Why-Not-Linearize?-1"></a><a class="docs-heading-anchor-permalink" href="#Why-Not-Linearize?" title="Permalink"></a></h3><p>While PEPs can be linearized to standard eigenvalue problems, this:</p><ul><li>Increases problem size by factor of p (polynomial degree)</li><li>Introduces spurious eigenvalues at infinity</li><li>May lose numerical accuracy</li></ul><p>FeastKit solves PEPs directly using contour integration.</p><hr/><h2 id="Mathematical-Background"><a class="docs-heading-anchor" href="#Mathematical-Background">Mathematical Background</a><a id="Mathematical-Background-1"></a><a class="docs-heading-anchor-permalink" href="#Mathematical-Background" title="Permalink"></a></h2><h3 id="Standard-Form"><a class="docs-heading-anchor" href="#Standard-Form">Standard Form</a><a id="Standard-Form-1"></a><a class="docs-heading-anchor-permalink" href="#Standard-Form" title="Permalink"></a></h3><p>A polynomial eigenvalue problem of degree p:</p><p><strong>P(λ) = A₀ + λ A₁ + λ² A₂ + ... + λᵖ Aₚ</strong></p><p>where Aᵢ are n×n matrices. We seek λ and x such that P(λ)x = 0.</p><h3 id="Quadratic-Eigenvalue-Problem-(QEP)"><a class="docs-heading-anchor" href="#Quadratic-Eigenvalue-Problem-(QEP)">Quadratic Eigenvalue Problem (QEP)</a><a id="Quadratic-Eigenvalue-Problem-(QEP)-1"></a><a class="docs-heading-anchor-permalink" href="#Quadratic-Eigenvalue-Problem-(QEP)" title="Permalink"></a></h3><p>The most common case (p = 2):</p><p><strong>(λ² M + λ C + K) x = 0</strong></p><ul><li><strong>M</strong>: Mass matrix</li><li><strong>C</strong>: Damping matrix</li><li><strong>K</strong>: Stiffness matrix</li></ul><h3 id="FEAST-for-Polynomial-Problems"><a class="docs-heading-anchor" href="#FEAST-for-Polynomial-Problems">FEAST for Polynomial Problems</a><a id="FEAST-for-Polynomial-Problems-1"></a><a class="docs-heading-anchor-permalink" href="#FEAST-for-Polynomial-Problems" title="Permalink"></a></h3><p>FEAST uses contour integration to project onto the eigenspace:</p><p><strong>Q̃ = (1/2πi) ∮_C P(z)⁻¹ Q dz</strong></p><p>The contour C encloses the eigenvalues of interest.</p><hr/><h2 id="Basic-Usage"><a class="docs-heading-anchor" href="#Basic-Usage">Basic Usage</a><a id="Basic-Usage-1"></a><a class="docs-heading-anchor-permalink" href="#Basic-Usage" title="Permalink"></a></h2><h3 id="Using-feast_polynomial"><a class="docs-heading-anchor" href="#Using-feast_polynomial">Using <code>feast_polynomial</code></a><a id="Using-feast_polynomial-1"></a><a class="docs-heading-anchor-permalink" href="#Using-feast_polynomial" title="Permalink"></a></h3><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+# Define polynomial matrices [A₀, A₁, A₂, ...]
+n = 50
+A0 = randn(ComplexF64, n, n)
+A1 = randn(ComplexF64, n, n)
+A2 = randn(ComplexF64, n, n)
+coeffs = [A0, A1, A2]  # Quadratic: A0 + λ*A1 + λ²*A2
+
+# Search region (circular contour)
+center = 0.0 + 0.0im
+radius = 2.0
+
+# Solve
+result = feast_polynomial(coeffs, center, radius, M0=30)
+
+println(&quot;Found $(result.M) eigenvalues:&quot;)
+for i in 1:min(5, result.M)
+    println(&quot;  λ[$i] = $(result.lambda[i])&quot;)
+end</code></pre><h3 id="Result-Structure"><a class="docs-heading-anchor" href="#Result-Structure">Result Structure</a><a id="Result-Structure-1"></a><a class="docs-heading-anchor-permalink" href="#Result-Structure" title="Permalink"></a></h3><p>Returns <code>FeastGeneralResult</code> with complex eigenvalues:</p><pre><code class="language-julia hljs">result.lambda  # Complex eigenvalues
+result.q       # Eigenvectors
+result.M       # Number found
+result.info    # Status code
+result.epsout  # Residual</code></pre><hr/><h2 id="Problem-Types"><a class="docs-heading-anchor" href="#Problem-Types">Problem Types</a><a id="Problem-Types-1"></a><a class="docs-heading-anchor-permalink" href="#Problem-Types" title="Permalink"></a></h2><h3 id="Symmetric/Hermitian-Problems"><a class="docs-heading-anchor" href="#Symmetric/Hermitian-Problems">Symmetric/Hermitian Problems</a><a id="Symmetric/Hermitian-Problems-1"></a><a class="docs-heading-anchor-permalink" href="#Symmetric/Hermitian-Problems" title="Permalink"></a></h3><p>For real symmetric or complex Hermitian coefficient matrices:</p><pre><code class="language-julia hljs"># Symmetric coefficient matrices
+K = Symmetric(randn(n, n))
+C = Symmetric(randn(n, n))
+M = Symmetric(randn(n, n) + 5I)
+
+coeffs = [K, C, M]
+
+# Use symmetric solver
+result = feast_sypev!(coeffs, Emin, Emax, M0, fpm)</code></pre><h3 id="Real-Symmetric-with-Real-Eigenvalues"><a class="docs-heading-anchor" href="#Real-Symmetric-with-Real-Eigenvalues">Real Symmetric with Real Eigenvalues</a><a id="Real-Symmetric-with-Real-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Real-Symmetric-with-Real-Eigenvalues" title="Permalink"></a></h3><p>When M, C, K are real symmetric and eigenvalues are real:</p><pre><code class="language-julia hljs">using FeastKit
+
+# Underdamped system (real eigenvalues on interval)
+K = Symmetric(randn(n, n) + 10I)
+C = zeros(n, n)  # No damping
+M = Symmetric(randn(n, n) + 5I)
+
+# Real interval search
+Emin, Emax = 0.1, 2.0
+result = feast_sypev!([K, C, M], Emin, Emax, M0, fpm)</code></pre><h3 id="General-Complex-Problems"><a class="docs-heading-anchor" href="#General-Complex-Problems">General Complex Problems</a><a id="General-Complex-Problems-1"></a><a class="docs-heading-anchor-permalink" href="#General-Complex-Problems" title="Permalink"></a></h3><p>For non-Hermitian coefficient matrices:</p><pre><code class="language-julia hljs"># General complex matrices
+A0 = randn(ComplexF64, n, n)
+A1 = randn(ComplexF64, n, n)
+A2 = randn(ComplexF64, n, n)
+
+# Circular contour search
+result = feast_gepev!([A0, A1, A2], center, radius, M0, fpm)</code></pre><h3 id="Sparse-Polynomial-Problems"><a class="docs-heading-anchor" href="#Sparse-Polynomial-Problems">Sparse Polynomial Problems</a><a id="Sparse-Polynomial-Problems-1"></a><a class="docs-heading-anchor-permalink" href="#Sparse-Polynomial-Problems" title="Permalink"></a></h3><p>For large-scale problems with sparse coefficient matrices:</p><pre><code class="language-julia hljs">using SparseArrays
+
+# Sparse coefficient matrices
+K = sprandn(n, n, 0.01) + 10I
+C = sprandn(n, n, 0.01)
+M = sprandn(n, n, 0.01) + 5I
+
+# Sparse solver
+result = feast_scsrpev!([K, C, M], Emin, Emax, M0, fpm)</code></pre><hr/><h2 id="Examples"><a class="docs-heading-anchor" href="#Examples">Examples</a><a id="Examples-1"></a><a class="docs-heading-anchor-permalink" href="#Examples" title="Permalink"></a></h2><h3 id="Example-1:-Damped-Vibration-Problem"><a class="docs-heading-anchor" href="#Example-1:-Damped-Vibration-Problem">Example 1: Damped Vibration Problem</a><a id="Example-1:-Damped-Vibration-Problem-1"></a><a class="docs-heading-anchor-permalink" href="#Example-1:-Damped-Vibration-Problem" title="Permalink"></a></h3><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+# Damped vibration: (λ²M + λC + K)x = 0
+n = 100
+
+# Physical matrices
+K = SymTridiagonal(4*ones(n), -ones(n-1))  # Stiffness
+M = I(n)                                    # Mass
+C = 0.1 * K                                 # Proportional damping
+
+# Convert to complex for general PEP
+K_c = Complex.(Matrix(K))
+M_c = Complex.(Matrix(M))
+C_c = Complex.(Matrix(C))
+
+# Find eigenvalues near origin
+result = feast_polynomial([K_c, C_c, M_c], 0.0+0.0im, 3.0, M0=30)
+
+# Analyze results
+for i in 1:min(5, result.M)
+    λ = result.lambda[i]
+    ω = sqrt(-λ)  # Natural frequency (approximately)
+    ζ = real(λ) / (2 * abs(imag(ω)))  # Damping ratio
+    println(&quot;Mode $i: λ = $λ&quot;)
+end</code></pre><h3 id="Example-2:-Gyroscopic-System"><a class="docs-heading-anchor" href="#Example-2:-Gyroscopic-System">Example 2: Gyroscopic System</a><a id="Example-2:-Gyroscopic-System-1"></a><a class="docs-heading-anchor-permalink" href="#Example-2:-Gyroscopic-System" title="Permalink"></a></h3><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+# Gyroscopic system: (λ²M + λG + K)x = 0
+# G is skew-symmetric (gyroscopic matrix)
+
+n = 50
+K = Symmetric(randn(n, n) + 10I)
+M = Symmetric(randn(n, n) + 5I)
+
+# Skew-symmetric gyroscopic matrix
+G = randn(n, n)
+G = G - G&#39;  # Make skew-symmetric
+
+# Convert to complex
+coeffs = [Complex.(K), Complex.(G), Complex.(M)]
+
+# Eigenvalues are purely imaginary for undamped gyroscopic systems
+result = feast_polynomial(coeffs, 0.0+0.0im, 5.0, M0=40)
+
+println(&quot;Gyroscopic eigenvalues (should be imaginary):&quot;)
+for i in 1:min(5, result.M)
+    λ = result.lambda[i]
+    println(&quot;  λ[$i] = $(real(λ)) + $(imag(λ))im&quot;)
+end</code></pre><h3 id="Example-3:-Acoustic-Waveguide"><a class="docs-heading-anchor" href="#Example-3:-Acoustic-Waveguide">Example 3: Acoustic Waveguide</a><a id="Example-3:-Acoustic-Waveguide-1"></a><a class="docs-heading-anchor-permalink" href="#Example-3:-Acoustic-Waveguide" title="Permalink"></a></h3><pre><code class="language-julia hljs">using FeastKit, SparseArrays
+
+# Helmholtz equation in waveguide: (k² M + K)x = 0
+# k is wavenumber (eigenvalue)
+
+n = 200
+h = 1.0 / (n + 1)
+
+# Finite element matrices
+K = spdiagm(-1 =&gt; -ones(n-1)/h, 0 =&gt; 2*ones(n)/h, 1 =&gt; -ones(n-1)/h)
+M = spdiagm(0 =&gt; h * ones(n))
+
+# This is quadratic in k: (k²M + 0*k + K)x = 0
+K_c = sparse(Complex.(K))
+M_c = sparse(Complex.(M))
+zero_mat = sparse(zeros(ComplexF64, n, n))
+
+# Find propagating wavenumbers
+result = feast_hcsrpev!([K_c, zero_mat, M_c], 0.0, 50.0, 20, fpm)
+
+println(&quot;Propagating wavenumbers:&quot;)
+for i in 1:result.M
+    k = sqrt(result.lambda[i])
+    println(&quot;  k[$i] = $k&quot;)
+end</code></pre><h3 id="Example-4:-Delay-System-Approximation"><a class="docs-heading-anchor" href="#Example-4:-Delay-System-Approximation">Example 4: Delay System Approximation</a><a id="Example-4:-Delay-System-Approximation-1"></a><a class="docs-heading-anchor-permalink" href="#Example-4:-Delay-System-Approximation" title="Permalink"></a></h3><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+# Delay differential equation approximated as polynomial
+# ẋ(t) = A₀x(t) + A₁x(t-τ)
+# Characteristic equation involves exponentials, approximate with polynomials
+
+n = 20
+τ = 1.0
+
+A0 = -2.0 * I(n) + 0.5 * randn(n, n)
+A1 = 0.3 * randn(n, n)
+
+# Padé approximation of e^{-λτ} gives polynomial eigenvalue problem
+# For simplicity, use Taylor expansion: e^{-λτ} ≈ 1 - λτ + (λτ)²/2 - ...
+
+# Resulting polynomial (truncated)
+P0 = Complex.(A0 + A1)
+P1 = Complex.(-τ * A1)
+P2 = Complex.(τ^2/2 * A1)
+
+result = feast_polynomial([P0, P1, P2], 0.0+0.0im, 5.0, M0=30)
+
+println(&quot;Approximate delay system eigenvalues:&quot;)
+for i in 1:min(5, result.M)
+    println(&quot;  λ[$i] = $(result.lambda[i])&quot;)
+end</code></pre><hr/><h2 id="Advanced-Topics"><a class="docs-heading-anchor" href="#Advanced-Topics">Advanced Topics</a><a id="Advanced-Topics-1"></a><a class="docs-heading-anchor-permalink" href="#Advanced-Topics" title="Permalink"></a></h2><h3 id="Scaling-and-Conditioning"><a class="docs-heading-anchor" href="#Scaling-and-Conditioning">Scaling and Conditioning</a><a id="Scaling-and-Conditioning-1"></a><a class="docs-heading-anchor-permalink" href="#Scaling-and-Conditioning" title="Permalink"></a></h3><p>Polynomial problems are often ill-conditioned. Use scaling:</p><pre><code class="language-julia hljs"># Fan-Patel-Zhou scaling
+function scale_pep(coeffs)
+    p = length(coeffs) - 1
+    norms = [norm(A) for A in coeffs]
+
+    # Compute optimal scaling factors
+    γ = (norms[1] / norms[end])^(1/(2p))
+    δ = 2 / (norms[1] + norms[end] * γ^(2p))
+
+    # Scale coefficient matrices
+    scaled = similar(coeffs)
+    for k in 0:p
+        scaled[k+1] = δ * γ^k * coeffs[k+1]
+    end
+
+    return scaled, γ, δ
+end
+
+# Apply scaling
+scaled_coeffs, γ, δ = scale_pep(coeffs)
+result = feast_polynomial(scaled_coeffs, center*γ, radius*γ, M0=M0)
+
+# Recover original eigenvalues
+result.lambda ./= γ</code></pre><h3 id="Infinite-Eigenvalues"><a class="docs-heading-anchor" href="#Infinite-Eigenvalues">Infinite Eigenvalues</a><a id="Infinite-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Infinite-Eigenvalues" title="Permalink"></a></h3><p>Polynomial problems may have eigenvalues at infinity:</p><pre><code class="language-julia hljs"># If Aₚ is singular, there are infinite eigenvalues
+# These are not found by FEAST (which searches finite regions)
+
+# Check for infinite eigenvalues:
+if rank(coeffs[end]) &lt; size(coeffs[end], 1)
+    @warn &quot;Leading coefficient is singular - infinite eigenvalues exist&quot;
+end</code></pre><h3 id="Integration-Parameters"><a class="docs-heading-anchor" href="#Integration-Parameters">Integration Parameters</a><a id="Integration-Parameters-1"></a><a class="docs-heading-anchor-permalink" href="#Integration-Parameters" title="Permalink"></a></h3><pre><code class="language-julia hljs">fpm = zeros(Int, 64)
+feastinit!(fpm)
+
+fpm[2] = 16   # Integration points (more for polynomials)
+fpm[3] = 12   # Tolerance
+fpm[4] = 30   # Iterations
+
+result = feast_polynomial(coeffs, center, radius, M0=M0, fpm=fpm)</code></pre><h3 id="Companion-Linearization-(Comparison)"><a class="docs-heading-anchor" href="#Companion-Linearization-(Comparison)">Companion Linearization (Comparison)</a><a id="Companion-Linearization-(Comparison)-1"></a><a class="docs-heading-anchor-permalink" href="#Companion-Linearization-(Comparison)" title="Permalink"></a></h3><p>For debugging, compare with linearized problem:</p><pre><code class="language-julia hljs">using LinearAlgebra
+
+function companion_linearize(coeffs)
+    p = length(coeffs) - 1
+    n = size(coeffs[1], 1)
+
+    # Block companion form
+    A = zeros(ComplexF64, p*n, p*n)
+    B = zeros(ComplexF64, p*n, p*n)
+
+    # Build companion matrices
+    for k in 1:p-1
+        A[(k-1)*n+1:k*n, k*n+1:(k+1)*n] = I(n)
+        B[(k-1)*n+1:k*n, (k-1)*n+1:k*n] = I(n)
+    end
+
+    for k in 1:p
+        A[(p-1)*n+1:p*n, (k-1)*n+1:k*n] = -coeffs[k]
+    end
+    B[(p-1)*n+1:p*n, (p-1)*n+1:p*n] = coeffs[end]
+
+    return A, B
+end
+
+# Compare results
+A_lin, B_lin = companion_linearize(coeffs)
+λ_linearized = eigvals(A_lin, B_lin)</code></pre><hr/><h2 id="Troubleshooting"><a class="docs-heading-anchor" href="#Troubleshooting">Troubleshooting</a><a id="Troubleshooting-1"></a><a class="docs-heading-anchor-permalink" href="#Troubleshooting" title="Permalink"></a></h2><h3 id="No-Eigenvalues-Found"><a class="docs-heading-anchor" href="#No-Eigenvalues-Found">No Eigenvalues Found</a><a id="No-Eigenvalues-Found-1"></a><a class="docs-heading-anchor-permalink" href="#No-Eigenvalues-Found" title="Permalink"></a></h3><ol><li><strong>Check search region</strong>: Eigenvalues may be elsewhere</li></ol><pre><code class="language-julia hljs"># Linearize and find all eigenvalues for reference
+A_lin, B_lin = companion_linearize(coeffs)
+λ_all = eigvals(A_lin, B_lin)
+println(&quot;All eigenvalues: $λ_all&quot;)</code></pre><ol><li><strong>Expand search region</strong></li></ol><pre><code class="language-julia hljs">result = feast_polynomial(coeffs, center, 2*radius, M0=M0)</code></pre><h3 id="Poor-Accuracy"><a class="docs-heading-anchor" href="#Poor-Accuracy">Poor Accuracy</a><a id="Poor-Accuracy-1"></a><a class="docs-heading-anchor-permalink" href="#Poor-Accuracy" title="Permalink"></a></h3><ol><li><strong>Scale the problem</strong></li></ol><pre><code class="language-julia hljs">scaled_coeffs, γ, δ = scale_pep(coeffs)</code></pre><ol><li><strong>Increase integration points</strong></li></ol><pre><code class="language-julia hljs">fpm[2] = 24  # More quadrature points</code></pre><ol><li><strong>Check condition number</strong></li></ol><pre><code class="language-julia hljs">for (i, A) in enumerate(coeffs)
+    println(&quot;Condition of A[$i]: $(cond(A))&quot;)
+end</code></pre><h3 id="Spurious-Eigenvalues"><a class="docs-heading-anchor" href="#Spurious-Eigenvalues">Spurious Eigenvalues</a><a id="Spurious-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Spurious-Eigenvalues" title="Permalink"></a></h3><p>If eigenvalues appear that shouldn&#39;t exist:</p><ol><li><strong>Check residual</strong>: True eigenvalues have small residuals</li></ol><pre><code class="language-julia hljs">for i in 1:result.M
+    λ = result.lambda[i]
+    x = result.q[:, i]
+    P_λ = sum(λ^k * coeffs[k+1] for k in 0:length(coeffs)-1)
+    residual = norm(P_λ * x)
+    println(&quot;λ[$i]: residual = $residual&quot;)
+end</code></pre><ol><li><strong>Increase M0</strong>: May be picking up nearby eigenvalues</li><li><strong>Refine search region</strong>: Use smaller radius</li></ol><hr/><h2 id="API-Reference"><a class="docs-heading-anchor" href="#API-Reference">API Reference</a><a id="API-Reference-1"></a><a class="docs-heading-anchor-permalink" href="#API-Reference" title="Permalink"></a></h2><h3 id="Main-Functions"><a class="docs-heading-anchor" href="#Main-Functions">Main Functions</a><a id="Main-Functions-1"></a><a class="docs-heading-anchor-permalink" href="#Main-Functions" title="Permalink"></a></h3><pre><code class="language-julia hljs"># High-level interface
+feast_polynomial(coeffs, center, radius; M0=10, fpm=nothing)
+
+# Symmetric polynomial (real interval)
+feast_sypev!(coeffs, Emin, Emax, M0, fpm)
+
+# Hermitian polynomial (real interval)
+feast_hepev!(coeffs, Emin, Emax, M0, fpm)
+
+# General polynomial (circular contour)
+feast_gepev!(coeffs, center, radius, M0, fpm)
+
+# Sparse variants
+feast_scsrpev!(coeffs, Emin, Emax, M0, fpm)
+feast_hcsrpev!(coeffs, Emin, Emax, M0, fpm)
+feast_gcsrpev!(coeffs, center, radius, M0, fpm)</code></pre><h3 id="RCI-Interface"><a class="docs-heading-anchor" href="#RCI-Interface">RCI Interface</a><a id="RCI-Interface-1"></a><a class="docs-heading-anchor-permalink" href="#RCI-Interface" title="Permalink"></a></h3><p>For custom implementations:</p><pre><code class="language-julia hljs"># Symmetric polynomial RCI
+feast_srcipev!(ijob, N, work, workc, Aq, Sq, fpm, coeffs,
+               Emin, Emax, M0, lambda, q, res)
+
+# General polynomial RCI
+feast_grcipev!(ijob, N, work, workc, Aq, Sq, fpm, coeffs,
+               center, radius, M0, lambda, q, res)</code></pre><h3 id="Parameters"><a class="docs-heading-anchor" href="#Parameters">Parameters</a><a id="Parameters-1"></a><a class="docs-heading-anchor-permalink" href="#Parameters" title="Permalink"></a></h3><table><tr><th style="text-align: right">Parameter</th><th style="text-align: right">Type</th><th style="text-align: right">Description</th></tr><tr><td style="text-align: right"><code>coeffs</code></td><td style="text-align: right"><code>Vector{AbstractMatrix}</code></td><td style="text-align: right">Coefficient matrices [A₀, A₁, ..., Aₚ]</td></tr><tr><td style="text-align: right"><code>center</code></td><td style="text-align: right"><code>Complex</code></td><td style="text-align: right">Center of search circle</td></tr><tr><td style="text-align: right"><code>radius</code></td><td style="text-align: right"><code>Real</code></td><td style="text-align: right">Radius of search circle</td></tr><tr><td style="text-align: right"><code>Emin, Emax</code></td><td style="text-align: right"><code>Real</code></td><td style="text-align: right">Search interval (symmetric problems)</td></tr><tr><td style="text-align: right"><code>M0</code></td><td style="text-align: right"><code>Int</code></td><td style="text-align: right">Maximum eigenvalues to find</td></tr><tr><td style="text-align: right"><code>fpm</code></td><td style="text-align: right"><code>Vector{Int}</code></td><td style="text-align: right">FEAST parameters</td></tr></table><hr/><h2 id="See-Also"><a class="docs-heading-anchor" href="#See-Also">See Also</a><a id="See-Also-1"></a><a class="docs-heading-anchor-permalink" href="#See-Also" title="Permalink"></a></h2><ul><li><a href="../complex_eigenvalues/">Complex Eigenvalues</a> - Non-Hermitian standard problems</li><li><a href="../custom_contours/">Custom Contours</a> - Advanced contour integration</li><li><a href="../api_reference/">API Reference</a> - Complete function documentation</li></ul><hr/><p>&lt;div align=&quot;center&quot;&gt;   &lt;p&gt;&lt;strong&gt;Solving polynomial eigenvalue problems with FeastKit.jl&lt;/strong&gt;&lt;/p&gt;   &lt;a href=&quot;examples.md&quot;&gt;Examples&lt;/a&gt; · &lt;a href=&quot;complex<em>eigenvalues.md&quot;&gt;Complex Eigenvalues&lt;/a&gt; · &lt;a href=&quot;api</em>reference.md&quot;&gt;API Reference&lt;/a&gt; &lt;/div&gt;</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../complex_eigenvalues/">« Complex Eigenvalues</a><a class="docs-footer-nextpage" href="../parallel_computing/">Parallel Computing »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Sunday 11 January 2026 18:25">Sunday 11 January 2026</span>. Using Julia version 1.12.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

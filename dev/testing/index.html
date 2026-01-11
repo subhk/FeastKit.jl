@@ -1,2 +1,289 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Testing · FeastKit.jl</title><meta name="title" content="Testing · FeastKit.jl"/><meta property="og:title" content="Testing · FeastKit.jl"/><meta property="twitter:title" content="Testing · FeastKit.jl"/><meta name="description" content="Documentation for FeastKit.jl."/><meta property="og:description" content="Documentation for FeastKit.jl."/><meta property="twitter:description" content="Documentation for FeastKit.jl."/><meta property="og:url" content="https://subhk.github.io/FeastKit.jl/stable/testing/"/><meta property="twitter:url" content="https://subhk.github.io/FeastKit.jl/stable/testing/"/><link rel="canonical" href="https://subhk.github.io/FeastKit.jl/stable/testing/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">FeastKit.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../zero_to_feast/">Zero to FeastKit</a></li><li><a class="tocitem" href="../getting_started/">Getting Started</a></li><li><span class="tocitem">User Guide</span><ul><li><a class="tocitem" href="../examples/">Examples</a></li><li><a class="tocitem" href="../matrix_free_interface/">Matrix-Free Interface</a></li><li><a class="tocitem" href="../performance/">Performance Tips</a></li><li><a class="tocitem" href="../custom_contours/">Custom Contours</a></li><li><a class="tocitem" href="../complex_eigenvalues/">Complex Eigenvalues</a></li><li><a class="tocitem" href="../polynomial_problems/">Polynomial Problems</a></li><li><a class="tocitem" href="../parallel_computing/">Parallel Computing</a></li></ul></li><li><a class="tocitem" href="../api_reference/">API Reference</a></li><li><span class="tocitem">Project</span><ul><li><a class="tocitem" href="../contributing/">Contributing</a></li><li><a class="tocitem" href="../developer_guide/">Developer Guide</a></li><li class="is-active"><a class="tocitem" href>Testing</a></li><li><a class="tocitem" href="../license/">License</a></li><li><a class="tocitem" href="../changelog/">Changelog</a></li><li><a class="tocitem" href="../bibliography/">Bibliography</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Project</a></li><li class="is-active"><a href>Testing</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Testing</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl/blob/main/docs/src/testing.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Testing"><a class="docs-heading-anchor" href="#Testing">Testing</a><a id="Testing-1"></a><a class="docs-heading-anchor-permalink" href="#Testing" title="Permalink"></a></h1><p>Run the package tests:</p><pre><code class="language-sh hljs">julia --project -e &#39;using Pkg; Pkg.test()&#39;</code></pre><p>Tips:</p><ul><li>Use <code>JULIA_DEPOT_PATH=$PWD/.julia</code> to keep artifacts local to the repo</li><li>Prefer small, focused tests that run quickly</li></ul></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../developer_guide/">« Developer Guide</a><a class="docs-footer-nextpage" href="../license/">License »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Friday 19 December 2025 18:14">Friday 19 December 2025</span>. Using Julia version 1.12.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Testing · FeastKit.jl</title><meta name="title" content="Testing · FeastKit.jl"/><meta property="og:title" content="Testing · FeastKit.jl"/><meta property="twitter:title" content="Testing · FeastKit.jl"/><meta name="description" content="Documentation for FeastKit.jl."/><meta property="og:description" content="Documentation for FeastKit.jl."/><meta property="twitter:description" content="Documentation for FeastKit.jl."/><meta property="og:url" content="https://subhk.github.io/FeastKit.jl/stable/testing/"/><meta property="twitter:url" content="https://subhk.github.io/FeastKit.jl/stable/testing/"/><link rel="canonical" href="https://subhk.github.io/FeastKit.jl/stable/testing/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">FeastKit.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../zero_to_feast/">Zero to FeastKit</a></li><li><a class="tocitem" href="../getting_started/">Getting Started</a></li><li><span class="tocitem">User Guide</span><ul><li><a class="tocitem" href="../examples/">Examples</a></li><li><a class="tocitem" href="../matrix_free_interface/">Matrix-Free Interface</a></li><li><a class="tocitem" href="../performance/">Performance Tips</a></li><li><a class="tocitem" href="../custom_contours/">Custom Contours</a></li><li><a class="tocitem" href="../complex_eigenvalues/">Complex Eigenvalues</a></li><li><a class="tocitem" href="../polynomial_problems/">Polynomial Problems</a></li><li><a class="tocitem" href="../parallel_computing/">Parallel Computing</a></li></ul></li><li><a class="tocitem" href="../api_reference/">API Reference</a></li><li><span class="tocitem">Project</span><ul><li><a class="tocitem" href="../contributing/">Contributing</a></li><li><a class="tocitem" href="../developer_guide/">Developer Guide</a></li><li class="is-active"><a class="tocitem" href>Testing</a><ul class="internal"><li><a class="tocitem" href="#Table-of-Contents"><span>Table of Contents</span></a></li><li><a class="tocitem" href="#Running-Tests"><span>Running Tests</span></a></li><li><a class="tocitem" href="#Test-Structure"><span>Test Structure</span></a></li><li><a class="tocitem" href="#Writing-Tests"><span>Writing Tests</span></a></li><li><a class="tocitem" href="#Test-Categories"><span>Test Categories</span></a></li><li><a class="tocitem" href="#Debugging-Tests"><span>Debugging Tests</span></a></li><li><a class="tocitem" href="#Continuous-Integration"><span>Continuous Integration</span></a></li><li><a class="tocitem" href="#Best-Practices"><span>Best Practices</span></a></li></ul></li><li><a class="tocitem" href="../license/">License</a></li><li><a class="tocitem" href="../changelog/">Changelog</a></li><li><a class="tocitem" href="../bibliography/">Bibliography</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Project</a></li><li class="is-active"><a href>Testing</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Testing</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl/blob/main/docs/src/testing.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Testing-Guide"><a class="docs-heading-anchor" href="#Testing-Guide">Testing Guide</a><a id="Testing-Guide-1"></a><a class="docs-heading-anchor-permalink" href="#Testing-Guide" title="Permalink"></a></h1><p>This guide covers how to run and write tests for FeastKit.jl.</p><h2 id="Table-of-Contents"><a class="docs-heading-anchor" href="#Table-of-Contents">Table of Contents</a><a id="Table-of-Contents-1"></a><a class="docs-heading-anchor-permalink" href="#Table-of-Contents" title="Permalink"></a></h2><ul><li><a href="#running-tests">Running Tests</a></li><li><a href="#test-structure">Test Structure</a></li><li><a href="#writing-tests">Writing Tests</a></li><li><a href="#test-categories">Test Categories</a></li><li><a href="#debugging-tests">Debugging Tests</a></li><li><a href="#continuous-integration">Continuous Integration</a></li></ul><hr/><h2 id="Running-Tests"><a class="docs-heading-anchor" href="#Running-Tests">Running Tests</a><a id="Running-Tests-1"></a><a class="docs-heading-anchor-permalink" href="#Running-Tests" title="Permalink"></a></h2><h3 id="Full-Test-Suite"><a class="docs-heading-anchor" href="#Full-Test-Suite">Full Test Suite</a><a id="Full-Test-Suite-1"></a><a class="docs-heading-anchor-permalink" href="#Full-Test-Suite" title="Permalink"></a></h3><pre><code class="language-bash hljs"># Standard test run
+julia --project -e &#39;using Pkg; Pkg.test()&#39;
+
+# With multiple threads
+julia --project --threads=auto -e &#39;using Pkg; Pkg.test()&#39;
+
+# With verbose output
+julia --project -e &#39;using Pkg; Pkg.test(coverage=true)&#39;</code></pre><h3 id="Specific-Tests"><a class="docs-heading-anchor" href="#Specific-Tests">Specific Tests</a><a id="Specific-Tests-1"></a><a class="docs-heading-anchor-permalink" href="#Specific-Tests" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Interactive testing
+julia --project
+
+julia&gt; using Test
+julia&gt; include(&quot;test/runtests.jl&quot;)
+
+# Run specific test file
+julia&gt; include(&quot;test/test_matrix_free.jl&quot;)</code></pre><h3 id="Test-with-Specific-Configuration"><a class="docs-heading-anchor" href="#Test-with-Specific-Configuration">Test with Specific Configuration</a><a id="Test-with-Specific-Configuration-1"></a><a class="docs-heading-anchor-permalink" href="#Test-with-Specific-Configuration" title="Permalink"></a></h3><pre><code class="language-bash hljs"># Keep artifacts local
+JULIA_DEPOT_PATH=$PWD/.julia julia --project -e &#39;using Pkg; Pkg.test()&#39;
+
+# Test with MPI (if available)
+FEASTKIT_ENABLE_MPI=true mpiexec -n 4 julia --project test/runtests.jl</code></pre><hr/><h2 id="Test-Structure"><a class="docs-heading-anchor" href="#Test-Structure">Test Structure</a><a id="Test-Structure-1"></a><a class="docs-heading-anchor-permalink" href="#Test-Structure" title="Permalink"></a></h2><h3 id="Directory-Layout"><a class="docs-heading-anchor" href="#Directory-Layout">Directory Layout</a><a id="Directory-Layout-1"></a><a class="docs-heading-anchor-permalink" href="#Directory-Layout" title="Permalink"></a></h3><pre><code class="nohighlight hljs">test/
+├── runtests.jl           # Main test file
+├── test_matrix_free.jl   # Matrix-free interface tests
+└── (future test files)</code></pre><h3 id="Main-Test-File"><a class="docs-heading-anchor" href="#Main-Test-File">Main Test File</a><a id="Main-Test-File-1"></a><a class="docs-heading-anchor-permalink" href="#Main-Test-File" title="Permalink"></a></h3><p><code>test/runtests.jl</code> contains the primary test suite organized by functionality:</p><pre><code class="language-julia hljs">using Test
+using FeastKit
+using LinearAlgebra
+using SparseArrays
+
+@testset &quot;FeastKit.jl&quot; begin
+    @testset &quot;Core Types&quot; begin
+        # Type tests
+    end
+
+    @testset &quot;Dense Solvers&quot; begin
+        # Dense matrix tests
+    end
+
+    @testset &quot;Sparse Solvers&quot; begin
+        # Sparse matrix tests
+    end
+
+    # ... more testsets
+end</code></pre><hr/><h2 id="Writing-Tests"><a class="docs-heading-anchor" href="#Writing-Tests">Writing Tests</a><a id="Writing-Tests-1"></a><a class="docs-heading-anchor-permalink" href="#Writing-Tests" title="Permalink"></a></h2><h3 id="Basic-Test-Patterns"><a class="docs-heading-anchor" href="#Basic-Test-Patterns">Basic Test Patterns</a><a id="Basic-Test-Patterns-1"></a><a class="docs-heading-anchor-permalink" href="#Basic-Test-Patterns" title="Permalink"></a></h3><pre><code class="language-julia hljs">@testset &quot;Feature Name&quot; begin
+    # Setup
+    n = 100
+    A = create_test_matrix(n)
+
+    # Test basic functionality
+    @test result.info == 0
+    @test result.M &gt; 0
+
+    # Test numerical accuracy
+    @test isapprox(computed, expected, rtol=1e-10)
+
+    # Test types
+    @test result isa FeastResult
+
+    # Test exceptions
+    @test_throws ArgumentError bad_function_call()
+end</code></pre><h3 id="Testing-Eigenvalue-Accuracy"><a class="docs-heading-anchor" href="#Testing-Eigenvalue-Accuracy">Testing Eigenvalue Accuracy</a><a id="Testing-Eigenvalue-Accuracy-1"></a><a class="docs-heading-anchor-permalink" href="#Testing-Eigenvalue-Accuracy" title="Permalink"></a></h3><pre><code class="language-julia hljs">@testset &quot;Eigenvalue accuracy&quot; begin
+    n = 50
+    A = SymTridiagonal(2*ones(n), -ones(n-1))
+    B = Matrix(1.0I, n, n)
+
+    # Compute reference eigenvalues
+    λ_ref = eigvals(A)
+
+    # FEAST result
+    result = feast(A, (0.0, 1.0), M0=20)
+
+    # Check eigenvalues match
+    for i in 1:result.M
+        λ = result.lambda[i]
+        # Find closest reference eigenvalue
+        idx = argmin(abs.(λ_ref .- λ))
+        @test isapprox(λ, λ_ref[idx], rtol=1e-10)
+    end
+end</code></pre><h3 id="Testing-Eigenvector-Residuals"><a class="docs-heading-anchor" href="#Testing-Eigenvector-Residuals">Testing Eigenvector Residuals</a><a id="Testing-Eigenvector-Residuals-1"></a><a class="docs-heading-anchor-permalink" href="#Testing-Eigenvector-Residuals" title="Permalink"></a></h3><pre><code class="language-julia hljs">@testset &quot;Eigenvector residuals&quot; begin
+    n = 100
+    A = Symmetric(randn(n, n))
+    B = Matrix(1.0I, n, n)
+
+    result = feast(A, (-1.0, 1.0), M0=20)
+
+    for i in 1:result.M
+        λ = result.lambda[i]
+        x = result.q[:, i]
+
+        # Residual: ||Ax - λBx|| / ||Ax||
+        Ax = A * x
+        residual = norm(Ax - λ * B * x) / norm(Ax)
+        @test residual &lt; 1e-10
+    end
+end</code></pre><h3 id="Testing-Orthogonality"><a class="docs-heading-anchor" href="#Testing-Orthogonality">Testing Orthogonality</a><a id="Testing-Orthogonality-1"></a><a class="docs-heading-anchor-permalink" href="#Testing-Orthogonality" title="Permalink"></a></h3><pre><code class="language-julia hljs">@testset &quot;Eigenvector orthogonality&quot; begin
+    result = feast(A, B, interval, M0=20)
+
+    Q = result.q[:, 1:result.M]
+
+    # For standard problem (B=I): Q&#39;Q ≈ I
+    @test isapprox(Q&#39; * Q, I, atol=1e-10)
+
+    # For generalized problem: Q&#39;BQ ≈ I
+    @test isapprox(Q&#39; * B * Q, I, atol=1e-10)
+end</code></pre><hr/><h2 id="Test-Categories"><a class="docs-heading-anchor" href="#Test-Categories">Test Categories</a><a id="Test-Categories-1"></a><a class="docs-heading-anchor-permalink" href="#Test-Categories" title="Permalink"></a></h2><h3 id="Core-Type-Tests"><a class="docs-heading-anchor" href="#Core-Type-Tests">Core Type Tests</a><a id="Core-Type-Tests-1"></a><a class="docs-heading-anchor-permalink" href="#Core-Type-Tests" title="Permalink"></a></h3><pre><code class="language-julia hljs">@testset &quot;FeastResult&quot; begin
+    # Test construction
+    result = FeastResult{Float64, Float64}(
+        [1.0, 2.0, 3.0],        # lambda
+        randn(10, 3),           # q
+        3,                       # M
+        [1e-12, 1e-12, 1e-12],  # res
+        0,                       # info
+        1e-12,                   # epsout
+        5                        # loop
+    )
+
+    @test length(result.lambda) == 3
+    @test result.M == 3
+    @test result.info == 0
+end</code></pre><h3 id="Dense-Solver-Tests"><a class="docs-heading-anchor" href="#Dense-Solver-Tests">Dense Solver Tests</a><a id="Dense-Solver-Tests-1"></a><a class="docs-heading-anchor-permalink" href="#Dense-Solver-Tests" title="Permalink"></a></h3><pre><code class="language-julia hljs">@testset &quot;Dense Solvers&quot; begin
+    @testset &quot;feast_sygv! - Real symmetric generalized&quot; begin
+        n = 50
+        A = Symmetric(randn(n, n))
+        B = Symmetric(randn(n, n) + 5I)
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+
+        result = feast_sygv!(Matrix(A), Matrix(B), -1.0, 1.0, 15, fpm)
+
+        @test result.info == 0
+        @test 0 &lt;= result.M &lt;= 15
+    end
+
+    @testset &quot;feast_heev! - Complex Hermitian&quot; begin
+        n = 50
+        A = randn(ComplexF64, n, n)
+        A = (A + A&#39;) / 2  # Hermitian
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+
+        result = feast_heev!(copy(A), -1.0, 1.0, 15, fpm)
+
+        @test result.info == 0
+        @test all(isreal.(result.lambda[1:result.M]))
+    end
+end</code></pre><h3 id="Sparse-Solver-Tests"><a class="docs-heading-anchor" href="#Sparse-Solver-Tests">Sparse Solver Tests</a><a id="Sparse-Solver-Tests-1"></a><a class="docs-heading-anchor-permalink" href="#Sparse-Solver-Tests" title="Permalink"></a></h3><pre><code class="language-julia hljs">@testset &quot;Sparse Solvers&quot; begin
+    @testset &quot;feast_scsrgv! - Sparse symmetric generalized&quot; begin
+        n = 500
+        A = spdiagm(-1 =&gt; -ones(n-1), 0 =&gt; 2*ones(n), 1 =&gt; -ones(n-1))
+        B = sparse(1.0I, n, n)
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+
+        result = feast_scsrgv!(A, B, 0.0, 1.0, 20, fpm)
+
+        @test result.info == 0
+        @test result.M &gt; 0
+    end
+end</code></pre><h3 id="Parallel-Tests"><a class="docs-heading-anchor" href="#Parallel-Tests">Parallel Tests</a><a id="Parallel-Tests-1"></a><a class="docs-heading-anchor-permalink" href="#Parallel-Tests" title="Permalink"></a></h3><pre><code class="language-julia hljs">@testset &quot;Parallel Computing&quot; begin
+    @testset &quot;Threading&quot; begin
+        if Threads.nthreads() &gt; 1
+            n = 500
+            A = Symmetric(randn(n, n))
+            B = Matrix(1.0I, n, n)
+
+            result = feast_parallel(A, B, (0.0, 1.0), M0=20, use_threads=true)
+
+            @test result.info == 0
+            @test result.M &gt; 0
+        else
+            @info &quot;Skipping threading tests (single thread)&quot;
+        end
+    end
+end</code></pre><h3 id="Matrix-Free-Tests"><a class="docs-heading-anchor" href="#Matrix-Free-Tests">Matrix-Free Tests</a><a id="Matrix-Free-Tests-1"></a><a class="docs-heading-anchor-permalink" href="#Matrix-Free-Tests" title="Permalink"></a></h3><pre><code class="language-julia hljs">@testset &quot;Matrix-Free Interface&quot; begin
+    n = 200
+
+    # Define operators
+    function A_mul!(y, x)
+        y .= 2 .* x
+        y[1:end-1] .-= x[2:end]
+        y[2:end] .-= x[1:end-1]
+    end
+
+    A_op = LinearOperator{Float64}(A_mul!, (n, n), issymmetric=true)
+
+    @testset &quot;LinearOperator creation&quot; begin
+        @test size(A_op) == (n, n)
+        @test A_op.issymmetric == true
+    end
+
+    @testset &quot;Matrix-free solve&quot; begin
+        result = feast(A_op, (0.0, 1.0), M0=10, solver=:cg)
+        @test result.info == 0 || result.M &gt; 0
+    end
+end</code></pre><h3 id="Error-Handling-Tests"><a class="docs-heading-anchor" href="#Error-Handling-Tests">Error Handling Tests</a><a id="Error-Handling-Tests-1"></a><a class="docs-heading-anchor-permalink" href="#Error-Handling-Tests" title="Permalink"></a></h3><pre><code class="language-julia hljs">@testset &quot;Error Handling&quot; begin
+    @testset &quot;Invalid interval&quot; begin
+        A = randn(10, 10)
+        A = A + A&#39;
+        # Emin &gt;= Emax should fail
+        @test_throws ArgumentError feast(A, (1.0, 0.0), M0=5)
+    end
+
+    @testset &quot;Invalid M0&quot; begin
+        A = randn(10, 10)
+        A = A + A&#39;
+        @test_throws ArgumentError feast(A, (0.0, 1.0), M0=0)
+        @test_throws ArgumentError feast(A, (0.0, 1.0), M0=-1)
+    end
+end</code></pre><hr/><h2 id="Debugging-Tests"><a class="docs-heading-anchor" href="#Debugging-Tests">Debugging Tests</a><a id="Debugging-Tests-1"></a><a class="docs-heading-anchor-permalink" href="#Debugging-Tests" title="Permalink"></a></h2><h3 id="Verbose-Testing"><a class="docs-heading-anchor" href="#Verbose-Testing">Verbose Testing</a><a id="Verbose-Testing-1"></a><a class="docs-heading-anchor-permalink" href="#Verbose-Testing" title="Permalink"></a></h3><pre><code class="language-julia hljs">@testset verbose=true &quot;Detailed Tests&quot; begin
+    @testset &quot;Subtest 1&quot; begin
+        @test true
+    end
+    @testset &quot;Subtest 2&quot; begin
+        @test true
+    end
+end</code></pre><h3 id="Debugging-Failing-Tests"><a class="docs-heading-anchor" href="#Debugging-Failing-Tests">Debugging Failing Tests</a><a id="Debugging-Failing-Tests-1"></a><a class="docs-heading-anchor-permalink" href="#Debugging-Failing-Tests" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Add debugging output
+@testset &quot;Debug example&quot; begin
+    result = feast(A, (0.0, 1.0), M0=10)
+
+    @show result.info
+    @show result.M
+    @show result.epsout
+    @show result.loop
+
+    if result.M &gt; 0
+        @show result.lambda[1:result.M]
+    end
+
+    @test result.info == 0
+end</code></pre><h3 id="Isolating-Failures"><a class="docs-heading-anchor" href="#Isolating-Failures">Isolating Failures</a><a id="Isolating-Failures-1"></a><a class="docs-heading-anchor-permalink" href="#Isolating-Failures" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Run single test interactively
+julia --project</code></pre><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, Test
+
+# Set up test case
+n = 100
+A = SymTridiagonal(2*ones(n), -ones(n-1))
+
+# Run the failing test
+result = feast(A, (0.5, 1.5), M0=10)
+
+# Inspect results
+result.info
+result.M
+result.lambda</code></pre><hr/><h2 id="Continuous-Integration"><a class="docs-heading-anchor" href="#Continuous-Integration">Continuous Integration</a><a id="Continuous-Integration-1"></a><a class="docs-heading-anchor-permalink" href="#Continuous-Integration" title="Permalink"></a></h2><h3 id="GitHub-Actions-Configuration"><a class="docs-heading-anchor" href="#GitHub-Actions-Configuration">GitHub Actions Configuration</a><a id="GitHub-Actions-Configuration-1"></a><a class="docs-heading-anchor-permalink" href="#GitHub-Actions-Configuration" title="Permalink"></a></h3><p>Tests run automatically on pull requests via <code>.github/workflows/ci.yml</code>:</p><pre><code class="language-yaml hljs">name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        julia-version: [&#39;1.10&#39;, &#39;1.11&#39;]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia-version }}
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1</code></pre><h3 id="Test-Coverage"><a class="docs-heading-anchor" href="#Test-Coverage">Test Coverage</a><a id="Test-Coverage-1"></a><a class="docs-heading-anchor-permalink" href="#Test-Coverage" title="Permalink"></a></h3><p>Coverage is collected during CI runs:</p><pre><code class="language-julia hljs"># Run tests with coverage
+Pkg.test(coverage=true)</code></pre><h3 id="CI-Environment-Detection"><a class="docs-heading-anchor" href="#CI-Environment-Detection">CI Environment Detection</a><a id="CI-Environment-Detection-1"></a><a class="docs-heading-anchor-permalink" href="#CI-Environment-Detection" title="Permalink"></a></h3><pre><code class="language-julia hljs">@testset &quot;CI-specific tests&quot; begin
+    if get(ENV, &quot;CI&quot;, &quot;false&quot;) == &quot;true&quot;
+        @info &quot;Running on CI&quot;
+        # CI-specific tests
+    else
+        @info &quot;Running locally&quot;
+        # Local-only tests (e.g., longer benchmarks)
+    end
+end</code></pre><hr/><h2 id="Best-Practices"><a class="docs-heading-anchor" href="#Best-Practices">Best Practices</a><a id="Best-Practices-1"></a><a class="docs-heading-anchor-permalink" href="#Best-Practices" title="Permalink"></a></h2><h3 id="Test-Design"><a class="docs-heading-anchor" href="#Test-Design">Test Design</a><a id="Test-Design-1"></a><a class="docs-heading-anchor-permalink" href="#Test-Design" title="Permalink"></a></h3><ol><li><strong>Keep tests fast</strong>: Prefer small matrices when possible</li><li><strong>Be deterministic</strong>: Use <code>Random.seed!()</code> for reproducibility</li><li><strong>Test edge cases</strong>: Empty intervals, single eigenvalue, etc.</li><li><strong>Clean up</strong>: Don&#39;t leave temporary files</li></ol><h3 id="Reproducibility"><a class="docs-heading-anchor" href="#Reproducibility">Reproducibility</a><a id="Reproducibility-1"></a><a class="docs-heading-anchor-permalink" href="#Reproducibility" title="Permalink"></a></h3><pre><code class="language-julia hljs">using Random
+
+@testset &quot;Reproducible tests&quot; begin
+    Random.seed!(42)
+    A = Symmetric(randn(50, 50))
+    result = feast(A, (-1.0, 1.0), M0=10)
+    @test result.M == expected_M  # Should always match
+end</code></pre><h3 id="Numerical-Tolerance"><a class="docs-heading-anchor" href="#Numerical-Tolerance">Numerical Tolerance</a><a id="Numerical-Tolerance-1"></a><a class="docs-heading-anchor-permalink" href="#Numerical-Tolerance" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Use appropriate tolerances
+@test isapprox(computed, expected, rtol=1e-10)  # Relative
+@test isapprox(computed, expected, atol=1e-12)  # Absolute
+@test abs(computed - expected) &lt; 1e-10          # Manual
+
+# For eigenvalues with different scales
+for (λ_computed, λ_expected) in zip(computed, expected)
+    if abs(λ_expected) &gt; 1
+        @test isapprox(λ_computed, λ_expected, rtol=1e-10)
+    else
+        @test isapprox(λ_computed, λ_expected, atol=1e-12)
+    end
+end</code></pre><hr/><p>&lt;div align=&quot;center&quot;&gt;   &lt;p&gt;&lt;strong&gt;Ensuring FeastKit.jl quality through comprehensive testing&lt;/strong&gt;&lt;/p&gt;   &lt;a href=&quot;contributing.md&quot;&gt;Contributing Guide&lt;/a&gt; · &lt;a href=&quot;developer_guide.md&quot;&gt;Developer Guide&lt;/a&gt; &lt;/div&gt;</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../developer_guide/">« Developer Guide</a><a class="docs-footer-nextpage" href="../license/">License »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Sunday 11 January 2026 18:25">Sunday 11 January 2026</span>. Using Julia version 1.12.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

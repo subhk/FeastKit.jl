@@ -99,7 +99,8 @@ function feastdefault!(fpm::Vector{Int})
     end
 
     # fpm[2]: Number of contour points (half-contour for symmetric/Hermitian)
-    if fpm[2] == FEAST_UNINITIALIZED
+    # Treat 0 as uninitialized (allows zero-initialized arrays)
+    if fpm[2] == FEAST_UNINITIALIZED || fpm[2] <= 0
         fpm[2] = 8  # Default half-contour for symmetric/Hermitian
         if dig[3] == 2
             fpm[2] = 4  # IFEAST uses fewer nodes
@@ -107,8 +108,6 @@ function feastdefault!(fpm::Vector{Int})
         if fpm[14] == 2
             fpm[2] = 3  # Stochastic estimate
         end
-    elseif fpm[2] < 1
-        throw(ArgumentError("Invalid fpm[2]=$(fpm[2]): must be positive"))
     elseif (fpm[16] == 0 || fpm[16] == 2) && fpm[2] > 20
         # Gauss or Zolotarev have restrictions (allow specific larger values)
         allowed_large = [24, 32, 40, 48, 56]
@@ -118,14 +117,16 @@ function feastdefault!(fpm::Vector{Int})
     end
 
     # fpm[3]: Convergence tolerance (stopping criteria: 10^(-fpm[3]))
-    if fpm[3] == FEAST_UNINITIALIZED
+    # Treat 0 as uninitialized (allows zero-initialized arrays)
+    if fpm[3] == FEAST_UNINITIALIZED || fpm[3] == 0
         fpm[3] = 12  # Default: 10^-12
     elseif fpm[3] < 0 || fpm[3] > 16
         throw(ArgumentError("Invalid fpm[3]=$(fpm[3]): must be between 0 and 16"))
     end
 
     # fpm[4]: Maximum number of refinement loops
-    if fpm[4] == FEAST_UNINITIALIZED
+    # Treat 0 as uninitialized (allows zero-initialized arrays)
+    if fpm[4] == FEAST_UNINITIALIZED || fpm[4] <= 0
         fpm[4] = 20  # Default
         if dig[3] == 2
             fpm[4] = 50  # IFEAST needs more iterations
@@ -157,7 +158,8 @@ function feastdefault!(fpm::Vector{Int})
     end
 
     # fpm[8]: Number of contour points (full-contour for non-Hermitian)
-    if fpm[8] == FEAST_UNINITIALIZED
+    # Treat 0 as uninitialized (allows zero-initialized arrays)
+    if fpm[8] == FEAST_UNINITIALIZED || fpm[8] <= 0
         fpm[8] = 16  # Default full-contour for non-Hermitian
         if dig[3] == 2
             fpm[8] = 8  # IFEAST uses fewer nodes

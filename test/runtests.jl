@@ -162,7 +162,7 @@ using Distributed
         @test result_standard.info == 0
         @test result_standard.M == 2
         expected_dense = sort(real.(eigvals(Matrix(A_dense))))
-        @test isapprox(sort(result_standard.lambda), expected_dense; atol=1e-9)
+        @test isapprox(sort(real.(result_standard.lambda)), expected_dense; atol=1e-9)
 
         # Dense generalized problem with diagonal B
         @info "General: dense generalized"
@@ -172,7 +172,7 @@ using Distributed
         @test result_general.info == 0
         @test result_general.M == 2
         expected_general = sort(real.(eigvals(Matrix(A_dense), Matrix(B_dense))))
-        @test isapprox(sort(result_general.lambda), expected_general; atol=1e-9)
+        @test isapprox(sort(real.(result_general.lambda)), expected_general; atol=1e-9)
 
         # Sparse standard problem (automatic type promotion)
         @info "General: sparse standard"
@@ -180,7 +180,7 @@ using Distributed
         result_sparse = feast_general(A_sparse, center, radius; M0=size(A_sparse, 1), fpm=copy(fpm), parallel=:serial)
         @test result_sparse.info == 0
         @test result_sparse.M == 2
-        @test isapprox(sort(result_sparse.lambda), expected_dense; atol=1e-9)
+        @test isapprox(sort(real.(result_sparse.lambda)), expected_dense; atol=1e-9)
 
         # Real input should be promoted to complex
         @info "General: real input promotion"
@@ -188,7 +188,7 @@ using Distributed
         result_real = feast_general(A_real, center, radius; M0=size(A_real, 1), fpm=copy(fpm), parallel=:serial)
         @test result_real.info == 0
         @test result_real.M == 2
-        @test isapprox(sort(result_real.lambda), expected_dense; atol=1e-9)
+        @test isapprox(sort(real.(result_real.lambda)), expected_dense; atol=1e-9)
 
         # Invalid configurations
         @test_throws ArgumentError feast_general(A_dense, B_dense, center, 0.0; M0=4, fpm=copy(fpm))

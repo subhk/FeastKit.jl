@@ -191,13 +191,7 @@ function feast_inside_contourx(lambda::Complex{T}, Zne::Vector{Complex{T}},
     return false
 end
 
-"""
-    _feast_bary_coef_triangle(v1, v2, v3) -> Real
-
-Compute signed area (barycentric-style coefficient) for triangle check.
-Matches Fortran zfeast_bary_coef: coef = adbc1 - adbc2 + adbc3
-where adbc_i = cross-product term for signed area.
-"""
+# Internal: Compute signed area (barycentric-style coefficient) for triangle check
 function _feast_bary_coef_triangle(v1::Complex{T}, v2::Complex{T}, v3::Complex{T}) where T<:Real
     adbc1 = real(v2) * imag(v3) - real(v3) * imag(v2)
     adbc2 = real(v1) * imag(v3) - real(v3) * imag(v1)
@@ -205,16 +199,7 @@ function _feast_bary_coef_triangle(v1::Complex{T}, v2::Complex{T}, v3::Complex{T
     return adbc1 - adbc2 + adbc3
 end
 
-"""
-    feast_cauchy_weights(lambda, Zne) -> Matrix{Complex}
-
-Compute normalized Cauchy kernel weights for eigenvalue filtering.
-For each eigenvalue λ_j, computes w_ji = (1/(Zne_i - λ_j)) normalized.
-
-Note: This is NOT the same as the Fortran `zfeast_bary_coef` which computes
-triangle signed areas. This function is used for eigenvalue filtering
-in the rational approximation context.
-"""
+# Internal: Compute normalized Cauchy kernel weights for eigenvalue filtering
 function feast_cauchy_weights(lambda::Vector{T}, Zne::Vector{Complex{T}}) where T<:Real
     M = length(lambda)
     ne = length(Zne)

@@ -388,6 +388,17 @@ abstract type MatrixFreeOperator{T} end
 - `LinearOperator{T}`
 - `MatrixVecFunction{T}`
 
+### RCI State Types
+
+Explicit state objects for Reverse Communication Interface (RCI) kernels. These must be created once before the RCI loop and reused across all iterations.
+
+```@docs
+FeastKit.FeastSRCIState
+FeastKit.FeastHRCIState
+FeastKit.FeastGRCIState
+FeastKit.FeastPolyRCIState
+```
+
 ---
 
 ## Utility Functions

@@ -54,6 +54,7 @@ export feast_parallel_info, feast_parallel_comparison
 export determine_parallel_backend, mpi_available, feast_parallel_capabilities
 export feast_with_backend, feast_serial
 export FeastResult, FeastGeneralResult, FeastParameters, FeastWorkspaceReal, FeastWorkspaceComplex
+export FeastSRCIState, FeastHRCIState, FeastGRCIState, FeastPolyRCIState
 # Matrix-free interface exports
 export MatrixFreeOperator, MatrixVecFunction, LinearOperator
 export feast_matfree_srci!, feast_matfree_grci!

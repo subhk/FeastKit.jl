@@ -200,11 +200,14 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
     mode = Ref(0)
     info = Ref(0)
     
+    # Persistent RCI state (must be reused across calls in the loop)
+    srci_state = FeastSRCIState{T}()
+
     # Matrix-free RCI loop
     while true
         # Call Feast RCI kernel
         feast_srci!(ijob, N, Ze, work, workc, Aq, Sq, fpm,
-                   epsout, loop, Emin, Emax, M0, lambda, q, mode, res, info)
+                   epsout, loop, Emin, Emax, M0, lambda, q, mode, res, info; state=srci_state)
         
         if ijob[] == Int(Feast_RCI_DONE)
             break
@@ -309,10 +312,13 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
     mode = Ref(0)
     info = Ref(0)
     
+    # Persistent RCI state (must be reused across calls in the loop)
+    grci_state = FeastGRCIState{T}()
+
     # Matrix-free RCI loop for general problems
     while true
         feast_grci!(ijob, N, Ze, work, workc, zAq, zSq, fpm,
-                   epsout, loop, center, radius, M0, lambda, q, mode, res, info)
+                   epsout, loop, center, radius, M0, lambda, q, mode, res, info; state=grci_state)
         
         if ijob[] == Int(Feast_RCI_DONE)
             break
@@ -353,11 +359,8 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
     end
     
     M_found = mode[]
-    # Note: For general eigenvalue problems, eigenvalues are complex
-    # but the lambda vector stores Complex{T}, so we extract real part for FeastResult
-    lambda_real = real.(lambda[1:M_found])
-    return FeastResult{T, Complex{T}}(
-        lambda_real,
+    return FeastGeneralResult{T}(
+        lambda[1:M_found],
         q[:, 1:M_found],
         M_found,
         res[1:M_found],

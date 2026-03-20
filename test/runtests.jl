@@ -347,7 +347,7 @@ using Distributed
             fpm_custom = copy(fpm)
             result_x = feast_hcsrgvx!(copy(A), copy(B), Emin, Emax, n, fpm_custom,
                                       contour.Zne, contour.Wne)
-            # Check if custom contour was used (fpm[15] should be reset to 0 after use)
+            # Check if custom contour was used (fpm[29] should be reset to 0 after use)
             if result_x.info == 0
                 @test isapprox(sort(result_x.lambda), sort(result.lambda); atol=1e-8)
             end

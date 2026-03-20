@@ -58,12 +58,15 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
     banded_ipiv = Vector{LinearAlgebra.BlasInt}(undef, 0)
     factorized = false
 
+    # Persistent RCI state (must be reused across calls in the loop)
+    srci_state = FeastSRCIState{T}()
+
     while true
         # Call Feast RCI kernel
         feast_srci!(ijob, N, Ze, workspace.work, workspace.workc,
                     workspace.Aq, workspace.Sq, fpm, epsout, loop,
                     Emin, Emax, M0, workspace.lambda, workspace.q,
-                    mode, workspace.res, info)
+                    mode, workspace.res, info; state=srci_state)
 
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             factorized = false

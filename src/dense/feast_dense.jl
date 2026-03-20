@@ -387,6 +387,9 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
     LU_factorization = nothing
     temp_matrix = Matrix{Complex{T}}(undef, N, N)
 
+    # Persistent RCI state (must be reused across calls in the loop)
+    grci_state = FeastGRCIState{T}()
+
     # Safety counter to prevent infinite loops
     max_rci_iterations = fpm[2] * (fpm[4] + 1) * 10  # num_points * (max_loops + 1) * safety_factor
     rci_iteration_count = 0
@@ -405,7 +408,7 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
         feast_grci!(ijob, N, Ze, workspace.work, workspace.workc,
                    workspace.zAq, workspace.zSq, fpm, epsout, loop,
                    Emid, r, M0, lambda_complex, q_complex,
-                   mode, workspace.res, info)
+                   mode, workspace.res, info; state=grci_state)
 
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             # Factorize Ze*B - A

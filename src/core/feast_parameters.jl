@@ -117,8 +117,9 @@ function feastdefault!(fpm::Vector{Int})
     end
 
     # fpm[3]: Convergence tolerance (stopping criteria: 10^(-fpm[3]))
-    # Treat 0 as uninitialized (allows zero-initialized arrays)
-    if fpm[3] == FEAST_UNINITIALIZED || fpm[3] == 0
+    # Note: fpm[3]=0 means tolerance=10^0=1.0 which is a valid (loose) tolerance.
+    # Only the sentinel value means uninitialized.
+    if fpm[3] == FEAST_UNINITIALIZED
         fpm[3] = 12  # Default: 10^-12
     elseif fpm[3] < 0 || fpm[3] > 16
         throw(ArgumentError("Invalid fpm[3]=$(fpm[3]): must be between 0 and 16"))
@@ -261,8 +262,7 @@ function feastdefault!(fpm::Vector{Int})
         end
     end
 
-    # fpm[29]: Custom contour type flag
-    # 0=user-provided custom contour, 1=generated using default contour
+    # fpm[29]: Custom contour ID (0=no custom contour, >0=contour registry ID)
     if fpm[29] == FEAST_UNINITIALIZED
         fpm[29] = 0
     end
@@ -405,14 +405,13 @@ function feast_epsilon(::Type{Float32})
 end
 
 # Check if a custom contour mode is active
-# Note: This is a simple check based on fpm[29] which indicates custom contour type:
-#   fpm[29] = 0: default contour (ellipsoid based on Emin, Emax, fpm[18], etc.)
-#   fpm[29] = 1: custom contour generated using default parameters
-# For a complete check whether a custom contour object exists, use:
-#   feast_get_custom_contour(fpm) !== nothing  (from feast_aux.jl)
+# fpm[29] stores the custom contour registry ID:
+#   fpm[29] = 0: no custom contour (use default ellipsoid from Emin, Emax, fpm[18], etc.)
+#   fpm[29] > 0: custom contour registered with this ID
+# The ID-based approach means copy(fpm) preserves the contour association.
 # Note: fpm[15] is for contour schemes (two-sided vs one-sided), not custom contours
 function feast_use_custom_contour(fpm::Vector{Int})
-    return fpm[29] != 0
+    return fpm[29] > 0
 end
 
 # Get number of integration points

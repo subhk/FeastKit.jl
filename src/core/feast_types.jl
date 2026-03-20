@@ -86,6 +86,85 @@ struct FeastGeneralResult{T<:Real}
     loop::Int
 end
 
+# RCI state structures - explicit state objects for thread safety and correctness
+# These replace the global Dict{UInt64, Dict{Symbol, Any}} approach that was
+# keyed by objectid (not GC-stable, not thread-safe, memory leak on exceptions).
+
+"""
+    FeastSRCIState{T<:Real}
+
+Explicit state object for the `feast_srci!` RCI kernel (real symmetric/Hermitian problems).
+Create with `FeastSRCIState{T}()` and pass to `feast_srci!` via the `state` keyword argument.
+"""
+mutable struct FeastSRCIState{T<:Real}
+    initialized::Bool
+    Zne::Vector{Complex{T}}
+    Wne::Vector{Complex{T}}
+    ne::Int
+    e::Int
+    Q0::Matrix{T}
+    Q_proj::Matrix{Complex{T}}
+    zAq::Matrix{Complex{T}}    # Complex moment accumulator (take real() only after full contour)
+    zSq::Matrix{Complex{T}}    # Complex moment accumulator (take real() only after full contour)
+    M::Int
+
+    function FeastSRCIState{T}() where T<:Real
+        new{T}(false, Complex{T}[], Complex{T}[], 0, 1,
+               Matrix{T}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
+               Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0), 0)
+    end
+end
+
+"""
+    FeastHRCIState{T<:Real}
+
+Explicit state object for the `feast_hrci!` RCI kernel (complex Hermitian problems).
+"""
+mutable struct FeastHRCIState{T<:Real}
+    initialized::Bool
+    Zne::Vector{Complex{T}}
+    Wne::Vector{Complex{T}}
+    ne::Int
+    e::Int
+    Q0::Matrix{Complex{T}}
+    Q_proj::Matrix{Complex{T}}
+    M::Int
+    eps::T
+    maxloop::Int
+
+    function FeastHRCIState{T}() where T<:Real
+        new{T}(false, Complex{T}[], Complex{T}[], 0, 1,
+               Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
+               0, zero(T), 0)
+    end
+end
+
+"""
+    FeastGRCIState{T<:Real}
+
+Explicit state object for the `feast_grci!` RCI kernel (general non-Hermitian problems).
+"""
+mutable struct FeastGRCIState{T<:Real}
+    initialized::Bool
+    Q0::Matrix{Complex{T}}
+    mult_a_for_projection::Bool  # Distinguishes two MULT_A calls (moved out of fpm[54])
+
+    function FeastGRCIState{T}() where T<:Real
+        new{T}(false, Matrix{Complex{T}}(undef, 0, 0), false)
+    end
+end
+
+"""
+    FeastPolyRCIState{T<:Real}
+
+Explicit state object for the polynomial RCI kernel `_feast_poly_grci!`.
+"""
+mutable struct FeastPolyRCIState{T<:Real}
+    initialized::Bool
+
+    FeastPolyRCIState{T}() where T<:Real = new{T}(false)
+end
+
 # Integration contour structure
 struct FeastContour{T<:Real}
     Zne::Vector{Complex{T}}

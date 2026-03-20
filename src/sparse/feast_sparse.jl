@@ -167,7 +167,9 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
     zSq = zeros(Complex{T}, M0, M0)
     moment = Matrix{Complex{T}}(undef, M0, M0)
     ReducedT = promote_type(Float64, T)
-    rhs_buffer = B === nothing ? Q_basis : Matrix{Complex{T}}(undef, N, M0)
+    # Always allocate a separate rhs_buffer to avoid aliasing Q_basis
+    # (aliased views are fragile — any future in-place write to one corrupts the other)
+    rhs_buffer = Matrix{Complex{T}}(undef, N, M0)
     residual_vec = zeros(Complex{T}, N)
     Bq_vec = B === nothing ? nothing : zeros(Complex{T}, N)
 
@@ -198,9 +200,8 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
             z = Zne[e]
             weight = 2 * Wne[e]
 
-            rhs = rhs_buffer
             if B === nothing
-                rhs = Q_basis
+                rhs_buffer .= Q_basis
             else
                 mul!(rhs_buffer, B_matrix, Q_basis)
             end
@@ -209,7 +210,7 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                 shifted_matrix = z * B_matrix - A
                 try
                     solver_factor = lu(shifted_matrix)
-                    solutions .= solver_factor \ rhs
+                    solutions .= solver_factor \ rhs_buffer
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)
                     @warn "Sparse direct solve failed for shift $z" exception=err
@@ -217,7 +218,7 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                     break
                 end
             else
-                success = solve_shifted_iterative!(solutions, rhs, A, B_matrix,
+                success = solve_shifted_iterative!(solutions, rhs_buffer, A, B_matrix,
                                                    z, tol_value, solver_maxiter, solver_restart)
                 if !success
                     info_code = Int(Feast_ERROR_NO_CONVERGENCE)
@@ -563,13 +564,16 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     
     # Sparse linear solver workspace
     sparse_solver = nothing
-    
+
+    # Persistent RCI state (must be reused across calls in the loop)
+    grci_state = FeastGRCIState{T}()
+
     while true
         # Call Feast RCI kernel for general problems
         feast_grci!(ijob, N, Ze, workspace.work, workspace.workc,
                    workspace.zAq, workspace.zSq, fpm, epsout, loop,
-                   Emid, r, M0, lambda_complex, q_complex, 
-                   mode, workspace.res, info)
+                   Emid, r, M0, lambda_complex, q_complex,
+                   mode, workspace.res, info; state=grci_state)
         
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             # Factorize Ze*B - A for sparse matrices

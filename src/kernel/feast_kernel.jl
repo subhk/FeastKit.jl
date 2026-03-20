@@ -4,14 +4,8 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                      epsout::Ref{T}, loop::Ref{Int},
                      Emin::T, Emax::T, M0::Int,
                      lambda::Vector{T}, q::Matrix{T}, mode::Ref{Int},
-                     res::Vector{T}, info::Ref{Int}) where T<:Real
-    @static if !@isdefined(_feast_srci_state)
-        global _feast_srci_state = Dict{UInt64, Dict{Symbol, Any}}()
-    end
-    state_key = UInt64(objectid(Aq))
-    state = get!(() -> Dict{Symbol, Any}(), _feast_srci_state, state_key)
-    cleanup_state! = () -> pop!(_feast_srci_state, state_key, nothing)
-    state[:cleanup_state] = cleanup_state!
+                     res::Vector{T}, info::Ref{Int};
+                     state::FeastSRCIState{T} = FeastSRCIState{T}()) where T<:Real
 
     if ijob[] == -1  # Initialization
         feastdefault!(fpm)
@@ -38,10 +32,11 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             contour = feast_contour(Emin, Emax, fpm)
         end
 
-        state[:Zne] = copy(contour.Zne)
-        state[:Wne] = copy(contour.Wne)
-        state[:ne] = length(contour.Zne)
-        state[:e] = 1
+        state.Zne = copy(contour.Zne)
+        state.Wne = copy(contour.Wne)
+        state.ne = length(contour.Zne)
+        state.e = 1
+        state.initialized = true
 
         # Store state in fpm array
         fpm[50] = 1
@@ -78,9 +73,10 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             end
         end
 
-        state[:Q0] = copy(work[:, 1:M0])
-        # Initialize Q_proj buffer for accumulating filtered subspace
-        state[:Q_proj] = zeros(Complex{T}, N, M0)
+        state.Q0 = copy(work[:, 1:M0])
+        state.Q_proj = zeros(Complex{T}, N, M0)
+        state.zAq = zeros(Complex{T}, M0, M0)
+        state.zSq = zeros(Complex{T}, M0, M0)
 
         Ze[] = contour.Zne[1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
@@ -89,45 +85,41 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
     if ijob[] == Int(Feast_RCI_FACTORIZE)
         # After factorization, request linear solve
-        ijob[] = Int(Feast_RCI_SOLVE)  # Fortran uses ijob=11 for solve
-        Q0 = get(state, :Q0, nothing)
-        if Q0 === nothing
-            Q0 = copy(work[:, 1:M0])
-            state[:Q0] = Q0
-        end
+        ijob[] = Int(Feast_RCI_SOLVE)
+        Q0 = state.Q0
         work[:, 1:size(Q0, 2)] = Q0
         return
     end
 
     if ijob[] == Int(Feast_RCI_SOLVE)
-        if !haskey(state, :Zne)
+        if !state.initialized
             contour = feast_get_custom_contour(fpm)
             if contour === nothing
                 contour = feast_contour(Emin, Emax, fpm)
             end
-            state[:Zne] = copy(contour.Zne)
-            state[:Wne] = copy(contour.Wne)
-            state[:ne] = length(contour.Zne)
-            state[:e] = 1
+            state.Zne = copy(contour.Zne)
+            state.Wne = copy(contour.Wne)
+            state.ne = length(contour.Zne)
+            state.e = 1
+            state.initialized = true
         end
-        Zne = state[:Zne]
-        Wne = state[:Wne]
-        e = get(state, :e, 1)
-        ne = state[:ne]
+        Zne = state.Zne
+        Wne = state.Wne
+        e = state.e
+        ne = state.ne
 
-        Q0 = get!(state, :Q0) do
-            copy(work[:, 1:M0])
-        end
+        Q0 = state.Q0
         M_current = size(Q0, 2)
 
-        # Get or initialize Q_proj buffer for filtered subspace
-        Q_proj = get!(state, :Q_proj) do
-            zeros(Complex{T}, N, M_current)
-        end
+        Q_proj = state.Q_proj
+        zAq = state.zAq
+        zSq = state.zSq
 
-        # Reset Q_proj at start of new contour loop
+        # Reset accumulators at start of new contour loop
         if e == 1
             fill!(Q_proj, zero(Complex{T}))
+            fill!(zAq, zero(Complex{T}))
+            fill!(zSq, zero(Complex{T}))
         end
 
         weight = 2 * Wne[e]  # Account for conjugate half-contour
@@ -135,13 +127,13 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         # Accumulate filtered subspace (spectral projector applied to Q0)
         Q_proj[:, 1:M_current] .+= weight .* workc[:, 1:M_current]
 
-        # Accumulate moment matrices
+        # Accumulate moment matrices in complex (take real() only after full contour)
         temp = Q0' * workc[:, 1:M_current]
-        Aq[1:M_current, 1:M_current] .+= real(weight * temp)
-        Sq[1:M_current, 1:M_current] .+= real(weight * Zne[e] * temp)
+        zAq[1:M_current, 1:M_current] .+= weight * temp
+        zSq[1:M_current, 1:M_current] .+= weight * Zne[e] * temp
 
         fpm[50] = e + 1  # Store incremented counter in fpm
-        state[:e] = e + 1
+        state.e = e + 1
 
         if e < ne
             Ze[] = Zne[e+1]
@@ -149,24 +141,25 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             return
         else
             fpm[50] = 1  # Reset for next refinement loop
-            state[:e] = 1
+            state.e = 1
+
+            # Extract real part after full contour summation
+            # (imaginary parts cancel by conjugate symmetry of the half-contour)
+            Aq[1:M_current, 1:M_current] .= real.(zAq[1:M_current, 1:M_current])
+            Sq[1:M_current, 1:M_current] .= real.(zSq[1:M_current, 1:M_current])
 
             try
                 # Solve generalized eigenvalue problem: Sq*v = lambda*Aq*v
-                # This matches Fortran FEAST which uses ZHEGV(1,'V','U',M0,zSq,M0,zAq,...)
                 F = eigen(Sq[1:M_current, 1:M_current], Aq[1:M_current, 1:M_current])
                 lambda_red = real.(F.values)
                 v_red = real.(F.vectors)
 
                 # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q0
-                # Q_proj = spectral projector applied to Q0 via contour integration
-                Q_proj = state[:Q_proj]
                 Q_proj_real = real.(Q_proj[:, 1:M_current])
                 q[:, 1:M_current] = Q_proj_real * v_red[:, 1:M_current]
                 lambda[1:M_current] = lambda_red[1:M_current]
 
                 # Reorder: put eigenvalues inside the interval first
-                # This keeps lambda[i] paired with q[:, i]
                 inside_mask = [feast_inside_contour(lambda[i], Emin, Emax) for i in 1:M_current]
                 inside_indices = findall(inside_mask)
                 outside_indices = findall(.!inside_mask)
@@ -178,16 +171,18 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 M = length(inside_indices)
 
                 fpm[52] = M  # Store M in fpm
-                state[:M] = M
+                state.M = M
 
                 if M == 0
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     ijob[] = Int(Feast_RCI_DONE)
                     fpm[53] = 0  # Clear initialization flag
-                    state[:cleanup_state]()
+                    state.initialized = false
                     return
                 end
 
+                # Request caller to compute A * q[:, 1:M] and store result in work[:, 1:M].
+                # The residual will be computed as ||work[:,j] - lambda[j]*q[:,j]||.
                 ijob[] = Int(Feast_RCI_MULT_A)
                 mode[] = M
                 return
@@ -195,13 +190,14 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 info[] = Int(Feast_ERROR_LAPACK)
                 ijob[] = Int(Feast_RCI_DONE)
                 fpm[53] = 0  # Clear initialization flag
-                state[:cleanup_state]()
+                state.initialized = false
                 return
             end
         end
     end
 
     if ijob[] == Int(Feast_RCI_MULT_A)
+        # Caller must have computed A * q[:, 1:M] into work[:, 1:M]
         M = fpm[52]  # Get M from fpm
 
         for j in 1:M
@@ -217,14 +213,13 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             mode[] = M
             ijob[] = Int(Feast_RCI_DONE)
             fpm[53] = 0  # Clear initialization flag
-            state[:cleanup_state]()
+            state.initialized = false
             return
         else
             loop[] += 1
             fill!(Aq, zero(T))
             fill!(Sq, zero(T))
             # Use full subspace (M0 columns) for next iteration
-            # to maintain orthogonality and prevent subspace collapse
             work[:, 1:M0] = q[:, 1:M0]
 
             # Get contour for next refinement loop
@@ -232,13 +227,13 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             if contour === nothing
                 contour = feast_contour(Emin, Emax, fpm)
             end
-            state[:Zne] = copy(contour.Zne)
-            state[:Wne] = copy(contour.Wne)
-            state[:ne] = length(contour.Zne)
-            state[:e] = 1
+            state.Zne = copy(contour.Zne)
+            state.Wne = copy(contour.Wne)
+            state.ne = length(contour.Zne)
+            state.e = 1
             fpm[50] = 1  # Reset integration point counter
 
-            state[:Q0] = copy(work[:, 1:M0])
+            state.Q0 = copy(work[:, 1:M0])
             Ze[] = contour.Zne[1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return
@@ -246,11 +241,11 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     end
 
     if ijob[] == Int(Feast_RCI_DONE)
-        state[:cleanup_state]()
+        state.initialized = false
         return
     end
 
-    state[:cleanup_state]()
+    state.initialized = false
     error("FEAST RCI kernel: Invalid job code ijob=$(ijob[]). " *
           "Expected: -1 (init), $(Int(Feast_RCI_FACTORIZE)) (factorize), " *
           "$(Int(Feast_RCI_SOLVE)) (solve), $(Int(Feast_RCI_MULT_A)) (mult_a), " *
@@ -299,9 +294,6 @@ function feast_grcix!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                     Emid, r, M0, lambda, q, mode, res, info)
     end
 end
-@static if !@isdefined(_feast_hrci_state)
-    global _feast_hrci_state = Dict{UInt64, Dict{Symbol, Any}}()
-end
 
 function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                      work::Matrix{T}, workc::Matrix{Complex{T}},
@@ -309,30 +301,27 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                      fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
                      Emin::T, Emax::T, M0::Int,
                      lambda::Vector{T}, q::Matrix{Complex{T}},
-                     mode::Ref{Int}, res::Vector{T}, info::Ref{Int}) where T<:Real
-    state_key = UInt64(objectid(workc))
-    state = get!(() -> Dict{Symbol, Any}(), _feast_hrci_state, state_key)
-    cleanup_state! = () -> pop!(_feast_hrci_state, state_key, nothing)
+                     mode::Ref{Int}, res::Vector{T}, info::Ref{Int};
+                     state::FeastHRCIState{T} = FeastHRCIState{T}()) where T<:Real
 
     if ijob[] == -1
         feastdefault!(fpm)
-        empty!(state)
-        state[:cleanup_state] = cleanup_state!
+        state.initialized = true
 
         info[] = Int(Feast_SUCCESS)
         if N <= 0
             info[] = Int(Feast_ERROR_N)
-            state[:cleanup_state]()
+            state.initialized = false
             return
         end
         if M0 <= 0 || M0 > N
             info[] = Int(Feast_ERROR_M0)
-            state[:cleanup_state]()
+            state.initialized = false
             return
         end
         if Emin >= Emax
             info[] = Int(Feast_ERROR_EMIN_EMAX)
-            state[:cleanup_state]()
+            state.initialized = false
             return
         end
 
@@ -341,13 +330,13 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             contour = feast_contour(Emin, Emax, fpm)
         end
 
-        state[:Zne] = copy(contour.Zne)
-        state[:Wne] = copy(contour.Wne)
-        state[:ne] = length(contour.Zne)
-        state[:eps] = feast_tolerance(fpm)
-        state[:maxloop] = fpm[4]
-        state[:e] = 1
-        state[:M] = 0
+        state.Zne = copy(contour.Zne)
+        state.Wne = copy(contour.Wne)
+        state.ne = length(contour.Zne)
+        state.eps = feast_tolerance(fpm)
+        state.maxloop = fpm[4]
+        state.e = 1
+        state.M = 0
 
         loop[] = 0
 
@@ -379,54 +368,45 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         end
 
         # Save initial subspace for moment accumulation
-        state[:Q0] = copy(workc[:, 1:M0])
-        # Initialize Q_proj buffer for accumulating filtered subspace
-        state[:Q_proj] = zeros(Complex{T}, N, M0)
+        state.Q0 = copy(workc[:, 1:M0])
+        state.Q_proj = zeros(Complex{T}, N, M0)
 
-        Ze[] = state[:Zne][1]
+        Ze[] = state.Zne[1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
         return
     end
 
     if ijob[] == Int(Feast_RCI_FACTORIZE)
         ijob[] = Int(Feast_RCI_SOLVE)
-        Q0 = get(state, :Q0, nothing)
-        if Q0 === nothing
-            Q0 = copy(workc[:, 1:M0])
-            state[:Q0] = Q0
-        end
+        Q0 = state.Q0
         M_current = size(Q0, 2)
         workc[:, 1:M_current] = Q0
         return
     end
 
     if ijob[] == Int(Feast_RCI_SOLVE)
-        if !haskey(state, :Zne)
+        if !state.initialized
             contour = feast_get_custom_contour(fpm)
             if contour === nothing
                 contour = feast_contour(Emin, Emax, fpm)
             end
-            state[:Zne] = copy(contour.Zne)
-            state[:Wne] = copy(contour.Wne)
-            state[:ne] = length(contour.Zne)
-            state[:e] = 1
+            state.Zne = copy(contour.Zne)
+            state.Wne = copy(contour.Wne)
+            state.ne = length(contour.Zne)
+            state.e = 1
+            state.initialized = true
         end
 
-        e = get(state, :e, 1)
-        ne = state[:ne]
-        Zne = state[:Zne]
-        Wne = state[:Wne]
+        e = state.e
+        ne = state.ne
+        Zne = state.Zne
+        Wne = state.Wne
 
         # Use saved initial subspace Q0 and current solution in workc
-        Q0 = get!(state, :Q0) do
-            copy(workc[:, 1:M0])
-        end
-        M_current = size(Q0, 2)  # Current subspace size (M0 initially, M during refinement)
+        Q0 = state.Q0
+        M_current = size(Q0, 2)
 
-        # Get or initialize Q_proj buffer for filtered subspace
-        Q_proj = get!(state, :Q_proj) do
-            zeros(Complex{T}, N, M_current)
-        end
+        Q_proj = state.Q_proj
 
         # Reset Q_proj at start of new contour loop
         if e == 1
@@ -443,19 +423,17 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         zAq[1:M_current, 1:M_current] .+= weight * temp
         zSq[1:M_current, 1:M_current] .+= weight * Zne[e] * temp
 
-        state[:e] = e + 1
+        state.e = e + 1
 
         if e < ne
             Ze[] = Zne[e+1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return
         else
-            state[:e] = 1
+            state.e = 1
             try
-                Q0 = get!(state, :Q0) do
-                    copy(workc[:, 1:M0])
-                end
-                M_current = size(Q0, 2)  # Current subspace size
+                Q0 = state.Q0
+                M_current = size(Q0, 2)
 
                 # Solve generalized eigenvalue problem: Sq*v = lambda*Aq*v
                 F = eigen(zSq[1:M_current, 1:M_current], zAq[1:M_current, 1:M_current])
@@ -463,7 +441,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 v_red = F.vectors
 
                 # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q0
-                Q_proj = state[:Q_proj]
+                Q_proj = state.Q_proj
                 Q_proj_real = real.(Q_proj[:, 1:M_current])
                 q[:, 1:M_current] = Q_proj_real * v_red[:, 1:M_current]
                 lambda[1:M_current] = lambda_red[1:M_current]
@@ -479,41 +457,44 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
                 M = length(inside_indices)
 
-                state[:M] = M
+                state.M = M
 
                 if M == 0
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     ijob[] = Int(Feast_RCI_DONE)
-                    state[:cleanup_state]()
+                    state.initialized = false
                     return
                 end
 
+                # Request caller to compute A * q[:, 1:M] and store result in workc[:, 1:M].
+                # The residual will be computed as ||workc[:,j] - lambda[j]*q[:,j]||.
                 ijob[] = Int(Feast_RCI_MULT_A)
                 mode[] = M
                 return
             catch err
                 info[] = Int(Feast_ERROR_LAPACK)
                 ijob[] = Int(Feast_RCI_DONE)
-                state[:cleanup_state]()
+                state.initialized = false
                 return
             end
         end
     end
 
     if ijob[] == Int(Feast_RCI_MULT_A)
-        M = get(state, :M, 0)
+        # Caller must have computed A * q[:, 1:M] into workc[:, 1:M]
+        M = state.M
         for j in 1:M
             res[j] = norm(workc[:, j] - lambda[j] * q[:, j])
         end
         epsout[] = maximum(res[1:M])
-        eps = state[:eps]
-        maxloop = state[:maxloop]
+        eps = state.eps
+        maxloop = state.maxloop
 
         if epsout[] <= eps || loop[] >= maxloop
             feast_sort!(lambda, q, res, M)
             mode[] = M
             ijob[] = Int(Feast_RCI_DONE)
-            state[:cleanup_state]()
+            state.initialized = false
             return
         else
             loop[] += 1
@@ -522,32 +503,34 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             # Use full subspace (M0 columns) for next iteration
             workc[:, 1:M0] = q[:, 1:M0]
             # Update Q0 for next refinement iteration with full subspace
-            state[:Q0] = copy(q[:, 1:M0])
-            Ze[] = state[:Zne][1]
+            state.Q0 = copy(q[:, 1:M0])
+            Ze[] = state.Zne[1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return
         end
     end
 
     if ijob[] == Int(Feast_RCI_DONE)
-        state[:cleanup_state]()
+        state.initialized = false
         return
     end
 
-    state[:cleanup_state]()
+    state.initialized = false
     error("FEAST RCI kernel (Hermitian): Invalid job code ijob=$(ijob[]). " *
           "Expected: -1 (init), $(Int(Feast_RCI_FACTORIZE)) (factorize), " *
           "$(Int(Feast_RCI_SOLVE)) (solve), $(Int(Feast_RCI_MULT_A)) (mult_a), " *
           "or $(Int(Feast_RCI_DONE)) (done)")
 end
+
 function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                      work::Matrix{T}, workc::Matrix{Complex{T}},
-                     Aq::Matrix{Complex{T}}, Sq::Matrix{Complex{T}}, 
+                     Aq::Matrix{Complex{T}}, Sq::Matrix{Complex{T}},
                      fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
                      Emid::Complex{T}, r::T, M0::Int,
-                     lambda::Vector{Complex{T}}, q::Matrix{Complex{T}}, 
-                     mode::Ref{Int}, res::Vector{T}, info::Ref{Int}) where T<:Real
-    
+                     lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
+                     mode::Ref{Int}, res::Vector{T}, info::Ref{Int};
+                     state::FeastGRCIState{T} = FeastGRCIState{T}()) where T<:Real
+
     # Feast RCI for general (non-Hermitian) eigenvalue problems
     # Uses circular contour in complex plane
 
@@ -556,13 +539,6 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     # fpm[51] = total integration points ne
     # fpm[52] = stored M value
     # fpm[53] = initialization flag (1 = initialized, 0 = not initialized)
-
-    @static if !@isdefined(_feast_grci_state)
-        global _feast_grci_state = Dict{UInt64, Dict{Symbol, Any}}()
-    end
-    state_key = UInt64(objectid(Aq))
-    state = get!(() -> Dict{Symbol, Any}(), _feast_grci_state, state_key)
-    cleanup_state! = () -> pop!(_feast_grci_state, state_key, nothing)
 
     if ijob[] == -1  # Initialization
         feastdefault!(fpm)
@@ -596,7 +572,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         fpm[53] = 1
 
         loop[] = 0
-        
+
         # Initialize workspace arrays
         fill!(Aq, zero(Complex{T}))
         fill!(Sq, zero(Complex{T}))
@@ -605,17 +581,13 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
         fill!(q, zero(Complex{T}))
         fill!(res, zero(T))
-        
+
         # Initialize workc with initial subspace
-        # Check if user provides initial guess (fpm[5] = 1) or use random vectors
         if fpm[5] == 1
-            # User should have provided initial guess in workc
-            # Normalize the columns to ensure numerical stability
             for j in 1:M0
                 if norm(workc[:, j]) > 0
                     workc[:, j] ./= norm(workc[:, j])
                 else
-                    # If zero vector provided, use random
                     for i in 1:N
                         workc[i, j] = Complex{T}(randn(T), randn(T))
                     end
@@ -623,42 +595,36 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 end
             end
         else
-            # Generate random initial subspace
             for j in 1:M0
                 for i in 1:N
                     workc[i, j] = Complex{T}(randn(T), randn(T))
                 end
-                # Normalize each column
                 workc[:, j] ./= norm(workc[:, j])
             end
         end
-        
+
         # work is used for real intermediate results
         fill!(work, zero(T))
-        state[:Q0] = copy(workc[:, 1:M0])
+        state.Q0 = copy(workc[:, 1:M0])
+        state.initialized = true
 
         Ze[] = contour.Zne[1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
         return
     end
-    
+
     # Main Feast iteration loop for general (non-Hermitian) eigenvalue problems
     if ijob[] == Int(Feast_RCI_FACTORIZE)
         # User should factorize (Ze*B - A) for general matrices
         ijob[] = Int(Feast_RCI_SOLVE)
-        Q0 = get(state, :Q0, nothing)
-        if Q0 === nothing
-            Q0 = copy(workc[:, 1:M0])
-            state[:Q0] = Q0
-        end
+        Q0 = state.Q0
         M_current = size(Q0, 2)
         workc[:, 1:M_current] = Q0
         return
     end
-    
+
     if ijob[] == Int(Feast_RCI_SOLVE)
         # User has solved linear systems (Ze*B - A)*workc = rhs
-        # For general eigenvalue problems: accumulate subspace Q (not moment matrices!)
         e = fpm[50]  # Get current integration point from fpm
         ne = fpm[51]  # Get total integration points from fpm
 
@@ -670,9 +636,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         Zne = contour.Zne
         Wne = contour.Wne
 
-        # CORRECT ALGORITHM FOR GENERAL PROBLEMS:
-        # Accumulate subspace vectors Q (not moment matrices!)
-        # Q += Wne[e] * workc
+        # Accumulate subspace vectors Q
         for j in 1:M0
             for i in 1:N
                 q[i, j] += Wne[e] * workc[i, j]
@@ -680,23 +644,20 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         end
 
         # Move to next integration point
-        fpm[50] = e + 1  # Store incremented counter in fpm
+        fpm[50] = e + 1
 
         if e < ne
-            # More integration points to process
             Ze[] = Zne[e+1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return
         else
             # All integration points processed
-            # Now form reduced matrices zBq = Q^H * B * Q and zAq = Q^H * A * Q
             fpm[50] = 1  # Reset for next refinement loop
 
-            # First, ask user to compute work = B*Q
-            # (For standard problems B=I, this is just Q)
-            fill!(work, zero(T))  # Will receive real(B*Q)
+            # Ask user to compute work = B*Q
+            fill!(work, zero(T))
             ijob[] = Int(Feast_RCI_MULT_B)
-            mode[] = M0  # Process all M0 columns
+            mode[] = M0
             return
         end
     end
@@ -707,27 +668,26 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         Sq[1:M0, 1:M0] = q[:, 1:M0]' * workc[:, 1:M0]
 
         # Now ask user to compute work = A*Q
-        fill!(workc, zero(Complex{T}))  # Will receive A*Q
+        fill!(workc, zero(Complex{T}))
         ijob[] = Int(Feast_RCI_MULT_A)
-        mode[] = M0  # Process all M0 columns (for forming zAq)
-        fpm[54] = 1  # Flag: computing A*Q for projection (not residual)
+        mode[] = M0
+        state.mult_a_for_projection = true  # Next MULT_A is for forming zAq
         return
     end
 
     if ijob[] == Int(Feast_RCI_MULT_A)
-        # Check if this is for projection or residual
-        if fpm[54] == 1
+        if state.mult_a_for_projection
             # Computing zAq = Q^H * A * Q
             Aq[1:M0, 1:M0] = q[:, 1:M0]' * workc[:, 1:M0]
-            fpm[54] = 0  # Clear flag
+            state.mult_a_for_projection = false
 
             # Now solve reduced eigenvalue problem: zAq*v = lambda*zBq*v
             try
                 F = eigen(Aq[1:M0, 1:M0], Sq[1:M0, 1:M0])
-                lambda_red = F.values  # Complex eigenvalues
+                lambda_red = F.values
                 v_red = F.vectors
 
-                # Count eigenvalues inside circular region |lambda - Emid| <= r
+                # Count eigenvalues inside circular region
                 M = 0
                 indices = Int[]
                 for i in 1:M0
@@ -738,19 +698,17 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                     end
                 end
 
-                fpm[52] = M  # Store M in fpm
+                fpm[52] = M
 
-                # Check if any eigenvalues found
                 if M == 0
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     ijob[] = Int(Feast_RCI_DONE)
-                    fpm[53] = 0  # Clear initialization flag
-                    cleanup_state!()
+                    fpm[53] = 0
+                    state.initialized = false
                     return
                 end
 
                 # Project ALL M0 eigenvectors to maintain full subspace
-                # q_new = Q * v_red (where Q is the accumulated filtered subspace)
                 fill!(workc, zero(Complex{T}))
                 for idx in 1:M0
                     for k in 1:N
@@ -764,7 +722,6 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 outside_indices = setdiff(1:M0, indices)
                 perm = vcat(indices, outside_indices)
 
-                # Apply permutation and store eigenvalues
                 lambda_temp = copy(lambda_red)
                 workc_temp = copy(workc[:, 1:M0])
                 for (new_idx, old_idx) in enumerate(perm)
@@ -784,64 +741,53 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 q[:, 1:M0] = workc[:, 1:M0]
 
                 # Now compute residuals: need A*q_new
-                fill!(workc, zero(Complex{T}))  # Will receive A*q
+                fill!(workc, zero(Complex{T}))
                 ijob[] = Int(Feast_RCI_MULT_A)
-                mode[] = M  # Number of eigenvectors
-                fpm[54] = 0  # Flag: computing for residual
+                mode[] = M
+                state.mult_a_for_projection = false  # Next MULT_A is for residual
                 return
 
             catch e
                 info[] = Int(Feast_ERROR_LAPACK)
                 ijob[] = Int(Feast_RCI_DONE)
-                fpm[53] = 0  # Clear initialization flag
-                cleanup_state!()
+                fpm[53] = 0
+                state.initialized = false
                 return
             end
         else
             # Computing residuals
-            M = fpm[52]  # Get M from fpm
+            M = fpm[52]
 
             for j in 1:M
-                # Residual: r = A*q - lambda*B*q
-                # For standard problems (B=I): r = A*q - lambda*q
-                # workc contains A*q (complex result from user computation)
                 residual = zeros(Complex{T}, N)
                 for i in 1:N
-                    # workc[i,j] contains (A*q)[i] for j-th eigenvector
                     residual[i] = workc[i, j] - lambda[j] * q[i, j]
                 end
                 res[j] = norm(residual)
             end
 
-            # Check convergence
             epsout[] = maximum(res[1:M])
 
             eps_tolerance = feast_tolerance(fpm)
             maxloop = fpm[4]
 
             if epsout[] <= eps_tolerance || loop[] >= maxloop
-                # Converged or maximum iterations reached
-                # Sort by eigenvalue magnitude (for complex eigenvalues)
                 feast_sort_general!(lambda, q, res, M)
                 mode[] = M
                 ijob[] = Int(Feast_RCI_DONE)
-                fpm[53] = 0  # Clear initialization flag
-                cleanup_state!()
+                fpm[53] = 0
+                state.initialized = false
                 return
             else
                 # Start new refinement loop
                 loop[] += 1
 
-                # Use ALL M0 eigenvectors from q for next iteration
-                # (q already contains the properly reordered eigenvectors)
                 q_saved = copy(q[:, 1:M0])
 
-                # Reset accumulators for next iteration
                 fill!(Aq, zero(Complex{T}))
                 fill!(Sq, zero(Complex{T}))
-                fill!(q, zero(Complex{T}))  # q will accumulate new subspace
+                fill!(q, zero(Complex{T}))
 
-                # Use all previous eigenvectors as initial guess
                 workc[:, 1:M0] = q_saved
 
                 # Get contour for next refinement loop
@@ -849,10 +795,10 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 if contour === nothing
                     contour = feast_gcontour(Emid, r, fpm)
                 end
-                fpm[50] = 1  # Reset integration point counter
+                fpm[50] = 1
 
                 Ze[] = contour.Zne[1]
-                state[:Q0] = copy(workc[:, 1:M0])
+                state.Q0 = copy(workc[:, 1:M0])
                 ijob[] = Int(Feast_RCI_FACTORIZE)
                 return
             end
@@ -863,7 +809,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     if ijob[] != -1 && ijob[] != Int(Feast_RCI_FACTORIZE) &&
        ijob[] != Int(Feast_RCI_SOLVE) && ijob[] != Int(Feast_RCI_MULT_A) &&
        ijob[] != Int(Feast_RCI_MULT_B) && ijob[] != Int(Feast_RCI_DONE)
-        cleanup_state!()
+        state.initialized = false
         error("FEAST RCI kernel (General): Invalid job code ijob=$(ijob[]). " *
               "Expected: -1 (init), $(Int(Feast_RCI_FACTORIZE)) (factorize), " *
               "$(Int(Feast_RCI_SOLVE)) (solve), $(Int(Feast_RCI_MULT_B)) (mult_b), " *
@@ -874,10 +820,6 @@ end
 ############################
 # Polynomial RCI interfaces
 ############################
-
-@static if !@isdefined(_feast_poly_rci_state)
-    global _feast_poly_rci_state = Dict{UInt64, Dict{Symbol, Any}}()
-end
 
 function feast_grcipevx!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
                          work::Matrix{Complex{T}}, workc::Matrix{Complex{T}},
@@ -951,12 +893,6 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
     # fpm[51] = total integration points ne
     # fpm[52] = stored M value
     # fpm[53] = initialization flag (1 = initialized, 0 = not initialized)
-
-    @static if !@isdefined(_feast_poly_rci_state)
-        global _feast_poly_rci_state = Dict{UInt64, Dict{Symbol, Any}}()
-    end
-    state_key = UInt64(objectid(Aq))
-    cleanup_state! = () -> pop!(_feast_poly_rci_state, state_key, nothing)
 
     if ijob[] == -1
         feastdefault!(fpm)
@@ -1066,7 +1002,6 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
                 info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                 ijob[] = Int(Feast_RCI_DONE)
                 fpm[53] = 0  # Clear initialization flag
-                cleanup_state!()
                 return
             end
 
@@ -1078,7 +1013,6 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
             info[] = Int(Feast_ERROR_LAPACK)
             ijob[] = Int(Feast_RCI_DONE)
             fpm[53] = 0  # Clear initialization flag
-            cleanup_state!()
             return
         end
     end
@@ -1101,7 +1035,6 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
             mode[] = M
             ijob[] = Int(Feast_RCI_DONE)
             fpm[53] = 0  # Clear initialization flag
-            cleanup_state!()
             return
         else
             loop[] += 1
@@ -1116,7 +1049,6 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
     end
 
     if ijob[] != Int(Feast_RCI_DONE)
-        cleanup_state!()
         error("FEAST polynomial RCI kernel: unexpected ijob=$(ijob[]).")
     end
 end

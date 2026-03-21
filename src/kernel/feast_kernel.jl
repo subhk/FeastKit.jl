@@ -55,12 +55,13 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
         if fpm[5] == 1
             # User-provided initial subspace: normalize columns
+            fallback_rng = MersenneTwister(hash((N, M0, :fallback)))
             for j in 1:M0
                 if norm(work[:, j]) > 0
                     work[:, j] ./= norm(work[:, j])
                 else
                     for i in 1:N
-                        work[i, j] = randn(T)
+                        work[i, j] = randn(fallback_rng, T)
                     end
                     work[:, j] ./= norm(work[:, j])
                 end
@@ -197,9 +198,13 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         # Caller must have computed A * q[:, 1:M] into work[:, 1:M]
         M = fpm[52]  # Get M from fpm
 
+        residual = zeros(T, N)
         for j in 1:M
             # Relative residual: ||Ax - λx|| / max(|λ|, 1) to avoid scale dependence
-            res[j] = norm(work[:, j] - lambda[j] * q[:, j]) / max(abs(lambda[j]), one(T))
+            @inbounds for i in 1:N
+                residual[i] = work[i, j] - lambda[j] * q[i, j]
+            end
+            res[j] = norm(residual) / max(abs(lambda[j]), one(T))
         end
         epsout[] = maximum(res[1:M])
 
@@ -347,12 +352,13 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
         if fpm[5] == 1
             # User-provided initial subspace: normalize columns
+            fallback_rng = MersenneTwister(hash((N, M0, :fallback_hrci)))
             for j in 1:M0
                 if norm(workc[:, j]) > 0
                     workc[:, j] ./= norm(workc[:, j])
                 else
                     for i in 1:N
-                        workc[i, j] = Complex{T}(randn(T), randn(T))
+                        workc[i, j] = Complex{T}(randn(fallback_rng, T), zero(T))
                     end
                     workc[:, j] ./= norm(workc[:, j])
                 end
@@ -479,9 +485,13 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     if ijob[] == Int(Feast_RCI_MULT_A)
         # Caller must have computed A * q[:, 1:M] into workc[:, 1:M]
         M = state.M
+        residual = zeros(Complex{T}, N)
         for j in 1:M
             # Relative residual: ||Ax - λx|| / max(|λ|, 1)
-            res[j] = norm(workc[:, j] - lambda[j] * q[:, j]) / max(abs(lambda[j]), one(T))
+            @inbounds for i in 1:N
+                residual[i] = workc[i, j] - lambda[j] * q[i, j]
+            end
+            res[j] = norm(residual) / max(abs(lambda[j]), one(T))
         end
         epsout[] = maximum(res[1:M])
         eps = state.eps
@@ -586,12 +596,13 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         # Initialize workc with initial subspace
         if fpm[5] == 1
             # User-provided initial subspace: normalize columns
+            fallback_rng = MersenneTwister(hash((N, M0, :fallback_grci)))
             for j in 1:M0
                 if norm(workc[:, j]) > 0
                     workc[:, j] ./= norm(workc[:, j])
                 else
                     for i in 1:N
-                        workc[i, j] = Complex{T}(randn(T), randn(T))
+                        workc[i, j] = Complex{T}(randn(fallback_rng, T), randn(fallback_rng, T))
                     end
                     workc[:, j] ./= norm(workc[:, j])
                 end

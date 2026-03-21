@@ -213,10 +213,11 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
 
             # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q_basis
             # Q_proj = spectral projector applied to Q_basis via contour integration
-            Q_proj_real = real.(Q_proj)
+            # For complex Hermitian problems, Q_proj is complex — do NOT take real()
+            # since eigenvectors of complex Hermitian matrices are genuinely complex.
             for idx in 1:M0
                 coeffs = Vector{T}(view(v_red, :, idx))
-                mul!(view(solutions, :, idx), Q_proj_real, coeffs)
+                mul!(view(solutions, :, idx), Q_proj, Complex{T}.(coeffs))
                 lambda_vec[idx] = convert(T, lambda_red[idx])
             end
 

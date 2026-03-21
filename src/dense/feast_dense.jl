@@ -254,7 +254,8 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
                     mul!(Bq_vec, B_matrix, q_col)
                     @. residual_vec = residual_vec - lambda_vec[j] * Bq_vec
                 end
-                res_val = norm(residual_vec)
+                # Relative residual: normalize by max(|λ|, 1)
+                res_val = norm(residual_vec) / max(abs(lambda_vec[j]), one(T))
                 res_vec[j] = res_val
                 max_res = max(max_res, res_val)
             end

@@ -188,6 +188,9 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
     # Allocate buffer for accumulated filtered subspace
     Q_proj = zeros(Complex{T}, N, M0)
 
+    # Pre-allocate shifted matrix for direct solver to avoid repeated sparse allocation
+    shifted_matrix = solver_is_direct ? copy(B_matrix) : nothing
+
     for loop_idx in 0:maxloop
         loop_count = loop_idx
         fill!(zAq, zero(Complex{T}))
@@ -207,7 +210,8 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
             end
 
             if solver_is_direct
-                shifted_matrix = z * B_matrix - A
+                # Update shifted matrix in-place: shifted = z*B - A
+                @. shifted_matrix.nzval = z * B_matrix.nzval - A.nzval
                 try
                     solver_factor = lu(shifted_matrix)
                     solutions .= solver_factor \ rhs_buffer
@@ -306,7 +310,8 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                     mul!(Bq_vec, B_matrix, q_col)
                     @. residual_vec = residual_vec - lambda_vec[j] * Bq_vec
                 end
-                res_val = norm(residual_vec)
+                # Relative residual: normalize by max(|λ|, 1)
+                res_val = norm(residual_vec) / max(abs(lambda_vec[j]), one(T))
                 res_vec[j] = res_val
                 max_res = max(max_res, res_val)
             end
@@ -1065,7 +1070,8 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                 q_col = view(q_vectors, :, j)
                 A_matvec!(residual_vec, q_col)
                 @. residual_vec = residual_vec - lambda_vec[j] * q_col
-                res_val = norm(residual_vec)
+                # Relative residual: normalize by max(|λ|, 1)
+                res_val = norm(residual_vec) / max(abs(lambda_vec[j]), one(T))
                 res_vec[j] = res_val
                 max_res = max(max_res, res_val)
             end

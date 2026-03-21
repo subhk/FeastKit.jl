@@ -132,8 +132,6 @@ function feastdefault!(fpm::Vector{Int})
         if dig[3] == 2
             fpm[4] = 50  # IFEAST needs more iterations
         end
-    elseif fpm[4] < 0
-        throw(ArgumentError("Invalid fpm[4]=$(fpm[4]): must be non-negative"))
     end
 
     # fpm[5]: Initial subspace (0=random, 1=user-provided)
@@ -269,7 +267,9 @@ function feastdefault!(fpm::Vector{Int})
 
     # fpm[30]: Routine name code (set by caller)
     # fpm[31]: FEAST version * 10 (internal)
-    fpm[31] = 40  # FEAST v4.0
+    if fpm[31] == FEAST_UNINITIALIZED
+        fpm[31] = 40  # FEAST v4.0
+    end
 
     # fpm[32]: Stochastic estimate - number of steps/trials
     if fpm[32] == FEAST_UNINITIALIZED

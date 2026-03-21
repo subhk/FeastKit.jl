@@ -54,6 +54,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         fill!(workc, zero(Complex{T}))
 
         if fpm[5] == 1
+            # User-provided initial subspace: normalize columns
             for j in 1:M0
                 if norm(work[:, j]) > 0
                     work[:, j] ./= norm(work[:, j])
@@ -65,12 +66,8 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 end
             end
         else
-            for j in 1:M0
-                for i in 1:N
-                    work[i, j] = randn(T)
-                end
-                work[:, j] ./= norm(work[:, j])
-            end
+            # Deterministic seeded random subspace for reproducibility
+            _feast_seeded_subspace!(view(work, :, 1:M0))
         end
 
         state.Q0 = copy(work[:, 1:M0])
@@ -201,7 +198,8 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         M = fpm[52]  # Get M from fpm
 
         for j in 1:M
-            res[j] = norm(work[:, j] - lambda[j] * q[:, j])
+            # Relative residual: ||Ax - λx|| / max(|λ|, 1) to avoid scale dependence
+            res[j] = norm(work[:, j] - lambda[j] * q[:, j]) / max(abs(lambda[j]), one(T))
         end
         epsout[] = maximum(res[1:M])
 
@@ -348,6 +346,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         fill!(work, zero(T))
 
         if fpm[5] == 1
+            # User-provided initial subspace: normalize columns
             for j in 1:M0
                 if norm(workc[:, j]) > 0
                     workc[:, j] ./= norm(workc[:, j])
@@ -359,12 +358,8 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 end
             end
         else
-            for j in 1:M0
-                for i in 1:N
-                    workc[i, j] = Complex{T}(randn(T), randn(T))
-                end
-                workc[:, j] ./= norm(workc[:, j])
-            end
+            # Deterministic seeded random subspace for reproducibility
+            _feast_seeded_subspace_complex!(view(workc, :, 1:M0))
         end
 
         # Save initial subspace for moment accumulation
@@ -441,9 +436,10 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 v_red = F.vectors
 
                 # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q0
+                # For complex Hermitian problems, Q_proj is complex — do NOT take real()
+                # since eigenvectors of complex Hermitian matrices are genuinely complex.
                 Q_proj = state.Q_proj
-                Q_proj_real = real.(Q_proj[:, 1:M_current])
-                q[:, 1:M_current] = Q_proj_real * v_red[:, 1:M_current]
+                q[:, 1:M_current] = Q_proj[:, 1:M_current] * v_red[:, 1:M_current]
                 lambda[1:M_current] = lambda_red[1:M_current]
 
                 # Reorder: put eigenvalues inside the interval first
@@ -484,7 +480,8 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         # Caller must have computed A * q[:, 1:M] into workc[:, 1:M]
         M = state.M
         for j in 1:M
-            res[j] = norm(workc[:, j] - lambda[j] * q[:, j])
+            # Relative residual: ||Ax - λx|| / max(|λ|, 1)
+            res[j] = norm(workc[:, j] - lambda[j] * q[:, j]) / max(abs(lambda[j]), one(T))
         end
         epsout[] = maximum(res[1:M])
         eps = state.eps
@@ -584,6 +581,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
         # Initialize workc with initial subspace
         if fpm[5] == 1
+            # User-provided initial subspace: normalize columns
             for j in 1:M0
                 if norm(workc[:, j]) > 0
                     workc[:, j] ./= norm(workc[:, j])
@@ -595,12 +593,8 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 end
             end
         else
-            for j in 1:M0
-                for i in 1:N
-                    workc[i, j] = Complex{T}(randn(T), randn(T))
-                end
-                workc[:, j] ./= norm(workc[:, j])
-            end
+            # Deterministic seeded random subspace for reproducibility
+            _feast_seeded_subspace_complex!(view(workc, :, 1:M0))
         end
 
         # work is used for real intermediate results
@@ -763,7 +757,8 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 for i in 1:N
                     residual[i] = workc[i, j] - lambda[j] * q[i, j]
                 end
-                res[j] = norm(residual)
+                # Relative residual: ||Ax - λx|| / max(|λ|, 1)
+                res[j] = norm(residual) / max(abs(lambda[j]), one(T))
             end
 
             epsout[] = maximum(res[1:M])
@@ -1022,7 +1017,8 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
         max_res = zero(T)
         for j in 1:M
             residual = view(workc, :, j) .- lambda[j] .* view(q, :, j)
-            res[j] = norm(residual)
+            # Relative residual: normalize by max(|λ|, 1)
+            res[j] = norm(residual) / max(abs(lambda[j]), one(T))
             max_res = max(max_res, res[j])
         end
         epsout[] = max_res

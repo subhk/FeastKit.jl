@@ -48,7 +48,6 @@ export Feast_RCI_INIT, Feast_RCI_DONE, Feast_RCI_FACTORIZE, Feast_RCI_SOLVE,
        Feast_RCI_MULT_A, Feast_RCI_MULT_A_H, Feast_RCI_MULT_B, Feast_RCI_MULT_B_H,
        Feast_RCI_BIORTHOG, Feast_RCI_REDUCED_SYSTEM
 export feast_sparse_info
-export nworkers
 export eigvals_feast, eigen_feast
 export feast_parallel_info, feast_parallel_comparison
 export determine_parallel_backend, mpi_available, feast_parallel_capabilities

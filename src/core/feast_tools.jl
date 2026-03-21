@@ -660,9 +660,9 @@ function feast_residual!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     N = size(A, 1)
     
     for j in 1:M
-        # Compute residual: r = A*q - lambda*B*q
+        # Relative residual: ||A*q - λ*B*q|| / max(|λ|, 1)
         r = A * q[:, j] - lambda[j] * (B * q[:, j])
-        res[j] = norm(r)
+        res[j] = norm(r) / max(abs(lambda[j]), one(T))
     end
     
     return nothing

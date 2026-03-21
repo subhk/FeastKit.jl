@@ -7,12 +7,11 @@ using Printf
 # Using an Int key (instead of IdDict keyed by Vector identity) ensures that
 # copy(fpm) preserves the contour association since the ID travels with the data.
 const FEAST_CUSTOM_CONTOURS = Dict{Int, FeastContour}()
-const _feast_contour_next_id = Ref(1)
+const _feast_contour_next_id = Threads.Atomic{Int}(1)
+const _feast_contour_lock = ReentrantLock()
 
 function _next_contour_id()
-    id = _feast_contour_next_id[]
-    _feast_contour_next_id[] += 1
-    return id
+    return Threads.atomic_add!(_feast_contour_next_id, 1)
 end
 
 function _copy_contour(contour::FeastContour{T}) where T<:Real
@@ -32,17 +31,19 @@ end
 
 function feast_set_custom_contour!(fpm::Vector{Int}, contour::FeastContour{T}) where T<:Real
     validate_contour(contour.Zne, contour.Wne)
-    # Clear previous contour if one was registered
-    old_id = fpm[29]
-    if old_id > 0
-        delete!(FEAST_CUSTOM_CONTOURS, old_id)
+    lock(_feast_contour_lock) do
+        # Clear previous contour if one was registered
+        old_id = fpm[29]
+        if old_id > 0
+            delete!(FEAST_CUSTOM_CONTOURS, old_id)
+        end
+        # Assign a new unique ID and store contour
+        id = _next_contour_id()
+        FEAST_CUSTOM_CONTOURS[id] = _copy_contour(contour)
+        fpm[29] = id   # Store ID in fpm (any value > 0 means custom contour active)
+        fpm[2] = length(contour.Zne)
+        return FEAST_CUSTOM_CONTOURS[id]
     end
-    # Assign a new unique ID and store contour
-    id = _next_contour_id()
-    FEAST_CUSTOM_CONTOURS[id] = _copy_contour(contour)
-    fpm[29] = id   # Store ID in fpm (any value > 0 means custom contour active)
-    fpm[2] = length(contour.Zne)
-    return FEAST_CUSTOM_CONTOURS[id]
 end
 
 function feast_set_custom_contour!(fpm::Vector{Int},
@@ -60,15 +61,32 @@ function feast_get_custom_contour(fpm::Vector{Int})
     if id <= 0
         return nothing
     end
-    return get(FEAST_CUSTOM_CONTOURS, id, nothing)
+    lock(_feast_contour_lock) do
+        return get(FEAST_CUSTOM_CONTOURS, id, nothing)
+    end
 end
 
 function feast_clear_custom_contour!(fpm::Vector{Int})
-    id = fpm[29]
-    if id > 0
-        delete!(FEAST_CUSTOM_CONTOURS, id)
+    lock(_feast_contour_lock) do
+        id = fpm[29]
+        if id > 0
+            delete!(FEAST_CUSTOM_CONTOURS, id)
+        end
+        fpm[29] = 0
     end
-    fpm[29] = 0
+    return nothing
+end
+
+"""
+    feast_clear_all_contours!()
+
+Remove all entries from the custom contour registry, freeing memory.
+Call this in long-running applications to prevent unbounded registry growth.
+"""
+function feast_clear_all_contours!()
+    lock(_feast_contour_lock) do
+        empty!(FEAST_CUSTOM_CONTOURS)
+    end
     return nothing
 end
 

@@ -271,13 +271,13 @@ function mpi_compute_residuals!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     # Compute local residuals
     local_res = zeros(T, M)
     for j in start_idx:min(end_idx, M)
-        # Residual: ||A*q - lambda*B*q||
+        # Relative residual: ||A*q - λ*B*q|| / max(|λ|, 1)
         Aq = A * q[:, j]
         Bq = B * q[:, j]
         residual = Aq - lambda[j] * Bq
-        local_res[j] = norm(residual)
+        local_res[j] = norm(residual) / max(abs(lambda[j]), one(eltype(lambda)))
     end
-    
+
     # Reduce residuals across all ranks
     MPI.Allreduce!(local_res, res, MPI.SUM, comm)
 end
@@ -485,9 +485,9 @@ function mpi_compute_sparse_residuals!(A::SparseMatrixCSC{T,Int}, B::SparseMatri
         Aq = A * q[:, j]
         Bq = B * q[:, j]
         residual = Aq - lambda[j] * Bq
-        local_res[j] = norm(residual)
+        local_res[j] = norm(residual) / max(abs(lambda[j]), one(eltype(lambda)))
     end
-    
+
     # Reduce across ranks
     MPI.Allreduce!(local_res, res, MPI.SUM, comm)
 end

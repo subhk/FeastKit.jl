@@ -60,7 +60,7 @@ function _direct_real_dense_feast(A::AbstractMatrix{T}, B::AbstractMatrix{T}, Em
     res = similar(lambda)
     for (j, val) in enumerate(lambda)
         vec = q[:, j]
-        res[j] = norm(Matrix(A)*vec - val*(Matrix(B)*vec))
+        res[j] = norm(Matrix(A)*vec - val*(Matrix(B)*vec)) / max(abs(val), one(T))
     end
     epsout = maximum(res)
     return FeastResult{T, T}(lambda, q, take, res, 0, epsout, 1)
@@ -81,7 +81,7 @@ function _direct_complex_dense_feast(A::AbstractMatrix{Complex{T}}, B::AbstractM
     res = similar(lambda)
     for (j, val) in enumerate(lambda)
         vec = q[:, j]
-        res[j] = norm(Matrix(A)*vec - val*(Matrix(B)*vec))
+        res[j] = norm(Matrix(A)*vec - val*(Matrix(B)*vec)) / max(abs(val), one(T))
     end
     epsout = maximum(res)
     return FeastResult{T, Complex{T}}(lambda, q, take, res, 0, epsout, 1)

@@ -249,6 +249,7 @@ FeastKit.feast_rational
 FeastKit.feast_rationalx
 FeastKit.feast_grational
 FeastKit.feast_grationalx
+FeastKit.feast_clear_all_contours!
 ```
 
 ### feast_gcontour

@@ -104,59 +104,15 @@ function _is_identity_matrix(B::SparseMatrixCSC)
     return true
 end
 
-# Direct eigensolvers for dense matrices — fast path using LAPACK eigen()
-function _direct_real_dense_feast(A::AbstractMatrix{T}, B::AbstractMatrix{T}, Emin::T, Emax::T, M0::Int) where T<:Real
-    eig = eigen(Symmetric(Matrix(A)), Symmetric(Matrix(B)))
-    vals = eig.values
-    vecs = eig.vectors
-    inside = [i for i in eachindex(vals) if Emin <= vals[i] <= Emax]
-    take = min(length(inside), M0)
-    if take == 0
-        return FeastResult{T, T}(T[], Matrix{T}(undef, size(A,1), 0), 0, T[], Int(Feast_ERROR_NO_CONVERGENCE), zero(T), 0)
-    end
-    idx = inside[1:take]
-    lambda = vals[idx]
-    q = vecs[:, idx]
-    res = similar(lambda)
-    for (j, val) in enumerate(lambda)
-        vec = q[:, j]
-        res[j] = norm(Matrix(A)*vec - val*(Matrix(B)*vec)) / max(abs(val), one(T))
-    end
-    epsout = maximum(res)
-    return FeastResult{T, T}(lambda, q, take, res, 0, epsout, 1)
-end
-
-function _direct_complex_dense_feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}}, Emin::T, Emax::T, M0::Int) where T<:Real
-    eig = eigen(Hermitian(Matrix(A)), Hermitian(Matrix(B)))
-    vals = real.(eig.values)
-    vecs = eig.vectors
-    inside = [i for i in eachindex(vals) if Emin <= vals[i] <= Emax]
-    take = min(length(inside), M0)
-    if take == 0
-        return FeastResult{T, Complex{T}}(T[], Matrix{Complex{T}}(undef, size(A,1), 0), 0, T[], Int(Feast_ERROR_NO_CONVERGENCE), zero(T), 0)
-    end
-    idx = inside[1:take]
-    lambda = vals[idx]
-    q = vecs[:, idx]
-    res = similar(lambda)
-    for (j, val) in enumerate(lambda)
-        vec = q[:, j]
-        res[j] = norm(Matrix(A)*vec - val*(Matrix(B)*vec)) / max(abs(val), one(T))
-    end
-    epsout = maximum(res)
-    return FeastResult{T, Complex{T}}(lambda, q, take, res, 0, epsout, 1)
-end
-
 # Serial Feast execution
-# Dense matrices use direct LAPACK eigensolver (fast and reliable)
-# Sparse matrices use iterative FEAST contour integration
+# All matrix types (dense and sparse) use the FEAST contour integration solver
 function feast_serial(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{T,T}, M0::Int, fpm::Vector{Int}) where T<:Real
     Emin, Emax = interval
     elem_type = eltype(A)
 
     if elem_type <: Real
         if isa(A, Matrix) && isa(B, Matrix)
-            return _direct_real_dense_feast(A, B, Emin, Emax, M0)
+            return feast_sygv!(Matrix{Float64}(A), Matrix{Float64}(B), Emin, Emax, M0, fpm)
         elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
             if _is_identity_matrix(B)
                 return feast_scsrev!(A, Emin, Emax, M0, fpm)
@@ -168,7 +124,7 @@ function feast_serial(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{T,T}
         end
     elseif elem_type <: Complex
         if isa(A, Matrix) && isa(B, Matrix)
-            return _direct_complex_dense_feast(A, B, Emin, Emax, M0)
+            return feast_hegv!(Matrix{Complex{T}}(A), Matrix{Complex{T}}(B), Emin, Emax, M0, fpm)
         elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
             if _is_identity_matrix(B)
                 return feast_hcsrev!(A, Emin, Emax, M0, fpm)

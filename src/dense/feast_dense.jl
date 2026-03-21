@@ -91,7 +91,6 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
     zAq = zeros(Complex{T}, M0, M0)
     zSq = zeros(Complex{T}, M0, M0)
     moment = Matrix{Complex{T}}(undef, M0, M0)
-    ReducedT = T
     lambda_vec = zeros(T, M0)
     res_vec = zeros(T, M0)
     residual_vec = zeros(Complex{T}, N)
@@ -182,40 +181,36 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
         solve_failed && break
 
         try
-            # For half-contour integration, extract real symmetric part
-            # Symmetrize explicitly: 0.5*(Re(M) + Re(M)') ensures the reduced
-            # matrices are exactly symmetric even when Q is complex
-            Aq_real = Matrix{ReducedT}(real.(0.5 .* (zAq .+ transpose(zAq))))
-            Sq_real = Matrix{ReducedT}(real.(0.5 .* (zSq .+ transpose(zSq))))
+            # For half-contour integration of Hermitian problems, the full contour
+            # integral yields Hermitian reduced matrices (R(z̄)^H = R(z) for A = A^H).
+            # Extract the Hermitian part via (M + M^H)/2, NOT real/symmetric part,
+            # which would discard imaginary components needed for complex Hermitian A.
+            Aq_herm = 0.5 .* (zAq .+ adjoint(zAq))
+            Sq_herm = 0.5 .* (zSq .+ adjoint(zSq))
 
-            # Try Symmetric solver first (more accurate), fall back to general if not positive definite
-            # IMPORTANT: Solve Sq*x = lambda*Aq*x (not Aq*x = lambda*Sq*x)
-            # This is because zAq ≈ Q'*P*Q and zSq ≈ Q'*A*P*Q where P is the spectral projector
-            lambda_red = Vector{ReducedT}(undef, 0)
-            v_red = Array{ReducedT}(undef, 0, 0)
+            # Solve Hermitian generalized eigenproblem: Sq*x = lambda*Aq*x
+            # Eigenvalues are real; eigenvectors are complex.
+            lambda_red = Vector{T}(undef, 0)
+            v_red = Array{Complex{T}}(undef, 0, 0)
             try
-                F = eigen(Symmetric(Sq_real), Symmetric(Aq_real))
-                lambda_red = Vector{ReducedT}(F.values)
-                v_red = Array{ReducedT}(F.vectors)
+                F = eigen(Hermitian(Sq_herm), Hermitian(Aq_herm))
+                lambda_red = Vector{T}(F.values)
+                v_red = Matrix{Complex{T}}(F.vectors)
             catch e
                 if isa(e, PosDefException) || isa(e, LAPACKException)
-                    # Fall back to general eigenvalue solver if not positive definite
-                    F = eigen(Sq_real, Aq_real)
-                    lambda_red = Vector{ReducedT}(real.(F.values))
-                    v_red = Array{ReducedT}(real.(F.vectors))
+                    # Fall back to general complex eigenvalue solver
+                    F = eigen(Sq_herm, Aq_herm)
+                    lambda_red = Vector{T}(real.(F.values))
+                    v_red = Matrix{Complex{T}}(F.vectors)
                 else
                     rethrow(e)
                 end
             end
 
-            # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q_basis
-            # Q_proj = spectral projector applied to Q_basis via contour integration
-            # For complex Hermitian problems, Q_proj is complex — do NOT take real()
-            # since eigenvectors of complex Hermitian matrices are genuinely complex.
+            # Project eigenvectors using filtered subspace Q_proj (complex coefficients)
             for idx in 1:M0
-                coeffs = Vector{T}(view(v_red, :, idx))
-                mul!(view(solutions, :, idx), Q_proj, Complex{T}.(coeffs))
-                lambda_vec[idx] = convert(T, lambda_red[idx])
+                mul!(view(solutions, :, idx), Q_proj, view(v_red, :, idx))
+                lambda_vec[idx] = lambda_red[idx]
             end
 
             # Reorder: put eigenvalues inside interval first while maintaining pairing

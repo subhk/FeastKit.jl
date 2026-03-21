@@ -324,7 +324,7 @@ end
 # Convenience wrapper for parallel Feast with automatic RCI handling
 function feast_parallel(A::AbstractMatrix{T}, B::AbstractMatrix{T}, 
                         interval::Tuple{T,T}; M0::Int = 10, 
-                        fpm::Union{Vector{Int}, Nothing} = nothing,
+                        fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                         use_threads::Bool = true,
                         auto_rci::Bool = true) where T<:Real
     # Parallel FeastKit with automatic RCI management

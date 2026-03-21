@@ -2,19 +2,27 @@
 # Translated from Feast Fortran library
 
 # Feast parameter structure
+# Wraps a Vector{Int} and forwards indexing so it can be used wherever fpm::Vector{Int} is expected.
 struct FeastParameters
     fpm::Vector{Int}
-    
+
     function FeastParameters()
         fpm = zeros(Int, 64)
         new(fpm)
     end
-    
+
     function FeastParameters(fpm::Vector{Int})
         length(fpm) >= 64 || error("fpm array must have at least 64 elements")
         new(fpm)
     end
 end
+
+# Allow FeastParameters to be used transparently as a Vector{Int}
+Base.getindex(p::FeastParameters, i) = p.fpm[i]
+Base.setindex!(p::FeastParameters, v, i) = (p.fpm[i] = v)
+Base.length(p::FeastParameters) = length(p.fpm)
+Base.size(p::FeastParameters) = size(p.fpm)
+Base.convert(::Type{Vector{Int}}, p::FeastParameters) = p.fpm
 
 # Feast workspace structure for real symmetric problems
 mutable struct FeastWorkspaceReal{T<:Real}

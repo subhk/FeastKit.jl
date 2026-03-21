@@ -166,7 +166,7 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
     zAq = zeros(Complex{T}, M0, M0)
     zSq = zeros(Complex{T}, M0, M0)
     moment = Matrix{Complex{T}}(undef, M0, M0)
-    ReducedT = promote_type(Float64, T)
+    ReducedT = T
     # Always allocate a separate rhs_buffer to avoid aliasing Q_basis
     # (aliased views are fragile — any future in-place write to one corrupts the other)
     rhs_buffer = Matrix{Complex{T}}(undef, N, M0)
@@ -240,9 +240,10 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
         end
 
         try
-            # For half-contour integration, take real part directly
-            Aq_real = Matrix{ReducedT}(real.(zAq))
-            Sq_real = Matrix{ReducedT}(real.(zSq))
+            # For half-contour integration, extract real symmetric part
+            # Symmetrize explicitly to handle complex Q correctly
+            Aq_real = Matrix{ReducedT}(real.(0.5 .* (zAq .+ transpose(zAq))))
+            Sq_real = Matrix{ReducedT}(real.(0.5 .* (zSq .+ transpose(zSq))))
 
             # Try Symmetric solver first (more accurate), fall back to general if not positive definite
             # IMPORTANT: Solve Sq*x = lambda*Aq*x (not Aq*x = lambda*Sq*x)

@@ -3,15 +3,16 @@
 
 const FEAST_PARAMETERS_LENGTH = 64
 
-@inline function _ensure_feast_parameters(fpm::Union{Vector{Int},Nothing})
+@inline function _ensure_feast_parameters(fpm::Union{Vector{Int},FeastParameters,Nothing})
     if fpm === nothing
         params = zeros(Int, FEAST_PARAMETERS_LENGTH)
         feastinit!(params)
         return params
     end
-    length(fpm) >= FEAST_PARAMETERS_LENGTH ||
+    vec = fpm isa FeastParameters ? fpm.fpm : fpm
+    length(vec) >= FEAST_PARAMETERS_LENGTH ||
         throw(ArgumentError("fpm vector must have length ≥ $(FEAST_PARAMETERS_LENGTH)"))
-    return fpm
+    return vec
 end
 
 @inline function _normalize_parallel(parallel::Union{Bool,Symbol})
@@ -72,7 +73,7 @@ end
 # Main Feast interface functions
 function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                interval::Tuple{T,T}; M0::Int = 10,
-               fpm::Union{Vector{Int}, Nothing} = nothing,
+               fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                parallel::Union{Bool, Symbol} = false,
                use_threads::Bool = true,
                comm = nothing) where T<:Real
@@ -97,7 +98,7 @@ end
 
 function feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
                interval::Tuple{T,T}; M0::Int = 10,
-               fpm::Union{Vector{Int}, Nothing} = nothing,
+               fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                parallel::Union{Bool, Symbol} = false,
                use_threads::Bool = true,
                comm = nothing) where T<:Real
@@ -121,7 +122,7 @@ function feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
 end
 
 function feast(A::AbstractMatrix{T}, interval::Tuple{T,T};
-               M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing,
+               M0::Int = 10, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                parallel::Union{Bool, Symbol} = false,
                use_threads::Bool = true, comm = nothing) where T<:Real
     # Feast interface for standard real symmetric eigenvalue problems (B = I)
@@ -132,7 +133,7 @@ function feast(A::AbstractMatrix{T}, interval::Tuple{T,T};
 end
 
 function feast(A::AbstractMatrix{Complex{T}}, interval::Tuple{T,T};
-               M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing,
+               M0::Int = 10, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                parallel::Union{Bool, Symbol} = false,
                use_threads::Bool = true, comm = nothing) where T<:Real
     # Feast interface for standard complex Hermitian eigenvalue problems (B = I)
@@ -145,7 +146,7 @@ end
 
 function feast_general(A::AbstractMatrix, B::AbstractMatrix,
                        center::Complex{T}, radius::T; M0::Int = 10,
-                       fpm::Union{Vector{Int}, Nothing} = nothing,
+                       fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                        parallel::Union{Bool, Symbol} = false,
                        use_threads::Bool = true,
                        comm = nothing) where T<:Real
@@ -190,7 +191,7 @@ function feast_general(A::AbstractMatrix, B::AbstractMatrix,
 end
 
 function feast_general(A::AbstractMatrix, center::Complex{T}, radius::T;
-                       M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing,
+                       M0::Int = 10, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                        parallel::Union{Bool, Symbol} = false,
                        use_threads::Bool = true,
                        comm = nothing) where T<:Real
@@ -216,7 +217,7 @@ end
 
 function feast_banded(A::Matrix{T}, kla::Int, interval::Tuple{T,T};
                      B::Union{Matrix{T}, Nothing} = nothing, klb::Int = 0,
-                     M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing) where T<:Real
+                     M0::Int = 10, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing) where T<:Real
     # Feast interface for real symmetric banded matrices
 
     Emin, Emax = interval
@@ -238,7 +239,7 @@ end
 
 function feast_banded(A::Matrix{Complex{T}}, kla::Int, interval::Tuple{T,T};
                      B::Union{Matrix{Complex{T}}, Nothing} = nothing, klb::Int = 0,
-                     M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing) where T<:Real
+                     M0::Int = 10, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing) where T<:Real
     # Feast interface for complex Hermitian banded matrices
 
     Emin, Emax = interval
@@ -283,7 +284,7 @@ end
 # Polynomial eigenvalue problems
 function feast_polynomial(coeffs::Vector{<:AbstractMatrix{Complex{T}}},
                          center::Complex{T}, radius::T; M0::Int = 10,
-                         fpm::Union{Vector{Int}, Nothing} = nothing) where T<:Real
+                         fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing) where T<:Real
     # Feast for polynomial eigenvalue problems
     # P(λ) = coeffs[1] + λ*coeffs[2] + λ²*coeffs[3] + ...
     
@@ -300,7 +301,7 @@ end
 # Matrix-free interfaces
 function feast_matvec(A_mul!::Function, B_mul!::Function, N::Int, 
                      interval::Tuple{T,T}; M0::Int = 10,
-                     fpm::Union{Vector{Int}, Nothing} = nothing) where T<:Real
+                     fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing) where T<:Real
     # Feast with matrix-free operations
     # A_mul!(y, x) computes y = A*x
     # B_mul!(y, x) computes y = B*x
@@ -317,39 +318,61 @@ function feast_matvec(A_mul!::Function, B_mul!::Function, N::Int,
 end
 
 # Advanced configuration functions
-function feast_set_defaults!(fpm::Vector{Int}; 
+function feast_set_defaults!(fpm::Vector{Int};
                             print_level::Int = 1,
                             integration_points::Int = 8,
                             tolerance_exp::Int = 12,
                             max_refinement::Int = 20)
     # Set common Feast parameters with user-friendly names
-    
+    # Validate against the same constraints as feastdefault!
+
+    length(fpm) >= 64 || throw(ArgumentError("fpm array must have at least 64 elements"))
+
+    print_level <= 1 ||
+        throw(ArgumentError("print_level must be 0, 1, or negative for file output, got $print_level"))
+
+    integration_points > 0 ||
+        throw(ArgumentError("integration_points must be positive, got $integration_points"))
+
+    0 <= tolerance_exp <= 16 ||
+        throw(ArgumentError("tolerance_exp must be between 0 and 16, got $tolerance_exp"))
+
+    max_refinement > 0 ||
+        throw(ArgumentError("max_refinement must be positive, got $max_refinement"))
+
     fpm[1] = print_level
-    fpm[2] = integration_points  
+    fpm[2] = integration_points
     fpm[3] = tolerance_exp
     fpm[4] = max_refinement
-    
+
     return fpm
 end
 
-function feast_custom_contour(nodes::Vector{Complex{T}}, 
-                             A::AbstractMatrix, B::AbstractMatrix;
+function feast_custom_contour(nodes::Vector{Complex{T}},
+                             A::AbstractMatrix, B::AbstractMatrix,
+                             interval::Tuple{T,T};
                              M0::Int = 10,
-                             fpm::Union{Vector{Int}, Nothing} = nothing) where T<:Real
+                             fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing) where T<:Real
     # Feast with custom integration contour
-    
-    # Initialize Feast parameters if not provided  
-    if fpm === nothing
-        fpm = zeros(Int, 64)
-        feastinit!(fpm)
+    # Computes trapezoidal weights from nodes, registers as custom contour, then runs feast
+
+    params = _ensure_feast_parameters(fpm)
+    contour = feast_customcontour(nodes, params)
+
+    return with_custom_contour(params, contour) do
+        feast(A, B, interval; M0=M0, fpm=params)
     end
-    
-    # Set up custom contour
-    contour = feast_customcontour(nodes, fpm)
-    
-    # This would require modifications to the RCI routines to accept custom contour
-    # For now, throw an error indicating it's not fully implemented
-    throw(ArgumentError("Custom contour interface not fully implemented yet"))
+end
+
+function feast_custom_contour(nodes::Vector{Complex{T}},
+                             A::AbstractMatrix,
+                             interval::Tuple{T,T};
+                             M0::Int = 10,
+                             fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing) where T<:Real
+    N = size(A, 1)
+    B = isa(A, SparseMatrixCSC) ? spdiagm(0 => fill(one(eltype(A)), N)) :
+        Matrix{eltype(A)}(I, N, N)
+    return feast_custom_contour(nodes, A, B, interval; M0=M0, fpm=fpm)
 end
 
 # Utility functions for result analysis

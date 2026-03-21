@@ -11,6 +11,12 @@ const _feast_contour_next_id = Threads.Atomic{Int}(1)
 const _feast_contour_lock = ReentrantLock()
 
 function _next_contour_id()
+    # Reset counter when registry is empty to prevent unbounded growth
+    # Caller must hold _feast_contour_lock
+    if isempty(FEAST_CUSTOM_CONTOURS)
+        Threads.atomic_xchg!(_feast_contour_next_id, 2)
+        return 1
+    end
     return Threads.atomic_add!(_feast_contour_next_id, 1)
 end
 
@@ -86,6 +92,7 @@ Call this in long-running applications to prevent unbounded registry growth.
 function feast_clear_all_contours!()
     lock(_feast_contour_lock) do
         empty!(FEAST_CUSTOM_CONTOURS)
+        Threads.atomic_xchg!(_feast_contour_next_id, 1)
     end
     return nothing
 end
@@ -178,12 +185,6 @@ function check_feast_grci_input(N::Int, M0::Int, Emid::Complex{T}, r::T,
     return true
 end
 
-function feast_inside_contour_old(lambda::T, Emin::T, Emax::T, 
-                                 fpm::Vector{Int}) where T<:Real
-    # Legacy version of eigenvalue location check
-    return feast_inside_contour(lambda, Emin, Emax)
-end
-
 function feast_inside_contourx(lambda::Complex{T}, Zne::Vector{Complex{T}},
                               Wne::Vector{Complex{T}}) where T<:Real
     # Check if eigenvalue is inside custom contour using triangulation
@@ -216,9 +217,10 @@ function feast_inside_contourx(lambda::Complex{T}, Zne::Vector{Complex{T}},
             d1j < eps(T) && continue  # Skip coincident nodes
             z1j = (Zne[j] - Zne[1]) / d1j
 
-            # Skip collinear points (Fortran tolerance: 1e-8)
+            # Skip collinear points (scale tolerance to precision)
+            collinear_tol = max(T(1e-8), 100 * eps(T))
             dot_product = real(z1i) * real(z1j) + imag(z1i) * imag(z1j)
-            if abs(one(T) - abs(dot_product)) > T(1e-8)
+            if abs(one(T) - abs(dot_product)) > collinear_tol
                 # Barycentric coordinates for the point in triangle (Zne[1], Zne[i], Zne[j])
                 xp = real(lambda)
                 yp = imag(lambda)
@@ -229,8 +231,9 @@ function feast_inside_contourx(lambda::Complex{T}, Zne::Vector{Complex{T}},
                 lambda3 = one(T) - lambda1 - lambda2
 
                 # Point is inside triangle if all barycentric coords >= 0 (with tolerance)
-                tol = T(1e-14)
-                if lambda1 > -tol && lambda2 > -tol && lambda3 > -tol
+                # Scale tolerance to precision: ~1e-14 for Float64, ~1e-5 for Float32
+                bary_tol = 100 * eps(T)
+                if lambda1 > -bary_tol && lambda2 > -bary_tol && lambda3 > -bary_tol
                     return true
                 end
             end
@@ -256,11 +259,26 @@ function feast_cauchy_weights(lambda::Vector{T}, Zne::Vector{Complex{T}}) where 
     coef = Matrix{Complex{T}}(undef, M, ne)
 
     for j in 1:M
+        # Check if eigenvalue coincides with any contour node
+        coincident = 0
         for i in 1:ne
-            coef[j, i] = one(T) / (Zne[i] - lambda[j])
+            if abs(Zne[i] - lambda[j]) < eps(T)
+                coincident = i
+                break
+            end
         end
-        # Normalize
-        coef[j, :] ./= sum(coef[j, :])
+
+        if coincident > 0
+            # Eigenvalue on contour node: the limit gives weight 1 at that node, 0 elsewhere
+            fill!(view(coef, j, :), zero(Complex{T}))
+            coef[j, coincident] = one(Complex{T})
+        else
+            for i in 1:ne
+                coef[j, i] = one(T) / (Zne[i] - lambda[j])
+            end
+            # Normalize
+            coef[j, :] ./= sum(view(coef, j, :))
+        end
     end
 
     return coef

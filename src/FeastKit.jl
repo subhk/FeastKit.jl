@@ -69,12 +69,21 @@ using FastGaussQuadrature
 
 const FEAST_KRYLOV_AVAILABLE = Ref(false)
 try
-    @eval using Krylov: gmres
-    @eval import Krylov
+    using Krylov: gmres
+    import Krylov
     FEAST_KRYLOV_AVAILABLE[] = true
 catch e
     @debug "Krylov.jl not available; iterative FEAST variants requiring GMRES will be disabled." exception=e
     FEAST_KRYLOV_AVAILABLE[] = false
+end
+
+# Load MPI at compile time (it's in [deps]) but defer initialization check to __init__
+const MPI_AVAILABLE = Ref(false)
+const _MPI_LOADED = try
+    using MPI
+    true
+catch
+    false
 end
 
 include("core/feast_types.jl")
@@ -92,19 +101,27 @@ include("interfaces/feast_interfaces.jl")
 include("interfaces/feast_matfree.jl")
 include("deprecations.jl")
 
-# Conditional MPI loading - include at end to allow proper loading
-const MPI_AVAILABLE = Ref(false)
+# Include MPI files at compile time (they define types/methods that need to exist);
+# actual MPI usage is gated by MPI_AVAILABLE[] at runtime.
+if _MPI_LOADED
+    include("parallel/feast_mpi.jl")
+    include("parallel/feast_mpi_interface.jl")
+end
 
 function __init__()
+    if !_MPI_LOADED
+        MPI_AVAILABLE[] = false
+        return
+    end
+
     # Skip MPI initialization on CI environments to avoid hanging
-    # MPI.Initialized() can hang when MPI runtime is not properly configured
     if get(ENV, "CI", "false") == "true"
         @debug "Running on CI, skipping MPI initialization"
         MPI_AVAILABLE[] = false
         return
     end
 
-    # Only attempt MPI loading if explicitly enabled via environment variable
+    # Only attempt MPI usage if explicitly enabled via environment variable
     # This prevents hanging when MPI is not properly configured
     if get(ENV, "FEASTKIT_ENABLE_MPI", "false") != "true"
         @debug "MPI not explicitly enabled (set FEASTKIT_ENABLE_MPI=true to enable), MPI features disabled"
@@ -113,28 +130,9 @@ function __init__()
     end
 
     try
-        # Try to load MPI components
-        @eval using MPI
-        # Check if MPI is initialized with a timeout-safe approach
-        # Only check if we're actually running under mpirun/mpiexec
-        mpi_initialized = false
-        try
-            mpi_initialized = @eval MPI.Initialized()
-        catch e
-            @debug "MPI.Initialized() check failed, MPI features disabled" exception=e
-            MPI_AVAILABLE[] = false
-            return
-        end
-
-        if mpi_initialized
-            include(joinpath(@__DIR__, "parallel", "feast_mpi.jl"))
-            include(joinpath(@__DIR__, "parallel", "feast_mpi_interface.jl"))
-            MPI_AVAILABLE[] = true
-        else
-            MPI_AVAILABLE[] = false
-        end
+        MPI_AVAILABLE[] = MPI.Initialized()
     catch e
-        @debug "MPI.jl not available or failed to load. MPI features will be disabled." exception=e
+        @debug "MPI.Initialized() check failed, MPI features disabled" exception=e
         MPI_AVAILABLE[] = false
     end
 end

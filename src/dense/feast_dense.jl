@@ -80,7 +80,10 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
         throw(ArgumentError("Krylov.jl is required for iterative dense FEAST solves."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
 
-    B_matrix = B === nothing ? nothing : copy(B)
+    # Always use an explicit identity matrix when B is nothing
+    # (matches sparse solver pattern and avoids subtle numerical differences)
+    B_matrix = B === nothing ? Matrix{Complex{T}}(I, N, N) : copy(B)
+    B_is_identity = B === nothing
     Q_basis = zeros(Complex{T}, N, M0)
     _feast_seeded_subspace_complex!(Q_basis)
     solutions = similar(Q_basis)
@@ -88,18 +91,18 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
     zAq = zeros(Complex{T}, M0, M0)
     zSq = zeros(Complex{T}, M0, M0)
     moment = Matrix{Complex{T}}(undef, M0, M0)
-    ReducedT = promote_type(Float64, T)
+    ReducedT = T
     lambda_vec = zeros(T, M0)
     res_vec = zeros(T, M0)
     residual_vec = zeros(Complex{T}, N)
-    Bq_vec = B_matrix === nothing ? nothing : zeros(Complex{T}, N)
+    Bq_vec = B_is_identity ? nothing : zeros(Complex{T}, N)
     shifted_matrix = similar(A)
     current_shift = Ref(zero(Complex{T}))
     tmpAx = solver_is_iterative ? zeros(Complex{T}, N) : nothing
     tmpBx = solver_is_iterative ? zeros(Complex{T}, N) : nothing
 
     function shifted_mul!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
-        if B_matrix === nothing
+        if B_is_identity
             @. tmpBx = current_shift[] * x
         else
             mul!(tmpBx, B_matrix, x)
@@ -136,20 +139,14 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
         for (idx, z) in enumerate(Zne)
             weight = 2 * Wne[idx]
 
-            if B_matrix === nothing
+            if B_is_identity
                 rhs_buffer .= Q_basis
             else
                 mul!(rhs_buffer, B_matrix, Q_basis)
             end
 
             if solver_is_direct
-                if B_matrix === nothing
-                    for j in 1:N, i in 1:N
-                        shifted_matrix[i, j] = (i == j ? z : zero(z)) - A[i, j]
-                    end
-                else
-                    @. shifted_matrix = z * B_matrix - A
-                end
+                @. shifted_matrix = z * B_matrix - A
                 rhs_copy = copy(rhs_buffer)
                 try
                     factor = lu(shifted_matrix)
@@ -185,11 +182,11 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
         solve_failed && break
 
         try
-            # For half-contour integration, take real part directly
-            # The half-contour exploits symmetry: contribution from conjugate points
-            # combines to give a purely real result when taking Re(zAq)
-            Aq_real = Matrix{ReducedT}(real.(zAq))
-            Sq_real = Matrix{ReducedT}(real.(zSq))
+            # For half-contour integration, extract real symmetric part
+            # Symmetrize explicitly: 0.5*(Re(M) + Re(M)') ensures the reduced
+            # matrices are exactly symmetric even when Q is complex
+            Aq_real = Matrix{ReducedT}(real.(0.5 .* (zAq .+ transpose(zAq))))
+            Sq_real = Matrix{ReducedT}(real.(0.5 .* (zSq .+ transpose(zSq))))
 
             # Try Symmetric solver first (more accurate), fall back to general if not positive definite
             # IMPORTANT: Solve Sq*x = lambda*Aq*x (not Aq*x = lambda*Sq*x)
@@ -249,7 +246,7 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
             for j in 1:M
                 q_col = view(solutions, :, j)
                 mul!(residual_vec, A, q_col)
-                if B_matrix === nothing
+                if B_is_identity
                     @. residual_vec = residual_vec - lambda_vec[j] * q_col
                 else
                     mul!(Bq_vec, B_matrix, q_col)
@@ -323,16 +320,19 @@ end
 end
 
 
-function feast_heev!(A::Matrix{Complex{T}}, 
+function feast_heev!(A::Matrix{Complex{T}},
                      Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                      solver::Symbol = :direct,
                      solver_tol::Real = 0.0,
                      solver_maxiter::Int = 500,
                      solver_restart::Int = 30) where T<:Real
-    return _feast_dense_complex_hermitian(A, nothing, Emin, Emax, M0, fpm;
-                                          solver=solver, solver_tol=solver_tol,
-                                          solver_maxiter=solver_maxiter,
-                                          solver_restart=solver_restart)
+    # Delegate to generalized solver with B = I, matching feast_syev! pattern
+    N = size(A, 1)
+    B = Matrix{Complex{T}}(I, N, N)
+    return feast_hegv!(A, B, Emin, Emax, M0, fpm;
+                       solver=solver, solver_tol=solver_tol,
+                       solver_maxiter=solver_maxiter,
+                       solver_restart=solver_restart)
 end
 
 function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},

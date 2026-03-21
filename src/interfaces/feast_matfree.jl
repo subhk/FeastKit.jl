@@ -157,7 +157,7 @@ Matrix-free Feast RCI for real symmetric eigenvalue problems.
 function feast_matfree_srci!(A_op::MatrixFreeOperator{T}, 
                             B_op::MatrixFreeOperator{T},
                             interval::Tuple{T, T}, M0::Int;
-                            fpm::Union{Vector{Int}, Nothing} = nothing,
+                            fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                             linear_solver::Union{Function, Nothing} = nothing,
                             workspace::Union{NamedTuple, Nothing} = nothing,
                             maxiter::Int = 20,
@@ -270,7 +270,7 @@ Matrix-free Feast RCI for general (non-Hermitian) eigenvalue problems.
 function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
                             B_op::MatrixFreeOperator{Complex{T}},
                             center::Complex{T}, radius::T, M0::Int;
-                            fpm::Union{Vector{Int}, Nothing} = nothing,
+                            fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                             linear_solver::Union{Function, Nothing} = nothing,
                             workspace::Union{NamedTuple, Nothing} = nothing,
                             maxiter::Int = 20,
@@ -428,7 +428,7 @@ function feast(A_op::MatrixFreeOperator{T}, B_op::MatrixFreeOperator{T},
                M0::Int = 10,
                solver::Union{Symbol, Function} = :gmres,
                solver_opts::NamedTuple = NamedTuple(),
-               fpm::Union{Vector{Int}, Nothing} = nothing,
+               fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                tol::T = T(1e-12),
                maxiter::Int = 20) where T<:Real
     
@@ -475,7 +475,7 @@ function feast_general(A_op::MatrixFreeOperator{Complex{T}},
                       M0::Int = 10,
                       solver::Union{Symbol, Function} = :gmres,
                       solver_opts::NamedTuple = NamedTuple(),
-                      fpm::Union{Vector{Int}, Nothing} = nothing,
+                      fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                       tol::T = T(1e-12),
                       maxiter::Int = 20) where T<:Real
     

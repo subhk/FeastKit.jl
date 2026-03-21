@@ -495,7 +495,7 @@ end
 # High-level MPI FeastKit interface
 function mpi_feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                    interval::Tuple{T,T}; M0::Int = 10,
-                   fpm::Union{Vector{Int}, Nothing} = nothing,
+                   fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                    comm::MPI.Comm = MPI.COMM_WORLD,
                    root::Int = 0) where T<:Real
     # Unified MPI interface that detects matrix type
@@ -517,7 +517,7 @@ end
 
 # Standard eigenvalue problem MPI interface
 function mpi_feast(A::AbstractMatrix{T}, interval::Tuple{T,T};
-                   M0::Int = 10, fpm::Union{Vector{Int}, Nothing} = nothing,
+                   M0::Int = 10, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                    comm::MPI.Comm = MPI.COMM_WORLD,
                    root::Int = 0) where T<:Real
     # MPI interface for standard eigenvalue problems

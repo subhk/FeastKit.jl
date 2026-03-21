@@ -692,11 +692,11 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 lambda_red = F.values
                 v_red = F.vectors
 
-                # Count eigenvalues inside circular region
+                # Count eigenvalues inside contour region (elliptical if fpm[18]/[19] set)
                 M = 0
                 indices = Int[]
                 for i in 1:M0
-                    if feast_inside_gcontour(lambda_red[i], Emid, r)
+                    if feast_inside_gcontour(lambda_red[i], Emid, r; fpm=fpm)
                         M += 1
                         push!(indices, i)
                         lambda[M] = lambda_red[i]
@@ -940,24 +940,22 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
         fill!(res, zero(T))
 
         if fpm[5] == 1
+            # User-provided initial subspace: normalize columns, replace zero columns
+            fallback_rng = MersenneTwister(hash((N, M0, :fallback_poly)))
             for j in 1:M0
                 normval = norm(work[:, j])
                 if normval > 0
                     work[:, j] ./= normval
                 else
                     for i in 1:N
-                        work[i, j] = Complex{T}(randn(T), randn(T))
+                        work[i, j] = Complex{T}(randn(fallback_rng, T), randn(fallback_rng, T))
                     end
                     work[:, j] ./= norm(work[:, j])
                 end
             end
         else
-            for j in 1:M0
-                for i in 1:N
-                    work[i, j] = Complex{T}(randn(T), randn(T))
-                end
-                work[:, j] ./= norm(work[:, j])
-            end
+            # Deterministic seeded random subspace for reproducibility
+            _feast_seeded_subspace_complex!(view(work, :, 1:M0))
         end
 
         loop[] = 0
@@ -995,7 +993,7 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
 
             M = 0
             for i in 1:M0
-                if feast_inside_gcontour(lambda_red[i], Emid, r)
+                if feast_inside_gcontour(lambda_red[i], Emid, r; fpm=fpm)
                     M += 1
                     lambda[M] = lambda_red[i]
                     q[:, M] .= work[:, 1:M0] * v_red[:, i]

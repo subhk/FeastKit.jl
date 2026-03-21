@@ -3,13 +3,6 @@
 
 using Random
 
-# Helper functions for integration nodes
-function gauss_legendre_point(n::Int, k::Int)
-    # Use FastGaussQuadrature directly for robust Gauss–Legendre nodes/weights
-    x, w = FastGaussQuadrature.gausslegendre(n)
-    return x[k], w[k]
-end
-
 @inline function _feast_seeded_subspace!(work::AbstractMatrix{T}) where T<:Real
     N, M0 = size(work)
     seed = hash((N, M0))
@@ -627,8 +620,33 @@ function feast_inside_contour(lambda::T, Emin::T, Emax::T) where T<:Real
     return Emin <= lambda <= Emax
 end
 
-function feast_inside_gcontour(lambda::Complex{T}, Emid::Complex{T}, r::T) where T<:Real
-    return abs(lambda - Emid) <= r
+function feast_inside_gcontour(lambda::Complex{T}, Emid::Complex{T}, r::T;
+                               fpm::Union{Vector{Int},Nothing} = nothing) where T<:Real
+    w = lambda - Emid
+
+    # Extract ellipse parameters from fpm if available
+    aspect_ratio = one(T)
+    rotation_theta = zero(T)
+    if fpm !== nothing && length(fpm) >= 19
+        fpm18 = fpm[18]
+        fpm19 = fpm[19]
+        if fpm18 > 0
+            aspect_ratio = fpm18 * T(0.01)
+        end
+        if fpm19 != 0
+            rotation_theta = (fpm19 / T(180)) * T(π)
+        end
+    end
+
+    # Un-rotate the displacement to align with ellipse axes
+    if rotation_theta != zero(T)
+        w *= exp(-im * rotation_theta)
+    end
+
+    # Check (Re(w)/r)^2 + (Im(w)/(r*aspect))^2 <= 1
+    x = real(w) / r
+    y = imag(w) / (r * aspect_ratio)
+    return x * x + y * y <= one(T)
 end
 
 # Sort eigenvalues and eigenvectors

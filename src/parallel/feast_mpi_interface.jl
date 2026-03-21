@@ -9,7 +9,7 @@
 # Hybrid parallel approach: MPI + threads within each MPI process
 function feast_hybrid(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                      interval::Tuple{T,T}; M0::Int = 10,
-                     fpm::Union{Vector{Int}, Nothing} = nothing,
+                     fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                      comm::MPI.Comm = MPI.COMM_WORLD,
                      use_threads_per_rank::Bool = true) where T<:Real
     # Hybrid MPI + threading approach

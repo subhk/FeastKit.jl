@@ -205,12 +205,16 @@ function feast_inside_contourx(lambda::Complex{T}, Zne::Vector{Complex{T}},
     for i in 2:ne
         x2 = real(Zne[i])
         y2 = imag(Zne[i])
-        z1i = (Zne[i] - Zne[1]) / abs(Zne[i] - Zne[1])
+        d1i = abs(Zne[i] - Zne[1])
+        d1i < eps(T) && continue  # Skip coincident nodes
+        z1i = (Zne[i] - Zne[1]) / d1i
 
         for j in (i+1):ne
             x3 = real(Zne[j])
             y3 = imag(Zne[j])
-            z1j = (Zne[j] - Zne[1]) / abs(Zne[j] - Zne[1])
+            d1j = abs(Zne[j] - Zne[1])
+            d1j < eps(T) && continue  # Skip coincident nodes
+            z1j = (Zne[j] - Zne[1]) / d1j
 
             # Skip collinear points (Fortran tolerance: 1e-8)
             dot_product = real(z1i) * real(z1j) + imag(z1i) * imag(z1j)

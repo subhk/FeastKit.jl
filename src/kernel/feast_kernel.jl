@@ -562,6 +562,10 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             contour = feast_gcontour(Emid, r, fpm)
         end
 
+        # Cache contour in state to avoid regeneration on every SOLVE call
+        state.Zne = copy(contour.Zne)
+        state.Wne = copy(contour.Wne)
+
         # Store state in fpm array
         fpm[50] = 1
         fpm[51] = length(contour.Zne)
@@ -622,13 +626,9 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         e = fpm[50]  # Get current integration point from fpm
         ne = fpm[51]  # Get total integration points from fpm
 
-        # Get contour points
-        contour = feast_get_custom_contour(fpm)
-        if contour === nothing
-            contour = feast_gcontour(Emid, r, fpm)
-        end
-        Zne = contour.Zne
-        Wne = contour.Wne
+        # Use cached contour from state (set during init and refinement loop reset)
+        Zne = state.Zne
+        Wne = state.Wne
 
         # Accumulate subspace vectors Q
         for j in 1:M0
@@ -752,9 +752,9 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             # Computing residuals
             M = fpm[52]
 
+            residual = zeros(Complex{T}, N)
             for j in 1:M
-                residual = zeros(Complex{T}, N)
-                for i in 1:N
+                @inbounds for i in 1:N
                     residual[i] = workc[i, j] - lambda[j] * q[i, j]
                 end
                 # Relative residual: ||Ax - λx|| / max(|λ|, 1)
@@ -785,11 +785,13 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
                 workc[:, 1:M0] = q_saved
 
-                # Get contour for next refinement loop
+                # Re-cache contour for next refinement loop
                 contour = feast_get_custom_contour(fpm)
                 if contour === nothing
                     contour = feast_gcontour(Emid, r, fpm)
                 end
+                state.Zne = copy(contour.Zne)
+                state.Wne = copy(contour.Wne)
                 fpm[50] = 1
 
                 Ze[] = contour.Zne[1]

@@ -47,15 +47,7 @@ end
 end
 
 function _feast_run_serial(A, B, interval, M0, fpm)
-    try
-        return feast_serial(A, B, interval, M0, fpm)
-    catch e
-        if e isa ArgumentError || e isa ErrorException || e isa UndefVarError
-            rethrow()
-        else
-            throw(ErrorException(string(e)))
-        end
-    end
+    return feast_serial(A, B, interval, M0, fpm)
 end
 
 @inline function _execute_feast_general(A, B, center, radius, backend, M0, fpm, comm, use_threads)
@@ -66,15 +58,7 @@ end
 end
 
 function _feast_run_general_serial(A, B, center, radius, M0, fpm)
-    try
-        return feast_general_serial(A, B, center, radius, M0, fpm)
-    catch e
-        if e isa ArgumentError || e isa ErrorException || e isa UndefVarError
-            rethrow()
-        else
-            throw(ErrorException(string(e)))
-        end
-    end
+    return feast_general_serial(A, B, center, radius, M0, fpm)
 end
 
 @inline _real_component_type(::Type{Complex{T}}) where T<:Real = T

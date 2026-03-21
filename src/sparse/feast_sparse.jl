@@ -188,9 +188,6 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
     # Allocate buffer for accumulated filtered subspace
     Q_proj = zeros(Complex{T}, N, M0)
 
-    # Pre-allocate shifted matrix for direct solver to avoid repeated sparse allocation
-    shifted_matrix = solver_is_direct ? copy(B_matrix) : nothing
-
     for loop_idx in 0:maxloop
         loop_count = loop_idx
         fill!(zAq, zero(Complex{T}))
@@ -210,8 +207,7 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
             end
 
             if solver_is_direct
-                # Update shifted matrix in-place: shifted = z*B - A
-                @. shifted_matrix.nzval = z * B_matrix.nzval - A.nzval
+                shifted_matrix = z * B_matrix - A
                 try
                     solver_factor = lu(shifted_matrix)
                     solutions .= solver_factor \ rhs_buffer

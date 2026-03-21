@@ -148,9 +148,12 @@ mutable struct FeastGRCIState{T<:Real}
     initialized::Bool
     Q0::Matrix{Complex{T}}
     mult_a_for_projection::Bool  # Distinguishes two MULT_A calls (moved out of fpm[54])
+    Zne::Vector{Complex{T}}     # Cached contour nodes
+    Wne::Vector{Complex{T}}     # Cached contour weights
 
     function FeastGRCIState{T}() where T<:Real
-        new{T}(false, Matrix{Complex{T}}(undef, 0, 0), false)
+        new{T}(false, Matrix{Complex{T}}(undef, 0, 0), false,
+               Complex{T}[], Complex{T}[])
     end
 end
 

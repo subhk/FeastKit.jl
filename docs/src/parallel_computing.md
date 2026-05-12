@@ -108,11 +108,16 @@ n = 5000
 A = SymTridiagonal(2.0*ones(n), -ones(n-1))
 B = Matrix(1.0I, n, n)
 
-# Threaded computation
-result = feast(A, B, (0.5, 1.5), M0=20, parallel=:threads)
+# Threaded computation. The threaded high-level backend currently supports
+# sparse real symmetric problems; unsupported cases fall back to serial unless
+# strict_backend=true is set.
+A_sparse = sparse(A)
+B_sparse = sparse(B)
+result = feast(A_sparse, B_sparse, (0.5, 1.5), M0=20, backend=:threads)
 
-# Or explicitly using feast_parallel
-result = feast_parallel(A, B, (0.5, 1.5), M0=20, use_threads=true)
+# Require a true threaded backend instead of fallback.
+result = feast(A_sparse, B_sparse, (0.5, 1.5), M0=20,
+               backend=:threads, strict_backend=true)
 
 println("Found $(result.M) eigenvalues using $(Threads.nthreads()) threads")
 ```
@@ -176,7 +181,7 @@ A = A + A' + 10I
 B = sparse(1.0I, n, n)
 
 # Distributed computation
-result = feast(A, B, (9.0, 11.0), M0=30, parallel=:distributed)
+result = feast(A, B, (9.0, 11.0), M0=30, backend=:distributed)
 
 println("Found $(result.M) eigenvalues using $(nworkers()) workers")
 ```
@@ -346,7 +351,7 @@ fpm = zeros(Int, 64)
 feastinit!(fpm)
 fpm[2] = 2 * nworkers()  # Set integration points
 
-result = feast(A, B, interval, M0=20, fpm=fpm, parallel=:distributed)
+result = feast(A, B, interval, M0=20, fpm=fpm, backend=:distributed)
 ```
 
 ### Benchmarking
@@ -446,8 +451,8 @@ MPI.install_mpiexecjl()
 
 ```julia
 # Monitor parallel efficiency
-@time result_serial = feast(A, B, interval, M0=20, parallel=:serial)
-@time result_parallel = feast(A, B, interval, M0=20, parallel=:threads)
+@time result_serial = feast(A, B, interval, M0=20, backend=:serial)
+@time result_parallel = feast(A, B, interval, M0=20, backend=:threads)
 
 speedup = result_serial.time / result_parallel.time
 efficiency = speedup / Threads.nthreads()
@@ -462,10 +467,10 @@ println("Speedup: $(speedup)x, Efficiency: $(efficiency * 100)%")
 
 ```julia
 # Automatic backend selection
-feast(A, B, interval; parallel=:auto)
-feast(A, B, interval; parallel=:threads)
-feast(A, B, interval; parallel=:distributed)
-feast(A, B, interval; parallel=:mpi, comm=MPI.COMM_WORLD)
+feast(A, B, interval; backend=:auto)
+feast(A, B, interval; backend=:threads)
+feast(A, B, interval; backend=:distributed)
+feast(A, B, interval; backend=:mpi, comm=MPI.COMM_WORLD)
 
 # Direct parallel interface
 feast_parallel(A, B, interval; use_threads=true)

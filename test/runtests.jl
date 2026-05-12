@@ -319,6 +319,13 @@ using Distributed
         @test info[1] == n  # Size
         @test info[2] > 0   # Non-zeros
         @test info[3] > 0   # Density
+
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        result = feast_scsrev!(copy(A_sparse), 0.0, 4.0, n, fpm)
+        @test result.info == 0
+        @test result.M == n
     end
 
     @testset "Sparse Hermitian generalized" begin
@@ -783,3 +790,7 @@ using Distributed
         end
     end
 end
+
+include("test_matrix_free.jl")
+include("test_allocation_helpers.jl")
+include("test_backend_api.jl")

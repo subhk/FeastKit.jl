@@ -1,11 +1,11 @@
-function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
-                     work::Matrix{T}, workc::Matrix{Complex{T}},
-                     Aq::Matrix{T}, Sq::Matrix{T}, fpm::Vector{Int},
-                     epsout::Ref{T}, loop::Ref{Int},
-                     Emin::T, Emax::T, M0::Int,
-                     lambda::Vector{T}, q::Matrix{T}, mode::Ref{Int},
-                     res::Vector{T}, info::Ref{Int};
-                     state::FeastSRCIState{T} = FeastSRCIState{T}()) where T<:Real
+@views function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
+                            work::Matrix{T}, workc::Matrix{Complex{T}},
+                            Aq::Matrix{T}, Sq::Matrix{T}, fpm::Vector{Int},
+                            epsout::Ref{T}, loop::Ref{Int},
+                            Emin::T, Emax::T, M0::Int,
+                            lambda::Vector{T}, q::Matrix{T}, mode::Ref{Int},
+                            res::Vector{T}, info::Ref{Int};
+                            state::FeastSRCIState{T} = FeastSRCIState{T}()) where T<:Real
 
     if ijob[] == -1  # Initialization
         feastdefault!(fpm)
@@ -27,7 +27,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             return
         end
 
-        contour = feast_get_custom_contour(fpm)
+        contour = feast_get_custom_contour(T, fpm)
         if contour === nothing
             contour = feast_contour(Emin, Emax, fpm)
         end
@@ -75,6 +75,10 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         state.Q_proj = zeros(Complex{T}, N, M0)
         state.zAq = zeros(Complex{T}, M0, M0)
         state.zSq = zeros(Complex{T}, M0, M0)
+        state.perm = Vector{Int}(undef, M0)
+        state.q_tmp = Matrix{T}(undef, N, M0)
+        state.residual = Vector{T}(undef, N)
+        state.moment = Matrix{Complex{T}}(undef, M0, M0)
 
         Ze[] = contour.Zne[1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
@@ -85,13 +89,13 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         # After factorization, request linear solve
         ijob[] = Int(Feast_RCI_SOLVE)
         Q0 = state.Q0
-        work[:, 1:size(Q0, 2)] = Q0
+        copyto!(view(work, :, 1:size(Q0, 2)), Q0)
         return
     end
 
     if ijob[] == Int(Feast_RCI_SOLVE)
         if !state.initialized
-            contour = feast_get_custom_contour(fpm)
+            contour = feast_get_custom_contour(T, fpm)
             if contour === nothing
                 contour = feast_contour(Emin, Emax, fpm)
             end
@@ -126,9 +130,14 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         Q_proj[:, 1:M_current] .+= weight .* workc[:, 1:M_current]
 
         # Accumulate moment matrices in complex (take real() only after full contour)
-        temp = Q0' * workc[:, 1:M_current]
-        zAq[1:M_current, 1:M_current] .+= weight * temp
-        zSq[1:M_current, 1:M_current] .+= weight * Zne[e] * temp
+        moment = view(state.moment, 1:M_current, 1:M_current)
+        mul!(moment, adjoint(view(Q0, :, 1:M_current)),
+             view(workc, :, 1:M_current))
+        @inbounds for j in 1:M_current, i in 1:M_current
+            weighted = weight * moment[i, j]
+            zAq[i, j] += weighted
+            zSq[i, j] += Zne[e] * weighted
+        end
 
         fpm[50] = e + 1  # Store incremented counter in fpm
         state.e = e + 1
@@ -153,20 +162,39 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 v_red = real.(F.vectors)
 
                 # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q0
-                Q_proj_real = real.(Q_proj[:, 1:M_current])
-                q[:, 1:M_current] = Q_proj_real * v_red[:, 1:M_current]
+                Q_proj_real = view(state.q_tmp, :, 1:M_current)
+                @inbounds for j in 1:M_current, i in 1:N
+                    Q_proj_real[i, j] = real(Q_proj[i, j])
+                end
+                mul!(view(q, :, 1:M_current), Q_proj_real,
+                     view(v_red, :, 1:M_current))
                 lambda[1:M_current] = lambda_red[1:M_current]
 
                 # Reorder: put eigenvalues inside the interval first
-                inside_mask = [feast_inside_contour(lambda[i], Emin, Emax) for i in 1:M_current]
-                inside_indices = findall(inside_mask)
-                outside_indices = findall(.!inside_mask)
-                perm = vcat(inside_indices, outside_indices)
+                M = 0
+                perm = state.perm
+                for i in 1:M_current
+                    if feast_inside_contour(lambda[i], Emin, Emax)
+                        M += 1
+                        perm[M] = i
+                    end
+                end
+                outside_position = M
+                for i in 1:M_current
+                    if !feast_inside_contour(lambda[i], Emin, Emax)
+                        outside_position += 1
+                        perm[outside_position] = i
+                    end
+                end
 
-                lambda[1:M_current] = lambda[perm]
-                q[:, 1:M_current] = q[:, perm]
-
-                M = length(inside_indices)
+                copyto!(view(state.q_tmp, :, 1:M_current),
+                        view(q, :, 1:M_current))
+                for new_idx in 1:M_current
+                    old_idx = perm[new_idx]
+                    lambda[new_idx] = lambda_red[old_idx]
+                    copyto!(view(q, :, new_idx),
+                            view(state.q_tmp, :, old_idx))
+                end
 
                 fpm[52] = M  # Store M in fpm
                 state.M = M
@@ -198,7 +226,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         # Caller must have computed A * q[:, 1:M] into work[:, 1:M]
         M = fpm[52]  # Get M from fpm
 
-        residual = zeros(T, N)
+        residual = state.residual
         for j in 1:M
             # Relative residual: ||Ax - λx|| / max(|λ|, 1) to avoid scale dependence
             @inbounds for i in 1:N
@@ -223,10 +251,10 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             fill!(Aq, zero(T))
             fill!(Sq, zero(T))
             # Use full subspace (M0 columns) for next iteration
-            work[:, 1:M0] = q[:, 1:M0]
+            copyto!(view(work, :, 1:M0), view(q, :, 1:M0))
 
             # Get contour for next refinement loop
-            contour = feast_get_custom_contour(fpm)
+            contour = feast_get_custom_contour(T, fpm)
             if contour === nothing
                 contour = feast_contour(Emin, Emax, fpm)
             end
@@ -236,7 +264,7 @@ function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             state.e = 1
             fpm[50] = 1  # Reset integration point counter
 
-            state.Q0 = copy(work[:, 1:M0])
+            copyto!(state.Q0, view(work, :, 1:M0))
             Ze[] = contour.Zne[1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return
@@ -298,14 +326,14 @@ function feast_grcix!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     end
 end
 
-function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
-                     work::Matrix{T}, workc::Matrix{Complex{T}},
-                     zAq::Matrix{Complex{T}}, zSq::Matrix{Complex{T}},
-                     fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
-                     Emin::T, Emax::T, M0::Int,
-                     lambda::Vector{T}, q::Matrix{Complex{T}},
-                     mode::Ref{Int}, res::Vector{T}, info::Ref{Int};
-                     state::FeastHRCIState{T} = FeastHRCIState{T}()) where T<:Real
+@views function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
+                            work::Matrix{T}, workc::Matrix{Complex{T}},
+                            zAq::Matrix{Complex{T}}, zSq::Matrix{Complex{T}},
+                            fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
+                            Emin::T, Emax::T, M0::Int,
+                            lambda::Vector{T}, q::Matrix{Complex{T}},
+                            mode::Ref{Int}, res::Vector{T}, info::Ref{Int};
+                            state::FeastHRCIState{T} = FeastHRCIState{T}()) where T<:Real
 
     if ijob[] == -1
         feastdefault!(fpm)
@@ -328,7 +356,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             return
         end
 
-        contour = feast_get_custom_contour(fpm)
+        contour = feast_get_custom_contour(T, fpm)
         if contour === nothing
             contour = feast_contour(Emin, Emax, fpm)
         end
@@ -371,6 +399,9 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         # Save initial subspace for moment accumulation
         state.Q0 = copy(workc[:, 1:M0])
         state.Q_proj = zeros(Complex{T}, N, M0)
+        state.perm = Vector{Int}(undef, M0)
+        state.q_tmp = Matrix{Complex{T}}(undef, N, M0)
+        state.residual = Vector{Complex{T}}(undef, N)
 
         Ze[] = state.Zne[1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
@@ -387,7 +418,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
     if ijob[] == Int(Feast_RCI_SOLVE)
         if !state.initialized
-            contour = feast_get_custom_contour(fpm)
+            contour = feast_get_custom_contour(T, fpm)
             if contour === nothing
                 contour = feast_contour(Emin, Emax, fpm)
             end
@@ -449,15 +480,30 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 lambda[1:M_current] = lambda_red[1:M_current]
 
                 # Reorder: put eigenvalues inside the interval first
-                inside_mask = [feast_inside_contour(lambda[i], Emin, Emax) for i in 1:M_current]
-                inside_indices = findall(inside_mask)
-                outside_indices = findall(.!inside_mask)
-                perm = vcat(inside_indices, outside_indices)
+                M = 0
+                perm = state.perm
+                for i in 1:M_current
+                    if feast_inside_contour(lambda[i], Emin, Emax)
+                        M += 1
+                        perm[M] = i
+                    end
+                end
+                outside_position = M
+                for i in 1:M_current
+                    if !feast_inside_contour(lambda[i], Emin, Emax)
+                        outside_position += 1
+                        perm[outside_position] = i
+                    end
+                end
 
-                lambda[1:M_current] = lambda[perm]
-                q[:, 1:M_current] = q[:, perm]
-
-                M = length(inside_indices)
+                copyto!(view(state.q_tmp, :, 1:M_current),
+                        view(q, :, 1:M_current))
+                for new_idx in 1:M_current
+                    old_idx = perm[new_idx]
+                    lambda[new_idx] = lambda_red[old_idx]
+                    copyto!(view(q, :, new_idx),
+                            view(state.q_tmp, :, old_idx))
+                end
 
                 state.M = M
 
@@ -485,7 +531,7 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     if ijob[] == Int(Feast_RCI_MULT_A)
         # Caller must have computed A * q[:, 1:M] into workc[:, 1:M]
         M = state.M
-        residual = zeros(Complex{T}, N)
+        residual = state.residual
         for j in 1:M
             # Relative residual: ||Ax - λx|| / max(|λ|, 1)
             @inbounds for i in 1:N
@@ -508,9 +554,9 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             fill!(zAq, zero(Complex{T}))
             fill!(zSq, zero(Complex{T}))
             # Use full subspace (M0 columns) for next iteration
-            workc[:, 1:M0] = q[:, 1:M0]
+            copyto!(view(workc, :, 1:M0), view(q, :, 1:M0))
             # Update Q0 for next refinement iteration with full subspace
-            state.Q0 = copy(q[:, 1:M0])
+            copyto!(state.Q0, view(q, :, 1:M0))
             Ze[] = state.Zne[1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return
@@ -529,14 +575,14 @@ function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
           "or $(Int(Feast_RCI_DONE)) (done)")
 end
 
-function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
-                     work::Matrix{T}, workc::Matrix{Complex{T}},
-                     Aq::Matrix{Complex{T}}, Sq::Matrix{Complex{T}},
-                     fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
-                     Emid::Complex{T}, r::T, M0::Int,
-                     lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
-                     mode::Ref{Int}, res::Vector{T}, info::Ref{Int};
-                     state::FeastGRCIState{T} = FeastGRCIState{T}()) where T<:Real
+@views function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
+                            work::Matrix{T}, workc::Matrix{Complex{T}},
+                            Aq::Matrix{Complex{T}}, Sq::Matrix{Complex{T}},
+                            fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
+                            Emid::Complex{T}, r::T, M0::Int,
+                            lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
+                            mode::Ref{Int}, res::Vector{T}, info::Ref{Int};
+                            state::FeastGRCIState{T} = FeastGRCIState{T}()) where T<:Real
 
     # Feast RCI for general (non-Hermitian) eigenvalue problems
     # Uses circular contour in complex plane
@@ -567,7 +613,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             return
         end
 
-        contour = feast_get_custom_contour(fpm)
+        contour = feast_get_custom_contour(T, fpm)
         if contour === nothing
             contour = feast_gcontour(Emid, r, fpm)
         end
@@ -615,6 +661,9 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
         # work is used for real intermediate results
         fill!(work, zero(T))
         state.Q0 = copy(workc[:, 1:M0])
+        state.perm = Vector{Int}(undef, M0)
+        state.workc_tmp = Matrix{Complex{T}}(undef, N, M0)
+        state.residual = Vector{Complex{T}}(undef, N)
         state.initialized = true
 
         Ze[] = contour.Zne[1]
@@ -694,11 +743,11 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
 
                 # Count eigenvalues inside contour region (elliptical if fpm[18]/[19] set)
                 M = 0
-                indices = Int[]
+                perm = state.perm
                 for i in 1:M0
                     if feast_inside_gcontour(lambda_red[i], Emid, r; fpm=fpm)
                         M += 1
-                        push!(indices, i)
+                        perm[M] = i
                         lambda[M] = lambda_red[i]
                     end
                 end
@@ -723,15 +772,20 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                     end
                 end
 
-                # Reorder: put eigenvalues inside contour first
-                outside_indices = setdiff(1:M0, indices)
-                perm = vcat(indices, outside_indices)
+                outside_position = M
+                for i in 1:M0
+                    if !feast_inside_gcontour(lambda_red[i], Emid, r; fpm=fpm)
+                        outside_position += 1
+                        perm[outside_position] = i
+                    end
+                end
 
-                lambda_temp = copy(lambda_red)
-                workc_temp = copy(workc[:, 1:M0])
-                for (new_idx, old_idx) in enumerate(perm)
-                    lambda[new_idx] = lambda_temp[old_idx]
-                    workc[:, new_idx] = workc_temp[:, old_idx]
+                copyto!(state.workc_tmp, view(workc, :, 1:M0))
+                for new_idx in 1:M0
+                    old_idx = perm[new_idx]
+                    lambda[new_idx] = lambda_red[old_idx]
+                    copyto!(view(workc, :, new_idx),
+                            view(state.workc_tmp, :, old_idx))
                 end
 
                 # Normalize eigenvectors
@@ -763,7 +817,7 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
             # Computing residuals
             M = fpm[52]
 
-            residual = zeros(Complex{T}, N)
+            residual = state.residual
             for j in 1:M
                 @inbounds for i in 1:N
                     residual[i] = workc[i, j] - lambda[j] * q[i, j]
@@ -788,16 +842,16 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 # Start new refinement loop
                 loop[] += 1
 
-                q_saved = copy(q[:, 1:M0])
+                copyto!(state.Q0, view(q, :, 1:M0))
 
                 fill!(Aq, zero(Complex{T}))
                 fill!(Sq, zero(Complex{T}))
                 fill!(q, zero(Complex{T}))
 
-                workc[:, 1:M0] = q_saved
+                copyto!(view(workc, :, 1:M0), state.Q0)
 
                 # Re-cache contour for next refinement loop
-                contour = feast_get_custom_contour(fpm)
+                contour = feast_get_custom_contour(T, fpm)
                 if contour === nothing
                     contour = feast_gcontour(Emid, r, fpm)
                 end
@@ -806,7 +860,6 @@ function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                 fpm[50] = 1
 
                 Ze[] = contour.Zne[1]
-                state.Q0 = copy(workc[:, 1:M0])
                 ijob[] = Int(Feast_RCI_FACTORIZE)
                 return
             end

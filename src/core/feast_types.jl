@@ -115,11 +115,16 @@ mutable struct FeastSRCIState{T<:Real}
     zAq::Matrix{Complex{T}}    # Complex moment accumulator (take real() only after full contour)
     zSq::Matrix{Complex{T}}    # Complex moment accumulator (take real() only after full contour)
     M::Int
+    perm::Vector{Int}
+    q_tmp::Matrix{T}
+    residual::Vector{T}
+    moment::Matrix{Complex{T}}
 
     function FeastSRCIState{T}() where T<:Real
         new{T}(false, Complex{T}[], Complex{T}[], 0, 1,
                Matrix{T}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
-               Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0), 0)
+               Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0), 0,
+               Int[], Matrix{T}(undef, 0, 0), T[], Matrix{Complex{T}}(undef, 0, 0))
     end
 end
 
@@ -139,11 +144,15 @@ mutable struct FeastHRCIState{T<:Real}
     M::Int
     eps::T
     maxloop::Int
+    perm::Vector{Int}
+    q_tmp::Matrix{Complex{T}}
+    residual::Vector{Complex{T}}
 
     function FeastHRCIState{T}() where T<:Real
         new{T}(false, Complex{T}[], Complex{T}[], 0, 1,
                Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
-               0, zero(T), 0)
+               0, zero(T), 0, Int[],
+               Matrix{Complex{T}}(undef, 0, 0), Complex{T}[])
     end
 end
 
@@ -158,10 +167,14 @@ mutable struct FeastGRCIState{T<:Real}
     mult_a_for_projection::Bool  # Distinguishes two MULT_A calls (moved out of fpm[54])
     Zne::Vector{Complex{T}}     # Cached contour nodes
     Wne::Vector{Complex{T}}     # Cached contour weights
+    perm::Vector{Int}
+    workc_tmp::Matrix{Complex{T}}
+    residual::Vector{Complex{T}}
 
     function FeastGRCIState{T}() where T<:Real
         new{T}(false, Matrix{Complex{T}}(undef, 0, 0), false,
-               Complex{T}[], Complex{T}[])
+               Complex{T}[], Complex{T}[], Int[],
+               Matrix{Complex{T}}(undef, 0, 0), Complex{T}[])
     end
 end
 

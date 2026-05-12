@@ -24,23 +24,23 @@ Matrix-free operator defined by a matrix-vector multiplication function.
 - `ishermitian`: Whether the operator is Hermitian  
 - `isposdef`: Whether the operator is positive definite
 """
-struct MatrixVecFunction{T} <: MatrixFreeOperator{T}
-    mul!::Function
+struct MatrixVecFunction{T,F} <: MatrixFreeOperator{T}
+    mul!::F
     size::Tuple{Int, Int}
     issymmetric::Bool
     ishermitian::Bool
     isposdef::Bool
-    
-    function MatrixVecFunction{T}(mul!::Function, size::Tuple{Int, Int};
-                                 issymmetric::Bool = false,
-                                 ishermitian::Bool = false,
-                                 isposdef::Bool = false) where T
-        new{T}(mul!, size, issymmetric, ishermitian, isposdef)
-    end
+end
+
+function MatrixVecFunction{T}(mul!::F, size::Tuple{Int, Int};
+                              issymmetric::Bool = false,
+                              ishermitian::Bool = false,
+                              isposdef::Bool = false) where {T,F}
+    return MatrixVecFunction{T,F}(mul!, size, issymmetric, ishermitian, isposdef)
 end
 
 # Convenience constructors
-MatrixVecFunction(mul!::Function, size::Tuple{Int, Int}; kwargs...) = 
+MatrixVecFunction(mul!::F, size::Tuple{Int, Int}; kwargs...) where F =
     MatrixVecFunction{Float64}(mul!, size; kwargs...)
 
 """
@@ -56,29 +56,29 @@ Matrix-free operator that supports multiple operations.
 - `size`: Operator size
 - `issymmetric`, `ishermitian`, `isposdef`: Properties
 """
-struct LinearOperator{T} <: MatrixFreeOperator{T}
-    A_mul!::Function
-    At_mul!::Union{Function, Nothing}
-    Ac_mul!::Union{Function, Nothing}
-    solve!::Union{Function, Nothing}
+struct LinearOperator{T,FA,FT,FC,FS} <: MatrixFreeOperator{T}
+    A_mul!::FA
+    At_mul!::FT
+    Ac_mul!::FC
+    solve!::FS
     size::Tuple{Int, Int}
     issymmetric::Bool
     ishermitian::Bool
     isposdef::Bool
-    
-    function LinearOperator{T}(A_mul!::Function, size::Tuple{Int, Int};
-                              At_mul!::Union{Function, Nothing} = nothing,
-                              Ac_mul!::Union{Function, Nothing} = nothing,
-                              solve!::Union{Function, Nothing} = nothing,
-                              issymmetric::Bool = false,
-                              ishermitian::Bool = false,
-                              isposdef::Bool = false) where T
-        new{T}(A_mul!, At_mul!, Ac_mul!, solve!, size, 
-               issymmetric, ishermitian, isposdef)
-    end
 end
 
-LinearOperator(A_mul!::Function, size::Tuple{Int, Int}; kwargs...) =
+function LinearOperator{T}(A_mul!::FA, size::Tuple{Int, Int};
+                           At_mul!::FT = nothing,
+                           Ac_mul!::FC = nothing,
+                           solve!::FS = nothing,
+                           issymmetric::Bool = false,
+                           ishermitian::Bool = false,
+                           isposdef::Bool = false) where {T,FA,FT,FC,FS}
+    return LinearOperator{T,FA,FT,FC,FS}(A_mul!, At_mul!, Ac_mul!, solve!, size,
+                                        issymmetric, ishermitian, isposdef)
+end
+
+LinearOperator(A_mul!::FA, size::Tuple{Int, Int}; kwargs...) where FA =
     LinearOperator{Float64}(A_mul!, size; kwargs...)
 
 # Interface functions
@@ -266,6 +266,11 @@ end
     feast_matfree_grci!(A_op, B_op, center, radius, M0; kwargs...)
 
 Matrix-free Feast RCI for general (non-Hermitian) eigenvalue problems.
+
+The user-provided `linear_solver` must solve `(Ze * B - A) * Y = X` for the
+current contour point `Ze`. The RCI kernel decides which operation is needed;
+this wrapper only supplies matrix-vector products and shifted solves through
+the matrix-free operators.
 """
 function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
                             B_op::MatrixFreeOperator{Complex{T}},
@@ -298,6 +303,9 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
     
     work = workspace.work
     workc = workspace.workc
+    # `workc` is both the input RHS and output solution for solve requests.
+    # Keep a separate RHS buffer so callbacks can overwrite `workc` safely.
+    rhs = hasproperty(workspace, :rhs) ? workspace.rhs : similar(workc)
     zAq = workspace.zAq
     zSq = workspace.zSq
     lambda = workspace.lambda
@@ -315,7 +323,8 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
     # Persistent RCI state (must be reused across calls in the loop)
     grci_state = FeastGRCIState{T}()
 
-    # Matrix-free RCI loop for general problems
+    # Matrix-free RCI loop for general problems. `ijob` tells us which user
+    # operation the core FEAST state machine needs next.
     while true
         feast_grci!(ijob, N, Ze, work, workc, zAq, zSq, fpm,
                    epsout, loop, center, radius, M0, lambda, q, mode, res, info; state=grci_state)
@@ -332,8 +341,8 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
             # For general problems, workc contains Q0 (the RHS) and result goes back to workc
             # Need a temporary to avoid overwriting input before reading it
             try
-                rhs_copy = copy(workc)
-                linear_solver(workc, Ze[], rhs_copy)
+                copyto!(rhs, workc)
+                linear_solver(workc, Ze[], rhs)
             catch e
                 info[] = Int(Feast_ERROR_LAPACK)
                 break
@@ -374,12 +383,18 @@ end
     allocate_matfree_workspace(T, N, M0)
 
 Allocate workspace arrays for matrix-free Feast operations.
+
+Real problems use real search vectors plus complex shifted-solve buffers.
+General complex problems use real FEAST bookkeeping with complex RHS/solution
+buffers. The `rhs` field is explicit scratch for callbacks that write into
+`workc`.
 """
 function allocate_matfree_workspace(::Type{T}, N::Int, M0::Int) where T
     if T <: Real
         return (
             work = zeros(T, N, M0),
             workc = zeros(Complex{T}, N, M0), 
+            rhs = zeros(Complex{T}, N, M0),
             Aq = zeros(T, M0, M0),
             Sq = zeros(T, M0, M0),
             lambda = zeros(T, M0),
@@ -391,6 +406,7 @@ function allocate_matfree_workspace(::Type{T}, N::Int, M0::Int) where T
         return (
             work = zeros(RT, N, M0),
             workc = zeros(T, N, M0),
+            rhs = zeros(T, N, M0),
             zAq = zeros(T, M0, M0),
             zSq = zeros(T, M0, M0), 
             lambda = zeros(T, M0),
@@ -492,6 +508,80 @@ function feast_general(A_op::MatrixFreeOperator{Complex{T}},
                               fpm=fpm, tol=tol, maxiter=maxiter)
 end
 
+function _matrix_free_polynomial_companion_operators(
+        coeffs_ops::AbstractVector{<:MatrixFreeOperator{Complex{T}}}) where T<:Real
+
+    d = length(coeffs_ops) - 1
+    if d < 1
+        throw(ArgumentError("Need at least 2 coefficient operators (degree ≥ 1)"))
+    end
+
+    N = size(coeffs_ops[1], 1)
+    for op in coeffs_ops
+        if size(op) != (N, N)
+            throw(DimensionMismatch("All coefficient operators must have size ($N, $N)"))
+        end
+    end
+
+    companion_tmp = Vector{Complex{T}}(undef, N)
+    companion_x = Vector{Complex{T}}(undef, N)
+
+    function A_companion_mul!(y::AbstractVector{Complex{T}}, x::AbstractVector{Complex{T}})
+        fill!(y, zero(Complex{T}))
+
+        for block in 1:d-1
+            y_offset = (block - 1) * N
+            x_offset = block * N
+            @inbounds for i in 1:N
+                y[y_offset+i] = x[x_offset+i]
+            end
+        end
+
+        last_offset = (d - 1) * N
+        for block in 0:d-1
+            x_offset = block * N
+            @inbounds for i in 1:N
+                companion_x[i] = x[x_offset+i]
+            end
+
+            mul!(companion_tmp, coeffs_ops[block+1], companion_x)
+
+            @inbounds for i in 1:N
+                y[last_offset+i] -= companion_tmp[i]
+            end
+        end
+
+        return y
+    end
+
+    function B_companion_mul!(y::AbstractVector{Complex{T}}, x::AbstractVector{Complex{T}})
+        fill!(y, zero(Complex{T}))
+
+        for block in 0:d-2
+            offset = block * N
+            @inbounds for i in 1:N
+                y[offset+i] = x[offset+i]
+            end
+        end
+
+        last_offset = (d - 1) * N
+        @inbounds for i in 1:N
+            companion_x[i] = x[last_offset+i]
+        end
+        mul!(companion_tmp, coeffs_ops[end], companion_x)
+        @inbounds for i in 1:N
+            y[last_offset+i] = companion_tmp[i]
+        end
+
+        return y
+    end
+
+    companion_size = (d * N, d * N)
+    A_comp = LinearOperator{Complex{T}}(A_companion_mul!, companion_size)
+    B_comp = LinearOperator{Complex{T}}(B_companion_mul!, companion_size)
+    return A_comp, B_comp
+end
+
 """
     feast_polynomial(coeffs_ops, center, radius; kwargs...)
 
@@ -512,7 +602,7 @@ eigenvalue problem (A - λB)y = 0 of size (d*N × d*N), where y = [x; λx; λ²x
 - `kwargs`: Additional options passed to feast_general
 
 # Returns
-- `FeastResult` with eigenvalues λ and corresponding eigenvectors x (first N components of full eigenvector)
+- `FeastGeneralResult` with eigenvalues λ and corresponding eigenvectors x (first N components of full eigenvector)
 """
 function feast_polynomial(coeffs_ops::Vector{<:MatrixFreeOperator{Complex{T}}},
                          center::Complex{T}, radius::T;
@@ -534,66 +624,7 @@ function feast_polynomial(coeffs_ops::Vector{<:MatrixFreeOperator{Complex{T}}},
         end
     end
     
-    # Linearize polynomial eigenvalue problem
-    # Convert P(λ)x = 0 to generalized eigenvalue problem (A - λB)y = 0
-    
-    # Create companion matrix operators
-    # For polynomial P(λ) = C_0 + λC_1 + λ²C_2 + ... + λᵈC_d
-    # The companion matrix is of size (d*N × d*N) and has the structure:
-    #   A = [   0    I    0  ...   0  ]
-    #       [   0    0    I  ...   0  ]
-    #       [   :    :    :  ⋱    :  ]
-    #       [   0    0    0  ...   I  ]
-    #       [-C_0  -C_1  -C_2 ... -C_{d-1}]
-    
-    function A_companion_mul!(y::AbstractVector, x::AbstractVector)
-        n = N
-        fill!(y, 0)
-        
-        # Identity blocks in super-diagonal: x[i*n+1:(i+1)*n] -> y[(i-1)*n+1:i*n]
-        for i in 1:d-1
-            # Block (i-1, i): I_n
-            y[(i-1)*n+1:i*n] .= view(x, i*n+1:(i+1)*n)
-        end
-        
-        # Last block row: -C_0*x[1:n] - C_1*x[n+1:2n] - ... - C_{d-1}*x[(d-1)*n+1:d*n]
-        # Accumulate directly into output to avoid temporary allocations
-        for i in 0:d-1
-            # Create a temporary view for the matrix-vector product
-            temp_view = view(y, (d-1)*n+1:d*n)
-            temp_storage = similar(temp_view)
-            mul!(temp_storage, coeffs_ops[i+1], view(x, i*n+1:(i+1)*n))
-            temp_view .-= temp_storage
-        end
-    end
-    
-    function B_companion_mul!(y::AbstractVector, x::AbstractVector)
-        # B matrix for companion linearization has the structure:
-        #   B = [ I   0   0  ...  0  ]
-        #       [ 0   I   0  ...  0  ]
-        #       [ :   :   :  ⋱   :  ]
-        #       [ 0   0   0  ...  I  ]
-        #       [ 0   0   0  ... C_d ]
-        
-        n = N
-        fill!(y, 0)
-        
-        # Identity blocks on diagonal for first d-1 block rows
-        for i in 0:d-2
-            # Block (i, i): I_n
-            y[i*n+1:(i+1)*n] .= view(x, i*n+1:(i+1)*n)
-        end
-        
-        # Last block row, last block: C_d * x[(d-1)*n+1:d*n]
-        if d >= 1
-            mul!(view(y, (d-1)*n+1:d*n), coeffs_ops[end], view(x, (d-1)*n+1:d*n))
-        end
-    end
-    
-    # Create linearized operators
-    companion_size = (d * N, d * N)
-    A_comp = LinearOperator{Complex{T}}(A_companion_mul!, companion_size)
-    B_comp = LinearOperator{Complex{T}}(B_companion_mul!, companion_size)
+    A_comp, B_comp = _matrix_free_polynomial_companion_operators(coeffs_ops)
     
     # Solve linearized problem
     result = feast_general(A_comp, B_comp, center, radius; M0=M0, solver=solver, kwargs...)
@@ -601,7 +632,7 @@ function feast_polynomial(coeffs_ops::Vector{<:MatrixFreeOperator{Complex{T}}},
     # Extract original eigenvectors (first N components)
     if result.M > 0
         q_original = result.q[1:N, :]
-        return FeastResult{T, Complex{T}}(
+        return FeastGeneralResult{T}(
             result.lambda,
             q_original,
             result.M,
@@ -648,16 +679,17 @@ function create_iterative_solver(A_op::MatrixFreeOperator{T},
         # Create shifted operator: (z*B - A)
         # Note: z is always complex in FEAST, so output must be complex
         CT = promote_type(T, typeof(z))
+        temp = Vector{CT}(undef, N)
+        temp_A = Vector{CT}(undef, N)
+        xj = Vector{CT}(undef, N)
 
         function shifted_mul!(y, x)
             # y = (z*B - A) * x = z*(B*x) - A*x
-            # Use complex temporary since z is complex
-            temp = zeros(CT, length(x))
             mul!(temp, B_op, x)
-            temp .*= z
-            temp_A = zeros(CT, length(x))
+            @. temp = z * temp
             mul!(temp_A, A_op, x)
-            y .= temp .- temp_A
+            @. y = temp - temp_A
+            return y
         end
 
         shifted_op = LinearOperator{CT}(shifted_mul!, (N, N))
@@ -665,16 +697,23 @@ function create_iterative_solver(A_op::MatrixFreeOperator{T},
         M0 = size(X, 2)
         for j in 1:M0
             # Convert RHS to complex since z is complex (Krylov needs matching types)
-            xj = CT.(X[:, j])
+            @inbounds for i in 1:N
+                xj[i] = CT(X[i, j])
+            end
             if solver_type == :gmres
-                result, stats = Krylov.gmres(shifted_op, xj, restart=restart,
-                                             rtol=rtol, itmax=maxiter)
-                Y[:, j] .= result
+                result, stats = Krylov.gmres(shifted_op, xj;
+                                             restart=true,
+                                             memory=max(restart, 2),
+                                             rtol=rtol,
+                                             atol=rtol,
+                                             itmax=maxiter)
+                @views Y[:, j] .= result
                 converged = stats.solved
             elseif solver_type == :bicgstab
-                result, stats = Krylov.bicgstab(shifted_op, xj,
-                                                rtol=rtol, itmax=maxiter)
-                Y[:, j] .= result
+                result, stats = Krylov.bicgstab(shifted_op, xj;
+                                                rtol=rtol, atol=rtol,
+                                                itmax=maxiter)
+                @views Y[:, j] .= result
                 converged = stats.solved
             elseif solver_type == :cg
                 # CG only works for SPD systems - but (z*B - A) is NOT SPD for complex z

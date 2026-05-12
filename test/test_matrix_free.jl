@@ -5,6 +5,19 @@ using FeastKit
 using LinearAlgebra, SparseArrays
 using Random
 
+struct DenseTestMul{M}
+    A::M
+end
+
+(op::DenseTestMul)(y, x) = mul!(y, op.A, x)
+
+function apply_repeated_test!(y, op, x, nrepeat)
+    for _ in 1:nrepeat
+        mul!(y, op, x)
+    end
+    return y
+end
+
 @testset "Matrix-Free Feast Tests" begin
     
     @testset "MatrixFreeOperator Types" begin
@@ -54,7 +67,7 @@ using Random
         function test_solver(Y::AbstractMatrix, z::Number, X::AbstractMatrix)
             shifted = z * I - A
             for j in 1:size(X, 2)
-                Y[:, j] = shifted \\ X[:, j]
+                Y[:, j] = shifted \ X[:, j]
             end
         end
         
@@ -84,7 +97,7 @@ using Random
         T = Float64
         N, M0 = 100, 10
         
-        ws = Feast.allocate_matfree_workspace(T, N, M0)
+        ws = allocate_matfree_workspace(T, N, M0)
         
         @test size(ws.work) == (N, M0)
         @test size(ws.workc) == (N, M0)
@@ -133,7 +146,7 @@ using Random
                 T_full = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))
                 shifted = z * I - T_full
                 for j in 1:size(X, 2)
-                    Y[:, j] = shifted \\ X[:, j]
+                    Y[:, j] = shifted \ X[:, j]
                 end
             else
                 throw(ArgumentError("Mock solver only works for small problems"))
@@ -177,6 +190,129 @@ using Random
         
         found_vals = sort(result.lambda[1:result.M])
         @test found_vals ≈ [2.0, 3.0, 4.0] atol=1e-10
+    end
+
+    @testset "Default Matrix-Free GMRES Solver" begin
+        n = 5
+        A = diagm(0 => collect(1.0:n))
+        A_mul!(y, x) = mul!(y, A, x)
+        A_op = LinearOperator{Float64}(A_mul!, (n, n), issymmetric=true)
+
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        fpm[2] = 4
+
+        result = feast(A_op, (1.5, 4.5); M0=n, fpm=fpm,
+                       solver_opts=(rtol=1e-10, maxiter=100, restart=10))
+
+        @test result.info == 0
+        @test result.M == 3
+        @test sort(result.lambda[1:result.M]) ≈ [2.0, 3.0, 4.0] atol=1e-8
+    end
+
+    @testset "Matrix-Free Callback Allocation" begin
+        n = 8
+        A = Matrix{Float64}(SymTridiagonal(fill(2.0, n), fill(-1.0, n - 1)))
+        A_mul!(y, op, x) = mul!(y, A, x)
+        op = MatrixVecFunction{Float64}(A_mul!, (n, n), issymmetric=true)
+        x = ones(n)
+        y = zeros(n)
+
+        function apply_repeated!(y, op, x)
+            for _ in 1:1_000
+                mul!(y, op, x)
+            end
+            return y
+        end
+
+        apply_repeated!(y, op, x)
+        bytes = @allocated begin
+            apply_repeated!(y, op, x)
+        end
+
+        @test bytes < 1024
+    end
+
+    @testset "Matrix-Free Shifted Operator Type Stability" begin
+        n = 8
+        A = Matrix{Float64}(SymTridiagonal(fill(2.0, n), fill(-1.0, n - 1)))
+        A_mul!(y, x) = mul!(y, A, x)
+        B_mul!(y, x) = copyto!(y, x)
+
+        op = FeastKit.MatrixFreeShiftedOperator(n, 0.5 + 0.25im, A_mul!, B_mul!, Float64)
+
+        @test fieldtype(typeof(op), :A_matvec!) === typeof(A_mul!)
+        @test fieldtype(typeof(op), :B_matvec!) === typeof(B_mul!)
+
+        x = randn(ComplexF64, n)
+        y = zeros(ComplexF64, n)
+        @inferred mul!(y, op, x)
+    end
+
+    @testset "Polynomial Companion Operator Allocation" begin
+        n = 4
+        C0 = ComplexF64.(-diagm(0 => collect(1.0:n)))
+        C1 = Matrix{ComplexF64}(I, n, n)
+
+        coeffs_ops = [
+            LinearOperator{ComplexF64}(DenseTestMul(C0), (n, n)),
+            LinearOperator{ComplexF64}(DenseTestMul(C1), (n, n)),
+        ]
+
+        A_comp, B_comp = FeastKit._matrix_free_polynomial_companion_operators(coeffs_ops)
+        x = randn(ComplexF64, n)
+        y = zeros(ComplexF64, n)
+
+        apply_repeated_test!(y, A_comp, x, 1)
+        bytes_a = @allocated begin
+            apply_repeated_test!(y, A_comp, x, 1_000)
+        end
+
+        apply_repeated_test!(y, B_comp, x, 1)
+        bytes_b = @allocated begin
+            apply_repeated_test!(y, B_comp, x, 1_000)
+        end
+
+        @test bytes_a < 1024
+        @test bytes_b < 1024
+
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[2] = 4
+        fpm[4] = 3
+
+        result = feast_polynomial(coeffs_ops, 2.5 + 0im, 3.0;
+                                  M0=n, fpm=fpm,
+                                  solver=:gmres,
+                                  solver_opts=(rtol=1e-10, maxiter=100, restart=10))
+
+        @test result.info == 0
+        @test result.lambda isa Vector{ComplexF64}
+        @test sort(real.(result.lambda[1:result.M])) ≈ collect(1.0:n) atol=1e-8
+    end
+
+    @testset "Typed Custom Contour Lookup" begin
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+
+        Zne = ComplexF64[1 + 0im, 0 + 1im, -1 + 0im, 0 - 1im]
+        Wne = ComplexF64[0.25 + 0im, 0 + 0.25im, -0.25 + 0im, 0 - 0.25im]
+        contour = FeastKit.FeastContour{Float64}(Zne, Wne)
+        FeastKit.feast_set_custom_contour!(fpm, contour)
+
+        try
+            return_type = only(Base.return_types(FeastKit.feast_get_custom_contour,
+                                                 (Type{Float64}, Vector{Int})))
+            @test return_type == Union{Nothing, FeastKit.FeastContour{Float64}}
+
+            typed = FeastKit.feast_get_custom_contour(Float64, fpm)
+            @test typed isa FeastKit.FeastContour{Float64}
+            @test typed.Zne == Zne
+            @test typed.Wne == Wne
+        finally
+            FeastKit.feast_clear_custom_contour!(fpm)
+        end
     end
     
     @testset "Error Handling" begin

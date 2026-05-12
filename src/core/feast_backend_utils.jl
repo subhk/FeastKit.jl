@@ -9,7 +9,7 @@ function mpi_available()
     return isdefined(FeastKit, :MPI_AVAILABLE) && FeastKit.MPI_AVAILABLE[]
 end
 
-# Determine optimal parallel backend
+# Determine the available backend for a requested execution mode.
 function determine_parallel_backend(parallel::Symbol, comm=nothing)
     if parallel == :mpi
         # Explicit MPI request
@@ -45,7 +45,17 @@ function determine_parallel_backend(parallel::Symbol, comm=nothing)
     end
 end
 
-function feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads)
+function _backend_fallback(reason::AbstractString, strict_backend::Bool,
+                           A, B, interval, M0, fpm)
+    if strict_backend
+        throw(ArgumentError(reason))
+    end
+    @warn "$reason; falling back to serial execution"
+    return feast_serial(A, B, interval, M0, fpm)
+end
+
+function feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads;
+                            strict_backend::Bool = false)
     if backend == :mpi && mpi_available()
         if eltype(A) <: Real && eltype(B) <: Real
             # Handle comm=nothing by omitting the keyword to use MPI.COMM_WORLD default
@@ -55,13 +65,24 @@ function feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads)
                 return mpi_feast(A, B, interval, M0=M0, fpm=fpm, comm=comm)
             end
         else
-            @warn "MPI backend currently supports real symmetric problems; falling back to serial execution"
+            return _backend_fallback("MPI backend currently supports real symmetric problems",
+                                     strict_backend, A, B, interval, M0, fpm)
         end
     elseif backend in [:threads, :distributed]
-        if eltype(A) <: Real && eltype(B) <: Real
-            return feast_parallel(A, B, interval, M0=M0, fpm=fpm, use_threads=(backend==:threads))
+        if !(eltype(A) <: Real && eltype(B) <: Real)
+            return _backend_fallback("Threaded/distributed backends currently support real symmetric problems",
+                                     strict_backend, A, B, interval, M0, fpm)
+        end
+
+        if A isa SparseMatrixCSC && B isa SparseMatrixCSC
+            return pfeast_scsrgv!(copy(A), copy(B), interval[1], interval[2], M0, fpm;
+                                  use_threads=(backend == :threads))
+        elseif A isa Matrix && B isa Matrix
+            return _backend_fallback("Dense threaded/distributed backend is disabled because it does not currently match serial results",
+                                     strict_backend, A, B, interval, M0, fpm)
         else
-            @warn "Threaded/distributed backends currently support real symmetric problems; falling back to serial execution"
+            return _backend_fallback("Threaded/distributed backend requires both matrices to use the same dense or sparse storage",
+                                     strict_backend, A, B, interval, M0, fpm)
         end
     end
     # Fall back to serial execution

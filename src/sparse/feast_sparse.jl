@@ -5,7 +5,7 @@ using SparseArrays
 using LinearAlgebra
 using Random
 
-# Shifted operator for GMRES solves
+# Shifted operator for GMRES solves on explicit sparse matrices.
 struct SparseShiftedOperator{CT<:Complex,TA<:AbstractMatrix,TB<:AbstractMatrix}
     A::TA
     B::TB
@@ -18,6 +18,7 @@ Base.size(op::SparseShiftedOperator) = size(op.A)
 Base.eltype(::SparseShiftedOperator{CT}) where {CT} = CT
 
 function LinearAlgebra.mul!(y::AbstractVector{CT}, op::SparseShiftedOperator{CT}, x::AbstractVector{CT}) where CT
+    # Compute y = z * B * x - A * x using the operator-owned scratch buffers.
     mul!(op.tmpB, op.B, x)
     @. op.tmpB = op.z * op.tmpB
     mul!(op.tmpA, op.A, x)
@@ -25,11 +26,18 @@ function LinearAlgebra.mul!(y::AbstractVector{CT}, op::SparseShiftedOperator{CT}
     return y
 end
 
-mutable struct MatrixFreeShiftedOperator{T<:Real,CT<:Complex}
+"""
+    MatrixFreeShiftedOperator(N, z, A_matvec!, B_matvec!, T)
+
+Matrix-free representation of `(zB - A)` for Krylov solves. The real and
+imaginary scratch vectors let real-valued user callbacks operate on complex
+vectors without allocating split views on every `mul!` call.
+"""
+mutable struct MatrixFreeShiftedOperator{T<:Real,CT<:Complex,FA,FB}
     N::Int
     z::CT
-    A_matvec!::Function
-    B_matvec!::Function
+    A_matvec!::FA
+    B_matvec!::FB
     tmp_real::Vector{T}
     tmp_imag::Vector{T}
     result_real::Vector{T}
@@ -38,17 +46,19 @@ mutable struct MatrixFreeShiftedOperator{T<:Real,CT<:Complex}
     x_imag::Vector{T}
 end
 
-MatrixFreeShiftedOperator(N::Int, z::CT, A_matvec!::Function,
-                          B_matvec!::Function, ::Type{T}) where {T<:Real,CT<:Complex} =
-    MatrixFreeShiftedOperator{T,CT}(N, z, A_matvec!, B_matvec!,
-                                    zeros(T, N), zeros(T, N),
-                                    zeros(T, N), zeros(T, N),
-                                    zeros(T, N), zeros(T, N))
+MatrixFreeShiftedOperator(N::Int, z::CT, A_matvec!::FA,
+                          B_matvec!::FB, ::Type{T}) where {T<:Real,CT<:Complex,FA,FB} =
+    MatrixFreeShiftedOperator{T,CT,FA,FB}(N, z, A_matvec!, B_matvec!,
+                                          zeros(T, N), zeros(T, N),
+                                          zeros(T, N), zeros(T, N),
+                                          zeros(T, N), zeros(T, N))
 
 Base.size(op::MatrixFreeShiftedOperator) = (op.N, op.N)
 Base.eltype(::MatrixFreeShiftedOperator{T,CT}) where {T,CT} = CT
 
 function LinearAlgebra.mul!(y::AbstractVector{CT}, op::MatrixFreeShiftedOperator{T,CT}, x::AbstractVector{CT}) where {T<:Real,CT<:Complex}
+    # User callbacks are real-valued, so split x into real/imaginary parts,
+    # apply A and B to each part, and recombine z * Bx - Ax in complex form.
     @inbounds for i in 1:op.N
         xi = x[i]
         op.x_real[i] = real(xi)
@@ -95,6 +105,14 @@ end
     end
     return dest
 end
+
+"""
+    solve_shifted_iterative!(dest, rhs, A, B, z, tol, maxiter, gmres_restart)
+
+Solve the sparse shifted system `(zB - A) * X = rhs` column by column with
+GMRES. The operator and residual buffers are reused for all right-hand sides,
+while Krylov owns the per-column iterate it returns.
+"""
 function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                                   rhs::AbstractMatrix{CT},
                                   A::SparseMatrixCSC,
@@ -133,6 +151,14 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
     return true
 end
 
+"""
+    _feast_sparse_hermitian(A, B, Emin, Emax, M0, fpm; solver=:direct)
+
+Shared sparse complex Hermitian FEAST implementation. It mirrors the dense
+Hermitian path but uses sparse factorizations or sparse GMRES for the shifted
+systems. Work arrays are kept outside the contour loop to avoid repeated
+allocation during refinement.
+"""
 function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                                  B::Union{SparseMatrixCSC{Complex{T},Int},Nothing},
                                  Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
@@ -156,23 +182,30 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
         throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Please ensure it is in the environment."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
 
+    # Workspace fields are reused for the basis, shifted solves, Ritz vectors,
+    # residuals, and interval reordering scratch across all FEAST loops.
     workspace = FeastWorkspaceComplex{T}(N, M0)
     Q_basis = view(workspace.workc, :, 1:M0)
     _feast_seeded_subspace_complex!(Q_basis)
-    solutions = view(workspace.q, :, 1:M0)
+    solutions = workspace.q
     lambda_vec = workspace.lambda
     res_vec = workspace.res
 
     zAq = zeros(Complex{T}, M0, M0)
     zSq = zeros(Complex{T}, M0, M0)
+    Aq_herm = similar(zAq)
+    Sq_herm = similar(zSq)
     moment = Matrix{Complex{T}}(undef, M0, M0)
     # Always allocate a separate rhs_buffer to avoid aliasing Q_basis
     # (aliased views are fragile — any future in-place write to one corrupts the other)
     rhs_buffer = Matrix{Complex{T}}(undef, N, M0)
+    lambda_tmp = similar(lambda_vec)
+    perm = Vector{Int}(undef, M0)
+    solutions_tmp = similar(solutions)
     residual_vec = zeros(Complex{T}, N)
     Bq_vec = B === nothing ? nothing : zeros(Complex{T}, N)
 
-    contour = feast_get_custom_contour(fpm)
+    contour = feast_get_custom_contour(T, fpm)
     contour === nothing && (contour = feast_contour(Emin, Emax, fpm))
     Zne = contour.Zne
     Wne = contour.Wne
@@ -188,6 +221,8 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
     Q_proj = zeros(Complex{T}, N, M0)
 
     for loop_idx in 0:maxloop
+        # Reset contour accumulators before applying the spectral projector to
+        # the current basis.
         loop_count = loop_idx
         fill!(zAq, zero(Complex{T}))
         fill!(zSq, zero(Complex{T}))
@@ -196,6 +231,8 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
         gmres_failed = false
 
         for e in 1:length(Zne)
+            # Each contour point contributes a shifted solve plus weighted
+            # moment matrices for the reduced eigenproblem.
             z = Zne[e]
             weight = 2 * Wne[e]
 
@@ -209,7 +246,7 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                 shifted_matrix = z * B_matrix - A
                 try
                     solver_factor = lu(shifted_matrix)
-                    solutions .= solver_factor \ rhs_buffer
+                    ldiv!(solutions, solver_factor, rhs_buffer)
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)
                     @warn "Sparse direct solve failed for shift $z" exception=err
@@ -242,8 +279,8 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
             # For half-contour integration of Hermitian problems, the full contour
             # integral yields Hermitian reduced matrices (R(z̄)^H = R(z) for A = A^H).
             # Extract the Hermitian part via (M + M^H)/2, NOT real/symmetric part.
-            Aq_herm = 0.5 .* (zAq .+ adjoint(zAq))
-            Sq_herm = 0.5 .* (zSq .+ adjoint(zSq))
+            _feast_hermitian_part!(Aq_herm, zAq)
+            _feast_hermitian_part!(Sq_herm, zSq)
 
             # Solve Hermitian generalized eigenproblem: Sq*x = lambda*Aq*x
             # Eigenvalues are real; eigenvectors are complex.
@@ -270,17 +307,9 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                 lambda_vec[idx] = lambda_red[idx]
             end
 
-            # Reorder: put eigenvalues inside interval first while maintaining pairing
-            inside_mask = [Emin <= lambda_vec[i] <= Emax for i in 1:M0]
-            inside_indices = findall(inside_mask)
-            outside_indices = findall(.!inside_mask)
-            perm = vcat(inside_indices, outside_indices)
-
-            # Apply permutation to maintain eigenvalue/eigenvector pairing
-            lambda_vec[1:M0] = lambda_vec[perm]
-            solutions[:, 1:M0] = solutions[:, perm]
-
-            M = length(inside_indices)
+            M = _feast_reorder_by_interval!(lambda_vec, solutions, perm,
+                                             lambda_tmp, solutions_tmp,
+                                             Emin, Emax, M0)
             if M == 0
                 info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
@@ -314,8 +343,6 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
             M_found = M
 
             if epsout_val <= eps_tol
-                Q_result = view(workspace.q, :, 1:M)
-                Q_result .= solutions[:, 1:M]
                 break
             end
 
@@ -325,7 +352,7 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
             end
 
             # Use full M0 subspace for next iteration
-            Q_basis[:, 1:M0] .= solutions[:, 1:M0]
+            copyto!(Q_basis, solutions)
         catch err
             info_code = Int(Feast_ERROR_LAPACK)
             @warn "Reduced eigenvalue problem failed during sparse Hermitian FEAST" exception=err
@@ -545,6 +572,7 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
     current_shift = Ref(zero(Complex{T}))
     rhs_iterative = solver_is_iterative ? zeros(Complex{T}, N, M0) : nothing
+    rhs_buffer = Matrix{Complex{T}}(undef, N, M0)
 
     # Initialize workspace
     workspace = FeastWorkspaceComplex{T}(N, M0)
@@ -567,7 +595,7 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     # Persistent RCI state (must be reused across calls in the loop)
     grci_state = FeastGRCIState{T}()
 
-    while true
+    @views while true
         # Call Feast RCI kernel for general problems
         feast_grci!(ijob, N, Ze, workspace.work, workspace.workc,
                    workspace.zAq, workspace.zSq, fpm, epsout, loop,
@@ -593,18 +621,20 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
             
         elseif ijob[] == Int(Feast_RCI_SOLVE)
             # Solve sparse linear systems: (Ze*B - A) * X = B * workspace.workc
-            rhs = B * workspace.workc[:, 1:M0]
+            rhs = view(rhs_buffer, :, 1:M0)
+            workc_block = view(workspace.workc, :, 1:M0)
+            mul!(rhs, B, workc_block)
             
             if solver_is_direct
                 try
-                    workspace.workc[:, 1:M0] .= sparse_solver \ rhs
+                    ldiv!(workc_block, sparse_solver, rhs)
                 catch e
                     info[] = Int(Feast_ERROR_LAPACK)
                     break
                 end
             else
-                rhs_iterative .= rhs
-                success = solve_shifted_iterative!(workspace.workc[:, 1:M0], rhs_iterative,
+                copyto!(rhs_iterative, rhs)
+                success = solve_shifted_iterative!(workc_block, rhs_iterative,
                                                    A, B, current_shift[],
                                                    tol_value, solver_maxiter, solver_restart)
                 if !success
@@ -616,12 +646,12 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
         elseif ijob[] == Int(Feast_RCI_MULT_B)
             # Compute B * q (for forming reduced matrix zBq = Q^H * B * Q)
             M = mode[]
-            workspace.workc[:, 1:M] .= B * q_complex[:, 1:M]
+            mul!(view(workspace.workc, :, 1:M), B, view(q_complex, :, 1:M))
 
         elseif ijob[] == Int(Feast_RCI_MULT_A)
             # Compute A * q (for forming zAq or computing residuals)
             M = mode[]
-            workspace.workc[:, 1:M] .= A * q_complex[:, 1:M]
+            mul!(view(workspace.workc, :, 1:M), A, view(q_complex, :, 1:M))
 
         elseif ijob[] == Int(Feast_RCI_DONE)
             break
@@ -910,7 +940,14 @@ function feast_gcsrpevx!(A::Vector{SparseMatrixCSC{Complex{T},Int}}, d::Int,
     end
 end
 
-# Matrix-free interface for sparse problems with GMRES solver
+"""
+    feast_sparse_matvec!(A_matvec!, B_matvec!, N, Emin, Emax, M0, fpm; kwargs...)
+
+Matrix-free sparse-style FEAST using GMRES for shifted solves. The user supplies
+real `A_matvec!` and `B_matvec!` callbacks; internally the shifted operator
+splits complex vectors into real and imaginary work buffers so the callbacks do
+not need to handle complex arithmetic themselves.
+"""
 function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                              N::Int, Emin::T, Emax::T, M0::Int,
                              fpm::Vector{Int};
@@ -936,7 +973,7 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
     lambda_vec = workspace.lambda
     res_vec = workspace.res
 
-    contour = feast_get_custom_contour(fpm)
+    contour = feast_get_custom_contour(T, fpm)
     contour === nothing && (contour = feast_contour(Emin, Emax, fpm))
     Zne = contour.Zne
     Wne = contour.Wne
@@ -946,9 +983,16 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
     eps_tol = feast_tolerance(fpm)
 
     shifted_operator = MatrixFreeShiftedOperator(N, zero(Complex{T}), A_matvec!, B_matvec!, T)
+
+    # Scratch buffers for applying B to each real basis vector and promoting
+    # the result to the complex RHS expected by the shifted Krylov solve.
     rhs_real = zeros(T, N)
     rhs_complex = zeros(Complex{T}, N)
     moment = Matrix{Complex{T}}(undef, M0, M0)
+    Q_proj_real = zeros(T, N, M0)
+    lambda_tmp = similar(lambda_vec)
+    perm = Vector{Int}(undef, M0)
+    q_tmp = similar(q_vectors)
     residual_vec = zeros(T, N)
 
     epsout_val = T(Inf)
@@ -959,7 +1003,9 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
     # Allocate buffer for accumulated filtered subspace
     Q_proj = zeros(Complex{T}, N, M0)
 
-    for loop_idx in 0:maxloop
+    @views for loop_idx in 0:maxloop
+        # The real reduced matrices are accumulated from complex contour
+        # moments. Q_proj is kept complex until projection back to real vectors.
         loop_count = loop_idx
         fill!(Aq_block, zero(T))
         fill!(Sq_block, zero(T))
@@ -971,6 +1017,8 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
             weight = 2 * Wne[e]
 
             for j in 1:M0
+                # Build one complex RHS at a time: B * q_j is real, then copied
+                # into the complex Krylov vector without allocating.
                 B_matvec!(rhs_real, view(Q_block, :, j))
                 _copyto_complex!(rhs_complex, rhs_real)
 
@@ -996,7 +1044,7 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
             # Accumulate filtered subspace
             @. Q_proj += weight * workc_block
 
-            moment .= transpose(Q_block) * workc_block
+            mul!(moment, transpose(Q_block), workc_block)
             Aq_block .+= real.(weight .* moment)
             Sq_block .+= real.((weight * Zne[e]) .* moment)
         end
@@ -1028,24 +1076,14 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
             end
 
             # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q
-            Q_proj_real = real.(Q_proj)
+            _feast_copy_real!(Q_proj_real, Q_proj)
             for idx in 1:M0
-                coeffs = Vector{T}(view(v_red, :, idx))
-                mul!(view(q_vectors, :, idx), Q_proj_real, coeffs)
+                mul!(view(q_vectors, :, idx), Q_proj_real, view(v_red, :, idx))
                 lambda_vec[idx] = convert(T, lambda_red[idx])
             end
 
-            # Reorder: put eigenvalues inside interval first while maintaining pairing
-            inside_mask = [Emin <= lambda_vec[i] <= Emax for i in 1:M0]
-            inside_indices = findall(inside_mask)
-            outside_indices = findall(.!inside_mask)
-            perm = vcat(inside_indices, outside_indices)
-
-            # Apply permutation to maintain eigenvalue/eigenvector pairing
-            lambda_vec[1:M0] = lambda_vec[perm]
-            q_vectors[:, 1:M0] = q_vectors[:, perm]
-
-            M = length(inside_indices)
+            M = _feast_reorder_by_interval!(lambda_vec, q_vectors, perm,
+                                             lambda_tmp, q_tmp, Emin, Emax, M0)
             if M == 0
                 info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
@@ -1152,7 +1190,7 @@ function feast_scsrev!(A::SparseMatrixCSC{T,Int},
     size(A, 2) == N || throw(ArgumentError("A must be square"))
 
     # Create sparse identity matrix for B
-    B = sparse(I, N, N)
+    B = spdiagm(0 => fill(one(T), N))
 
     # Call generalized version with B = I
     return feast_scsrgv!(A, B, Emin, Emax, M0, fpm)

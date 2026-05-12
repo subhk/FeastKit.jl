@@ -35,6 +35,105 @@ function feast_distribution_type(N::Int,
     end
 end
 
+"""
+    _feast_copy_real!(dest, src)
+
+Copy the real part of `src` into the already allocated real array `dest`.
+This replaces `real.(src)` in hot loops, where broadcasting would allocate a
+new array before the caller copies it into its workspace.
+"""
+function _feast_copy_real!(dest::AbstractArray{T}, src::AbstractArray) where T<:Real
+    @boundscheck axes(dest) == axes(src) || throw(DimensionMismatch("source and destination axes must match"))
+    @inbounds @simd for i in eachindex(dest, src)
+        dest[i] = real(src[i])
+    end
+    return dest
+end
+
+"""
+    _feast_hermitian_part!(dest, src)
+
+Write `(src + src') / 2` into `dest` without allocating temporary adjoint or
+broadcast arrays. Hermitian FEAST accumulates complex moment matrices over a
+half contour; this helper restores the Hermitian reduced matrices before the
+small projected eigenproblem is solved.
+"""
+function _feast_hermitian_part!(dest::AbstractMatrix{Complex{T}},
+                                src::AbstractMatrix{Complex{T}}) where T<:Real
+    @boundscheck size(dest) == size(src) || throw(DimensionMismatch("source and destination sizes must match"))
+    half = T(0.5)
+    @inbounds for j in axes(src, 2), i in axes(src, 1)
+        dest[i, j] = half * (src[i, j] + conj(src[j, i]))
+    end
+    return dest
+end
+
+"""
+    _feast_reorder_by_interval!(lambda, vectors, perm, lambda_tmp,
+                                vector_tmp, Emin, Emax, M0)
+
+Move eigenpairs with eigenvalues in `[Emin, Emax]` to the front of `lambda`
+and the matching columns of `vectors`. All scratch storage is provided by the
+caller so FEAST iterations do not allocate `inside_mask`, `findall` results, or
+temporary permuted matrix slices.
+
+Returns the number of eigenvalues inside the interval.
+"""
+function _feast_reorder_by_interval!(lambda::AbstractVector{Tλ},
+                                     vectors::AbstractMatrix{Tv},
+                                     perm::AbstractVector{Int},
+                                     lambda_tmp::AbstractVector{Tλ},
+                                     vector_tmp::AbstractMatrix{Tv},
+                                     Emin, Emax, M0::Int) where {Tλ,Tv}
+    @boundscheck begin
+        length(lambda) >= M0 || throw(BoundsError(lambda, M0))
+        length(perm) >= M0 || throw(BoundsError(perm, M0))
+        length(lambda_tmp) >= M0 || throw(BoundsError(lambda_tmp, M0))
+        size(vectors, 2) >= M0 || throw(BoundsError(vectors, (1, M0)))
+        size(vector_tmp, 1) == size(vectors, 1) || throw(DimensionMismatch("vector scratch row count mismatch"))
+        size(vector_tmp, 2) >= M0 || throw(BoundsError(vector_tmp, (1, M0)))
+    end
+
+    ninside = 0
+    # First pass stores in-interval eigenpairs at the front of `perm`.
+    @inbounds for i in 1:M0
+        value = lambda[i]
+        if Emin <= value <= Emax
+            ninside += 1
+            perm[ninside] = i
+        end
+    end
+
+    next_index = ninside
+    # Second pass appends the out-of-interval eigenpairs, preserving input order.
+    @inbounds for i in 1:M0
+        value = lambda[i]
+        if !(Emin <= value <= Emax)
+            next_index += 1
+            perm[next_index] = i
+        end
+    end
+
+    nrows = size(vectors, 1)
+    # Gather into scratch first so overlapping source/destination columns are safe.
+    @inbounds for j in 1:M0
+        src_col = perm[j]
+        lambda_tmp[j] = lambda[src_col]
+        for i in 1:nrows
+            vector_tmp[i, j] = vectors[i, src_col]
+        end
+    end
+
+    @inbounds for j in 1:M0
+        lambda[j] = lambda_tmp[j]
+        for i in 1:nrows
+            vectors[i, j] = vector_tmp[i, j]
+        end
+    end
+
+    return ninside
+end
+
 function feast_set_custom_contour!(fpm::Vector{Int}, contour::FeastContour{T}) where T<:Real
     validate_contour(contour.Zne, contour.Wne)
     lock(_feast_contour_lock) do
@@ -72,6 +171,24 @@ function feast_get_custom_contour(fpm::Vector{Int})
     end
 end
 
+function feast_get_custom_contour(::Type{T}, fpm::Vector{Int}) where T<:Real
+    id = fpm[29]
+    if id <= 0
+        return nothing
+    end
+    lock(_feast_contour_lock) do
+        contour = get(FEAST_CUSTOM_CONTOURS, id, nothing)
+        if contour === nothing
+            return nothing
+        elseif contour isa FeastContour{T}
+            return contour
+        else
+            return FeastContour{T}(Complex{T}.(contour.Zne),
+                                   Complex{T}.(contour.Wne))
+        end
+    end
+end
+
 function feast_clear_custom_contour!(fpm::Vector{Int})
     lock(_feast_contour_lock) do
         id = fpm[29]
@@ -100,7 +217,7 @@ end
 function with_custom_contour(solver::Function, fpm::Vector{Int}, contour::FeastContour{T}) where T<:Real
     old_flag = fpm[29]  # Save custom contour ID (0 = none, >0 = contour ID)
     old_ne = fpm[2]
-    old_contour = feast_get_custom_contour(fpm)
+    old_contour = feast_get_custom_contour(T, fpm)
     feast_set_custom_contour!(fpm, contour)
     try
         return solver()

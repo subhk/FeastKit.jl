@@ -16,11 +16,18 @@ function LinearAlgebra.mul!(y::AbstractVector{Complex{T}},
     return y
 end
 
+"""
+    solve_dense_shifted!(dest, rhs, apply_shift!, solver, tol, maxiter, restart)
+
+Solve `(zB - A) * X = rhs` one right-hand side at a time with an iterative
+Krylov method. `apply_shift!` is a closure over the current shift `z`; keeping
+it concrete lets Julia specialize the matrix-vector product used by GMRES.
+"""
 function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
                               rhs::AbstractMatrix{Complex{T}},
-                              apply_shift!::Function,
+                              apply_shift!::F,
                               solver::Symbol, tol::T,
-                              maxiter::Int, restart::Int) where T<:Real
+                              maxiter::Int, restart::Int) where {T<:Real,F}
     solver == :direct && error("Direct solve should be handled before calling solve_dense_shifted!")
 
     if !FEAST_KRYLOV_AVAILABLE[]
@@ -31,9 +38,10 @@ function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
     op = DenseShiftOperator{typeof(apply_shift!), T}(apply_shift!, N)
 
     residual = zeros(Complex{T}, N)
-    for j in 1:size(rhs, 2)
+    x0 = zeros(Complex{T}, N)
+    @views for j in 1:size(rhs, 2)
         b = view(rhs, :, j)
-        x0 = zeros(Complex{T}, N)
+        fill!(x0, zero(Complex{T}))
         x_sol, stats = gmres(op, b, x0;
                              restart=true,
                              memory=max(restart, 2),
@@ -54,6 +62,15 @@ function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
     return true
 end
 
+"""
+    _feast_dense_complex_hermitian(A, B, Emin, Emax, M0, fpm; solver=:direct)
+
+Shared implementation for dense complex Hermitian FEAST. The loop applies the
+contour spectral projector to a trial subspace, solves a small reduced
+Hermitian eigenproblem, then keeps only eigenpairs inside the requested
+interval. Scratch arrays are allocated once here and reused across contour
+points and refinement loops.
+"""
 function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
                                         B::Union{Matrix{Complex{T}},Nothing},
                                         Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
@@ -84,14 +101,23 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
     # (matches sparse solver pattern and avoids subtle numerical differences)
     B_matrix = B === nothing ? Matrix{Complex{T}}(I, N, N) : copy(B)
     B_is_identity = B === nothing
+
+    # Main FEAST workspaces. The rhs/reorder buffers look redundant, but they
+    # prevent per-contour copies and slice allocations in the inner iteration.
     Q_basis = zeros(Complex{T}, N, M0)
     _feast_seeded_subspace_complex!(Q_basis)
     solutions = similar(Q_basis)
     rhs_buffer = zeros(Complex{T}, N, M0)
+    rhs_copy = similar(rhs_buffer)
     zAq = zeros(Complex{T}, M0, M0)
     zSq = zeros(Complex{T}, M0, M0)
+    Aq_herm = similar(zAq)
+    Sq_herm = similar(zSq)
     moment = Matrix{Complex{T}}(undef, M0, M0)
     lambda_vec = zeros(T, M0)
+    lambda_tmp = similar(lambda_vec)
+    perm = Vector{Int}(undef, M0)
+    solutions_tmp = similar(solutions)
     res_vec = zeros(T, M0)
     residual_vec = zeros(Complex{T}, N)
     Bq_vec = B_is_identity ? nothing : zeros(Complex{T}, N)
@@ -112,7 +138,7 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
         return y
     end
 
-    contour = feast_get_custom_contour(fpm)
+    contour = feast_get_custom_contour(T, fpm)
     contour === nothing && (contour = feast_contour(Emin, Emax, fpm))
     Zne = contour.Zne
     Wne = contour.Wne
@@ -127,7 +153,9 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
     # Allocate buffer for accumulated filtered subspace
     Q_proj = zeros(Complex{T}, N, M0)
 
-    for loop_idx in 0:maxloop
+    @views for loop_idx in 0:maxloop
+        # Each refinement starts from a fresh projected subspace and moment
+        # accumulator; the basis itself is updated only after convergence checks.
         loop_count = loop_idx
         fill!(zAq, zero(Complex{T}))
         fill!(zSq, zero(Complex{T}))
@@ -136,6 +164,8 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
         solve_failed = false
 
         for (idx, z) in enumerate(Zne)
+            # Apply each contour resolvent `(zB - A)^-1 B` to the current basis.
+            # The half-contour weights are doubled for Hermitian symmetry.
             weight = 2 * Wne[idx]
 
             if B_is_identity
@@ -146,10 +176,10 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
 
             if solver_is_direct
                 @. shifted_matrix = z * B_matrix - A
-                rhs_copy = copy(rhs_buffer)
+                copyto!(rhs_copy, rhs_buffer)
                 try
                     factor = lu(shifted_matrix)
-                    solutions .= factor \ rhs_copy
+                    ldiv!(solutions, factor, rhs_copy)
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)
                     @warn "Dense direct solve failed for shift $z" exception=err
@@ -157,7 +187,7 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
                     break
                 end
             else
-                rhs_copy = copy(rhs_buffer)
+                copyto!(rhs_copy, rhs_buffer)
                 current_shift[] = z
                 success = solve_dense_shifted!(solutions, rhs_copy,
                                                shifted_mul!, solver_choice,
@@ -170,7 +200,8 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
                 end
             end
 
-            # Accumulate filtered subspace (spectral projector applied to Q_basis)
+            # Accumulate both the filtered subspace and the reduced moments used
+            # for the Rayleigh-Ritz problem after the contour sweep.
             @. Q_proj += weight * solutions
 
             mul!(moment, adjoint(Q_basis), solutions)
@@ -185,8 +216,8 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
             # integral yields Hermitian reduced matrices (R(z̄)^H = R(z) for A = A^H).
             # Extract the Hermitian part via (M + M^H)/2, NOT real/symmetric part,
             # which would discard imaginary components needed for complex Hermitian A.
-            Aq_herm = 0.5 .* (zAq .+ adjoint(zAq))
-            Sq_herm = 0.5 .* (zSq .+ adjoint(zSq))
+            _feast_hermitian_part!(Aq_herm, zAq)
+            _feast_hermitian_part!(Sq_herm, zSq)
 
             # Solve Hermitian generalized eigenproblem: Sq*x = lambda*Aq*x
             # Eigenvalues are real; eigenvectors are complex.
@@ -213,17 +244,9 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
                 lambda_vec[idx] = lambda_red[idx]
             end
 
-            # Reorder: put eigenvalues inside interval first while maintaining pairing
-            inside_mask = [Emin <= lambda_vec[i] <= Emax for i in 1:M0]
-            inside_indices = findall(inside_mask)
-            outside_indices = findall(.!inside_mask)
-            perm = vcat(inside_indices, outside_indices)
-
-            # Apply permutation to maintain eigenvalue/eigenvector pairing
-            lambda_vec[1:M0] = lambda_vec[perm]
-            solutions[:, 1:M0] = solutions[:, perm]
-
-            M = length(inside_indices)
+            M = _feast_reorder_by_interval!(lambda_vec, solutions, perm,
+                                             lambda_tmp, solutions_tmp,
+                                             Emin, Emax, M0)
             if M == 0
                 info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
@@ -381,8 +404,10 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
     q_complex = Matrix{Complex{T}}(undef, N, M0)
     
     # LU factorization workspace
-    LU_factorization = nothing
+    LU_factorization = Ref{LinearAlgebra.LU{Complex{T}, Matrix{Complex{T}}, Vector{Int}}}()
     temp_matrix = Matrix{Complex{T}}(undef, N, N)
+    rhs_buffer = Matrix{Complex{T}}(undef, N, M0)
+    rhs_copy = Matrix{Complex{T}}(undef, N, M0)
 
     # Persistent RCI state (must be reused across calls in the loop)
     grci_state = FeastGRCIState{T}()
@@ -391,7 +416,7 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
     max_rci_iterations = fpm[2] * (fpm[4] + 1) * 10  # num_points * (max_loops + 1) * safety_factor
     rci_iteration_count = 0
 
-    while true
+    @views while true
         rci_iteration_count += 1
         if rci_iteration_count > max_rci_iterations
             info[] = Int(Feast_ERROR_NO_CONVERGENCE)
@@ -414,7 +439,7 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
 
             if use_direct
                 try
-                    LU_factorization = lu!(temp_matrix)
+                    LU_factorization[] = lu!(temp_matrix)
                 catch e
                     info[] = Int(Feast_ERROR_LAPACK)
                     break
@@ -425,17 +450,20 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
 
         elseif ijob[] == Int(Feast_RCI_SOLVE)
             # Solve linear systems: (Ze*B - A) * X = B * workspace.workc
-            rhs = B * workspace.workc[:, 1:M0]
+            rhs = view(rhs_buffer, :, 1:M0)
+            workc_block = view(workspace.workc, :, 1:M0)
+            mul!(rhs, B, workc_block)
 
             if use_direct
                 try
-                    workspace.workc[:, 1:M0] .= LU_factorization \ rhs
+                    copyto!(workc_block, rhs)
+                    ldiv!(LU_factorization[], workc_block)
                 catch e
                     info[] = Int(Feast_ERROR_LAPACK)
                     break
                 end
             else
-                rhs_copy = copy(rhs)
+                copyto!(rhs_copy, rhs)
                 function shifted_mul!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
                     mul!(tmpBx, B_iter, x)
                     @. tmpBx = current_shift[] * tmpBx
@@ -450,8 +478,9 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
                     # Fall back to direct solve if iterative solver failed
                     temp_matrix .= current_shift[] .* B_iter .- A_iter
                     try
-                        LU_factorization = lu!(temp_matrix)
-                        workspace.workc[:, 1:M0] .= LU_factorization \ rhs_copy
+                        LU_factorization[] = lu!(temp_matrix)
+                        copyto!(workc_block, rhs_copy)
+                        ldiv!(LU_factorization[], workc_block)
                     catch e
                         info[] = Int(Feast_ERROR_LAPACK)
                         break
@@ -463,12 +492,12 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
         elseif ijob[] == Int(Feast_RCI_MULT_B)
             # Compute B * q (for forming reduced matrix zBq = Q^H * B * Q)
             M = mode[]
-            workspace.workc[:, 1:M] .= B * q_complex[:, 1:M]
+            mul!(view(workspace.workc, :, 1:M), B, view(q_complex, :, 1:M))
 
         elseif ijob[] == Int(Feast_RCI_MULT_A)
             # Compute A * q (for forming zAq or computing residuals)
             M = mode[]
-            workspace.workc[:, 1:M] .= A * q_complex[:, 1:M]
+            mul!(view(workspace.workc, :, 1:M), A, view(q_complex, :, 1:M))
 
         elseif ijob[] == Int(Feast_RCI_DONE)
             break
@@ -534,7 +563,7 @@ function _feast_polynomial_rci!(coeffs::Vector{Matrix{Complex{T}}}, d::Int,
     N = _check_polynomial_coeffs(coeffs, d)
     check_feast_grci_input(N, M0, Emid, r, fpm)
 
-    contour = feast_get_custom_contour(fpm)
+    contour = feast_get_custom_contour(T, fpm)
     if contour === nothing
         contour = feast_gcontour(Emid, r, fpm)
     end
@@ -662,8 +691,8 @@ function feast_pep!(A::Vector{Matrix{Complex{T}}}, d::Int,
     lambda = result.lambda[1:M]
     q_orig = result.q[1:N, 1:M]
 
-    return FeastResult{T, Complex{T}}(lambda, q_orig, M, result.res[1:M],
-                                     result.info, result.epsout, result.loop)
+    return FeastGeneralResult{T}(lambda, q_orig, M, result.res[1:M],
+                                 result.info, result.epsout, result.loop)
 end
 
 # Standard eigenvalue problem variants (B = I)

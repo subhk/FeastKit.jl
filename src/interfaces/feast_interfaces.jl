@@ -22,6 +22,26 @@ end
     throw(ArgumentError("Invalid parallel option: $parallel"))
 end
 
+function _normalize_backend(parallel::Union{Bool,Symbol,Nothing},
+                            backend::Union{Symbol,Nothing})
+    if backend !== nothing
+        requested = backend
+        if parallel !== nothing
+            legacy_requested = _normalize_parallel(parallel)
+            legacy_requested == requested ||
+                throw(ArgumentError("Conflicting backend requests: backend=$requested and parallel=$legacy_requested"))
+        end
+    elseif parallel !== nothing
+        requested = _normalize_parallel(parallel)
+    else
+        requested = :serial
+    end
+
+    requested in (:serial, :auto, :threads, :distributed, :mpi) ||
+        throw(ArgumentError("Unknown backend: $requested. Use :serial, :auto, :threads, :distributed, or :mpi"))
+    return requested
+end
+
 function _materialize_matrix(A::AbstractMatrix)
     if A isa Matrix || A isa SparseMatrixCSC
         return A
@@ -36,12 +56,14 @@ function _materialize_matrix(A::AbstractMatrix)
     end
 end
 
-@inline function _execute_feast(A, B, interval, backend, M0, fpm, comm, use_threads)
+@inline function _execute_feast(A, B, interval, backend, M0, fpm, comm, use_threads, strict_backend)
     if backend != :serial
         try
-            return feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads)
+            return feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads;
+                                      strict_backend=strict_backend)
         catch e
-            @debug "Parallel execution failed, falling back to serial" exception=e
+            strict_backend && rethrow(e)
+            @warn "Backend $backend failed; falling back to serial execution" exception=e
         end
     end
     return _feast_run_serial(A, B, interval, M0, fpm)
@@ -51,9 +73,11 @@ function _feast_run_serial(A, B, interval, M0, fpm)
     return feast_serial(A, B, interval, M0, fpm)
 end
 
-@inline function _execute_feast_general(A, B, center, radius, backend, M0, fpm, comm, use_threads)
+@inline function _execute_feast_general(A, B, center, radius, backend, M0, fpm, comm, use_threads, strict_backend)
     if backend != :serial
-        @warn "Parallel execution for general problems is not yet available, falling back to serial"
+        msg = "Parallel execution for general problems is not yet available"
+        strict_backend && throw(ArgumentError(msg))
+        @warn "$msg; falling back to serial execution"
     end
     return _feast_run_general_serial(A, B, center, radius, M0, fpm)
 end
@@ -74,7 +98,9 @@ end
 function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                interval::Tuple{T,T}; M0::Int = 10,
                fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
-               parallel::Union{Bool, Symbol} = false,
+               backend::Union{Symbol, Nothing} = nothing,
+               parallel::Union{Bool, Symbol, Nothing} = nothing,
+               strict_backend::Bool = false,
                use_threads::Bool = true,
                comm = nothing) where T<:Real
     # Main Feast interface for real symmetric generalized eigenvalue problems
@@ -88,18 +114,21 @@ function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     params = _ensure_feast_parameters(fpm)
     N = size(A, 1)
     M0 = min(M0, N)
-    backend = determine_parallel_backend(_normalize_parallel(parallel), comm)
+    backend_choice = determine_parallel_backend(_normalize_backend(parallel, backend), comm)
 
     A_exec = _materialize_matrix(A)
     B_exec = _materialize_matrix(B)
 
-    return _execute_feast(A_exec, B_exec, interval, backend, M0, params, comm, use_threads)
+    return _execute_feast(A_exec, B_exec, interval, backend_choice, M0, params,
+                          comm, use_threads, strict_backend)
 end
 
 function feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
                interval::Tuple{T,T}; M0::Int = 10,
                fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
-               parallel::Union{Bool, Symbol} = false,
+               backend::Union{Symbol, Nothing} = nothing,
+               parallel::Union{Bool, Symbol, Nothing} = nothing,
+               strict_backend::Bool = false,
                use_threads::Bool = true,
                comm = nothing) where T<:Real
     # Feast interface for complex Hermitian generalized eigenvalue problems
@@ -113,41 +142,50 @@ function feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
     params = _ensure_feast_parameters(fpm)
     N = size(A, 1)
     M0 = min(M0, N)
-    backend = determine_parallel_backend(_normalize_parallel(parallel), comm)
+    backend_choice = determine_parallel_backend(_normalize_backend(parallel, backend), comm)
 
     A_exec = _materialize_matrix(A)
     B_exec = _materialize_matrix(B)
 
-    return _execute_feast(A_exec, B_exec, interval, backend, M0, params, comm, use_threads)
+    return _execute_feast(A_exec, B_exec, interval, backend_choice, M0, params,
+                          comm, use_threads, strict_backend)
 end
 
 function feast(A::AbstractMatrix{T}, interval::Tuple{T,T};
                M0::Int = 10, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
-               parallel::Union{Bool, Symbol} = false,
+               backend::Union{Symbol, Nothing} = nothing,
+               parallel::Union{Bool, Symbol, Nothing} = nothing,
+               strict_backend::Bool = false,
                use_threads::Bool = true, comm = nothing) where T<:Real
     # Feast interface for standard real symmetric eigenvalue problems (B = I)
     N = size(A, 1)
     B = isa(A, SparseMatrixCSC) ? spdiagm(0 => fill(one(T), N)) : Matrix{T}(I, N, N)
-    return feast(A, B, interval, M0=M0, fpm=fpm, parallel=parallel,
+    return feast(A, B, interval, M0=M0, fpm=fpm, backend=backend,
+                 parallel=parallel, strict_backend=strict_backend,
                  use_threads=use_threads, comm=comm)
 end
 
 function feast(A::AbstractMatrix{Complex{T}}, interval::Tuple{T,T};
                M0::Int = 10, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
-               parallel::Union{Bool, Symbol} = false,
+               backend::Union{Symbol, Nothing} = nothing,
+               parallel::Union{Bool, Symbol, Nothing} = nothing,
+               strict_backend::Bool = false,
                use_threads::Bool = true, comm = nothing) where T<:Real
     # Feast interface for standard complex Hermitian eigenvalue problems (B = I)
     N = size(A, 1)
     identity_vals = fill(one(Complex{T}), N)
     B = isa(A, SparseMatrixCSC) ? spdiagm(0 => identity_vals) : Matrix{Complex{T}}(I, N, N)
-    return feast(A, B, interval, M0=M0, fpm=fpm, parallel=parallel,
+    return feast(A, B, interval, M0=M0, fpm=fpm, backend=backend,
+                 parallel=parallel, strict_backend=strict_backend,
                  use_threads=use_threads, comm=comm)
 end
 
 function feast_general(A::AbstractMatrix, B::AbstractMatrix,
                        center::Complex{T}, radius::T; M0::Int = 10,
                        fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
-                       parallel::Union{Bool, Symbol} = false,
+                       backend::Union{Symbol, Nothing} = nothing,
+                       parallel::Union{Bool, Symbol, Nothing} = nothing,
+                       strict_backend::Bool = false,
                        use_threads::Bool = true,
                        comm = nothing) where T<:Real
     # Feast interface for general (non-Hermitian) eigenvalue problems
@@ -162,7 +200,7 @@ function feast_general(A::AbstractMatrix, B::AbstractMatrix,
     M0 = min(M0, N)
 
     params = _ensure_feast_parameters(fpm)
-    backend = determine_parallel_backend(_normalize_parallel(parallel), comm)
+    backend_choice = determine_parallel_backend(_normalize_backend(parallel, backend), comm)
 
     real_type = promote_type(_real_component_type(eltype(A_complex)),
                              _real_component_type(eltype(B_complex)),
@@ -179,7 +217,8 @@ function feast_general(A::AbstractMatrix, B::AbstractMatrix,
         throw(ArgumentError("Radius must be positive, got $radius"))
 
     return _execute_feast_general(A_exec, B_exec, center_exec, radius_exec,
-                                  backend, M0, params, comm, use_threads)
+                                  backend_choice, M0, params, comm, use_threads,
+                                  strict_backend)
 end
 
 function feast_general(A::AbstractMatrix, B::AbstractMatrix,
@@ -192,7 +231,9 @@ end
 
 function feast_general(A::AbstractMatrix, center::Complex{T}, radius::T;
                        M0::Int = 10, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
-                       parallel::Union{Bool, Symbol} = false,
+                       backend::Union{Symbol, Nothing} = nothing,
+                       parallel::Union{Bool, Symbol, Nothing} = nothing,
+                       strict_backend::Bool = false,
                        use_threads::Bool = true,
                        comm = nothing) where T<:Real
     # Feast interface for standard general eigenvalue problems (B = I)
@@ -205,7 +246,9 @@ function feast_general(A::AbstractMatrix, center::Complex{T}, radius::T;
     end
     M0 = min(M0, N)
     return feast_general(A, B, center, radius; M0=M0, fpm=fpm,
-                         parallel=parallel, use_threads=use_threads, comm=comm)
+                         backend=backend, parallel=parallel,
+                         strict_backend=strict_backend,
+                         use_threads=use_threads, comm=comm)
 end
 
 function feast_general(A::AbstractMatrix, center::Complex{Tc}, radius::Tr; kwargs...) where {Tc<:Real, Tr<:Real}

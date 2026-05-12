@@ -133,12 +133,18 @@ FeastKit.jl supports parallel computation where each contour integration point i
 ### Multi-threaded Execution
 
 ```julia
-# Enable parallel computation using threads
-result = feast(A, (0.5, 1.5), M0=10, parallel=:threads)
+# Prefer the explicit backend keyword for new code.
+# Threaded backend currently supports sparse real symmetric problems.
+result = feast(A_sparse, (0.5, 1.5), M0=10, backend=:threads)
 
-# Or use the explicit parallel interface
-result = feast_parallel(A, B, (0.5, 1.5), M0=10, use_threads=true)
+# Ask for an error instead of automatic serial fallback.
+result = feast(A_sparse, (0.5, 1.5), M0=10,
+               backend=:threads, strict_backend=true)
 ```
+
+The older `parallel=:threads` keyword remains supported as an alias. Dense
+threaded FEAST is disabled in the high-level API until it matches serial
+results reliably.
 
 ### Distributed Computing
 
@@ -149,7 +155,7 @@ using Distributed
 addprocs(4)
 
 # Use distributed computing for contour integration
-result = feast(A, (0.5, 1.5), M0=10, parallel=:distributed)
+result = feast(A_sparse, (0.5, 1.5), M0=10, backend=:distributed)
 ```
 
 ### MPI Support for HPC Clusters
@@ -164,7 +170,7 @@ using FeastKit
 MPI.Init()
 
 # Basic MPI FeastKit
-result = feast(A, B, (0.5, 1.5), M0=10, parallel=:mpi)
+result = feast(A, B, (0.5, 1.5), M0=10, backend=:mpi)
 
 # Explicit MPI interface with communicator
 comm = MPI.COMM_WORLD
@@ -270,12 +276,12 @@ end
 
 ```julia
 # FeastKit automatically selects the best available backend
-result = feast(A, B, (0.5, 1.5), M0=10, parallel=:auto)
+result = feast(A, B, (0.5, 1.5), M0=10, backend=:auto)
 
 # Manual backend selection
-result = feast(A, B, (0.5, 1.5), M0=10, parallel=:mpi)      # Force MPI
-result = feast(A, B, (0.5, 1.5), M0=10, parallel=:threads)  # Force threading
-result = feast(A, B, (0.5, 1.5), M0=10, parallel=:serial)   # Force serial
+result = feast(A, B, (0.5, 1.5), M0=10, backend=:mpi)      # Force MPI
+result = feast(A, B, (0.5, 1.5), M0=10, backend=:threads)  # Force threading
+result = feast(A, B, (0.5, 1.5), M0=10, backend=:serial)   # Force serial
 ```
 
 ## Algorithm Overview
@@ -327,8 +333,8 @@ end
 2. **Integration points**: More points (fpm[2]) improve accuracy but increase cost
 3. **Sparse matrices**: Use sparse format for large problems with few non-zeros
 4. **Initial guess**: Provide good initial guess when available (fpm[5] = 1)
-5. **Parallel execution**: Use `parallel=:auto` to automatically select the best backend
-6. **HPC clusters**: Use `parallel=:mpi` or `feast_hybrid()` for optimal cluster performance  
+5. **Parallel execution**: Use `backend=:auto` to automatically select the best backend
+6. **HPC clusters**: Use `backend=:mpi` or `feast_hybrid()` for optimal cluster performance  
 7. **Hybrid parallelism**: Combine MPI processes with threading for maximum performance
 8. **Load balancing**: FeastKit automatically distributes contour points for optimal load balancing
 

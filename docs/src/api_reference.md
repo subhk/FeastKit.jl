@@ -33,7 +33,9 @@ feast(A, B, interval; M0=10, fpm=nothing, kwargs...)
 **Keyword Arguments:**
 - `M0::Int=10`: Maximum number of eigenvalues to find
 - `fpm::Vector{Int}`: FeastKit parameter array (auto-initialized if `nothing`)
-- `parallel::Union{Bool,Symbol}=false`: Parallelization mode
+- `backend::Symbol=:serial`: Execution backend (`:serial`, `:auto`, `:threads`, `:distributed`, `:mpi`)
+- `parallel::Union{Bool,Symbol}`: Legacy alias for `backend`
+- `strict_backend::Bool=false`: Throw an error instead of falling back to serial when a requested backend is unavailable or unsupported
 - `use_threads::Bool=true`: Enable threading
 - `comm`: MPI communicator (if using MPI)
 
@@ -297,14 +299,18 @@ feast_rational_expert(Zne, Wne, lambda)
 Parallel FeastKit interfaces.
 
 ```julia
-feast(A, interval; parallel=:mpi, comm=MPI.COMM_WORLD, kwargs...)
+feast(A, interval; backend=:mpi, comm=MPI.COMM_WORLD, kwargs...)
 ```
 
 **Parallel Options:**
-- `parallel=false`: Serial execution
-- `parallel=:threads`: Shared-memory threading  
-- `parallel=:mpi`: MPI parallelization
-- `parallel=:hybrid`: MPI + threads
+- `backend=:serial`: Serial execution
+- `backend=:auto`: Select an available backend
+- `backend=:threads`: Shared-memory threading
+- `backend=:distributed`: Distributed workers
+- `backend=:mpi`: MPI parallelization
+
+`parallel=:threads` and similar values remain available for compatibility.
+Use `strict_backend=true` when fallback to serial should be treated as an error.
 
 ### mpi_feast
 

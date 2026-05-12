@@ -113,6 +113,46 @@ for (prefix, RT) in ((:s, Float32), (:d, Float64))
     end
 end
 
+for (prefix, RT) in ((:si, Float32), (:di, Float64))
+    @eval begin
+        $(Symbol(prefix, "feast_sypev!"))(A::Vector{Matrix{$RT}}, d::Int,
+                                          Emid::Complex{$RT}, r::$RT,
+                                          M0::Int, fpm::Vector{Int}) =
+            feast_sypev!(A, d, Emid, r, M0, fpm)
+
+        $(Symbol(prefix, "feast_sypevx!"))(A::Vector{Matrix{$RT}}, d::Int,
+                                           Emid::Complex{$RT}, r::$RT,
+                                           M0::Int, fpm::Vector{Int},
+                                           Zne::AbstractVector{Complex{TZ}},
+                                           Wne::AbstractVector{Complex{TW}}) where {TZ<:Real,TW<:Real} =
+            feast_sypevx!(A, d, Emid, r, M0, fpm, Zne, Wne)
+
+        $(Symbol(prefix, "feast_srcipev!"))(A::Vector{Matrix{$RT}}, d::Int,
+                                            Emid::Complex{$RT}, r::$RT,
+                                            M0::Int, fpm::Vector{Int}) =
+            feast_srcipev!(A, d, Emid, r, M0, fpm)
+
+        $(Symbol(prefix, "feast_srcipevx!"))(A::Vector{Matrix{$RT}}, d::Int,
+                                             Emid::Complex{$RT}, r::$RT,
+                                             M0::Int, fpm::Vector{Int},
+                                             Zne::AbstractVector{Complex{TZ}},
+                                             Wne::AbstractVector{Complex{TW}}) where {TZ<:Real,TW<:Real} =
+            feast_srcipevx!(A, d, Emid, r, M0, fpm, Zne, Wne)
+
+        $(Symbol(prefix, "feast_scsrpev!"))(A::Vector{SparseMatrixCSC{$RT,Int}}, d::Int,
+                                            Emid::Complex{$RT}, r::$RT,
+                                            M0::Int, fpm::Vector{Int}) =
+            feast_scsrpev!(A, d, Emid, r, M0, fpm)
+
+        $(Symbol(prefix, "feast_scsrpevx!"))(A::Vector{SparseMatrixCSC{$RT,Int}}, d::Int,
+                                             Emid::Complex{$RT}, r::$RT,
+                                             M0::Int, fpm::Vector{Int},
+                                             Zne::AbstractVector{Complex{TZ}},
+                                             Wne::AbstractVector{Complex{TW}}) where {TZ<:Real,TW<:Real} =
+            feast_scsrpevx!(A, d, Emid, r, M0, fpm, Zne, Wne)
+    end
+end
+
 for (prefix, RT) in ((:c, Float32), (:z, Float64))
     @eval begin
         $(Symbol(prefix, "feast_heev!"))(A::Matrix{Complex{$RT}},
@@ -372,6 +412,70 @@ for (prefix, RT) in ((:c, Float32), (:z, Float64))
                                           Zne::AbstractVector{Complex{TZ}},
                                           Wne::AbstractVector{Complex{TW}}) where {TZ<:Real,TW<:Real} =
             feast_gbgvx!(A, B, ka, kb, Emid, r, M0, fpm, Zne, Wne)
+    end
+end
+
+for (prefix, RT) in ((:ci, Float32), (:zi, Float64))
+    @eval begin
+        $(Symbol(prefix, "feast_gepev!"))(A::Vector{Matrix{Complex{$RT}}}, d::Int,
+                                          Emid::Complex{$RT}, r::$RT,
+                                          M0::Int, fpm::Vector{Int}) =
+            feast_gepev!(A, d, Emid, r, M0, fpm)
+
+        $(Symbol(prefix, "feast_gepevx!"))(A::Vector{Matrix{Complex{$RT}}}, d::Int,
+                                           Emid::Complex{$RT}, r::$RT,
+                                           M0::Int, fpm::Vector{Int},
+                                           Zne::AbstractVector{Complex{TZ}},
+                                           Wne::AbstractVector{Complex{TW}}) where {TZ<:Real,TW<:Real} =
+            feast_gepevx!(A, d, Emid, r, M0, fpm, Zne, Wne)
+
+        $(Symbol(prefix, "feast_hepev!"))(A::Vector{Matrix{Complex{$RT}}}, d::Int,
+                                          Emid::Complex{$RT}, r::$RT,
+                                          M0::Int, fpm::Vector{Int}) =
+            feast_hepev!(A, d, Emid, r, M0, fpm)
+
+        $(Symbol(prefix, "feast_hepevx!"))(A::Vector{Matrix{Complex{$RT}}}, d::Int,
+                                           Emid::Complex{$RT}, r::$RT,
+                                           M0::Int, fpm::Vector{Int},
+                                           Zne::AbstractVector{Complex{TZ}},
+                                           Wne::AbstractVector{Complex{TW}}) where {TZ<:Real,TW<:Real} =
+            feast_hepevx!(A, d, Emid, r, M0, fpm, Zne, Wne)
+
+        $(Symbol(prefix, "feast_grcipev!"))(A::Vector{Matrix{Complex{$RT}}}, d::Int,
+                                            Emid::Complex{$RT}, r::$RT,
+                                            M0::Int, fpm::Vector{Int}) =
+            feast_grcipev!(A, d, Emid, r, M0, fpm)
+
+        $(Symbol(prefix, "feast_grcipevx!"))(A::Vector{Matrix{Complex{$RT}}}, d::Int,
+                                             Emid::Complex{$RT}, r::$RT,
+                                             M0::Int, fpm::Vector{Int},
+                                             Zne::AbstractVector{Complex{TZ}},
+                                             Wne::AbstractVector{Complex{TW}}) where {TZ<:Real,TW<:Real} =
+            feast_grcipevx!(A, d, Emid, r, M0, fpm, Zne, Wne)
+
+        $(Symbol(prefix, "feast_hcsrpev!"))(A::Vector{SparseMatrixCSC{Complex{$RT},Int}}, d::Int,
+                                            Emid::Complex{$RT}, r::$RT,
+                                            M0::Int, fpm::Vector{Int}) =
+            feast_hcsrpev!(A, d, Emid, r, M0, fpm)
+
+        $(Symbol(prefix, "feast_hcsrpevx!"))(A::Vector{SparseMatrixCSC{Complex{$RT},Int}}, d::Int,
+                                             Emid::Complex{$RT}, r::$RT,
+                                             M0::Int, fpm::Vector{Int},
+                                             Zne::AbstractVector{Complex{TZ}},
+                                             Wne::AbstractVector{Complex{TW}}) where {TZ<:Real,TW<:Real} =
+            feast_hcsrpevx!(A, d, Emid, r, M0, fpm, Zne, Wne)
+
+        $(Symbol(prefix, "feast_gcsrpev!"))(A::Vector{SparseMatrixCSC{Complex{$RT},Int}}, d::Int,
+                                            Emid::Complex{$RT}, r::$RT,
+                                            M0::Int, fpm::Vector{Int}) =
+            feast_gcsrpev!(A, d, Emid, r, M0, fpm)
+
+        $(Symbol(prefix, "feast_gcsrpevx!"))(A::Vector{SparseMatrixCSC{Complex{$RT},Int}}, d::Int,
+                                             Emid::Complex{$RT}, r::$RT,
+                                             M0::Int, fpm::Vector{Int},
+                                             Zne::AbstractVector{Complex{TZ}},
+                                             Wne::AbstractVector{Complex{TW}}) where {TZ<:Real,TW<:Real} =
+            feast_gcsrpevx!(A, d, Emid, r, M0, fpm, Zne, Wne)
     end
 end
 

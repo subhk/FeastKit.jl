@@ -476,6 +476,12 @@ feast_gepev!(coeffs, center, radius, M0, fpm)
 feast_scsrpev!(coeffs, Emin, Emax, M0, fpm)
 feast_hcsrpev!(coeffs, Emin, Emax, M0, fpm)
 feast_gcsrpev!(coeffs, center, radius, M0, fpm)
+
+# IFEAST-compatible precision aliases
+difeast_srcipev!(coeffs, degree, center, radius, M0, fpm)
+zifeast_grcipev!(coeffs, degree, center, radius, M0, fpm)
+difeast_scsrpev!(coeffs, degree, center, radius, M0, fpm)
+zifeast_gcsrpev!(coeffs, degree, center, radius, M0, fpm)
 ```
 
 ### RCI Interface

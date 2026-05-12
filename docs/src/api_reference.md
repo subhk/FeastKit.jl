@@ -109,8 +109,12 @@ implementations.
 | --- | --- | --- |
 | `sfeast_*` | `Float32` | `sfeast_syev!`, `sfeast_scsrgv!`, `sfeast_sbev!` |
 | `dfeast_*` | `Float64` | `dfeast_syev!`, `dfeast_scsrgv!`, `dfeast_sbev!` |
+| `sifeast_*` | `Float32` iterative polynomial | `sifeast_srcipev!`, `sifeast_scsrpev!` |
+| `difeast_*` | `Float64` iterative | `difeast_sygv!`, `difeast_scsrgv!`, `difeast_srcipev!` |
 | `cfeast_*` | `ComplexF32` | `cfeast_heev!`, `cfeast_gcsrgv!`, `cfeast_hbev!` |
 | `zfeast_*` | `ComplexF64` | `zfeast_heev!`, `zfeast_gcsrgv!`, `zfeast_hbev!` |
+| `cifeast_*` | `ComplexF32` iterative polynomial | `cifeast_grcipev!`, `cifeast_gcsrpev!` |
+| `zifeast_*` | `ComplexF64` iterative | `zifeast_gegv!`, `zifeast_hcsrgv!`, `zifeast_grcipev!` |
 | `psfeast_*` | `Float32` parallel real symmetric | `psfeast_syev!`, `psfeast_scsrgv!`, `psfeast_srci!` |
 | `pdfeast_*` | `Float64` parallel real symmetric | `pdfeast_syev!`, `pdfeast_scsrgv!`, `pdfeast_srci!` |
 

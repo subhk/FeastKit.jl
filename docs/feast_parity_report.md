@@ -16,7 +16,7 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
 ## Missing Feature High-Priority Items
 
 1. **Iterative FEAST (IFEAST) Variants**
-   - Dense real/complex Hermitian, general, and banded wrappers (`difeast_sygv/syev/sbgv/sbev`, `zifeast_heev/hegv/hbev/hbgv`, `zifeast_gegv/geev/gbgv/gbev`) plus sparse real CSR and sparse complex Hermitian/complex-symmetric/general families are supported via GMRES. Remaining work covers polynomial variants across the `difeast_*` / `zifeast_*` families.
+   - Dense real/complex Hermitian, general, and banded wrappers (`difeast_sygv/syev/sbgv/sbev`, `zifeast_heev/hegv/hbev/hbgv`, `zifeast_gegv/geev/gbgv/gbev`), sparse real CSR and sparse complex Hermitian/complex-symmetric/general families, and polynomial IFEAST aliases are supported.
 
 2. **MPI/Parallel Families**
    - High-level `backend=:mpi` and `mpi_feast` cover the real symmetric FEAST path.
@@ -34,6 +34,5 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
 
 ## Suggested Next Steps
 
-1. Expand polynomial IFEAST aliases and tests for the remaining polynomial wrapper surface.
-2. Expand MPI layer to complex/general and iterative precision-prefixed PFEAST variants.
-3. Complete example suite (translate remaining FEAST/PFEAST sample programs, include README guidance).
+1. Expand MPI layer to complex/general and iterative precision-prefixed PFEAST variants.
+2. Complete example suite (translate remaining FEAST/PFEAST sample programs, include README guidance).

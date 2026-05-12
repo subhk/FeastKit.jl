@@ -947,6 +947,72 @@ using Random
         @test isapprox(sort(real.(alias_band_cs.lambda)), sort(real.(generic_band_cs.lambda)); atol=1e-10)
     end
 
+    @testset "Polynomial IFEAST precision aliases" begin
+        required_poly_ifeast_aliases = [
+            :sifeast_srcipev!, :difeast_srcipev!,
+            :sifeast_srcipevx!, :difeast_srcipevx!,
+            :cifeast_grcipev!, :zifeast_grcipev!,
+            :cifeast_grcipevx!, :zifeast_grcipevx!,
+            :sifeast_scsrpev!, :difeast_scsrpev!,
+            :sifeast_scsrpevx!, :difeast_scsrpevx!,
+            :cifeast_hcsrpev!, :zifeast_hcsrpev!,
+            :cifeast_hcsrpevx!, :zifeast_hcsrpevx!,
+            :cifeast_gcsrpev!, :zifeast_gcsrpev!,
+            :cifeast_gcsrpevx!, :zifeast_gcsrpevx!
+        ]
+        aliases_available = all(name -> isdefined(FeastKit, name), required_poly_ifeast_aliases)
+        @test aliases_available
+
+        if aliases_available
+            n = 3
+            fpm_poly = zeros(Int, 64)
+            feastinit!(fpm_poly)
+            fpm_poly[1] = 0
+            fpm_poly[4] = 8
+            fpm_poly[8] = 16
+
+            A0 = Matrix(Diagonal([-1.0, -4.0, -9.0]))
+            A1 = zeros(n, n)
+            A2 = Matrix{Float64}(I, n, n)
+            coeffs_real = [A0, A1, A2]
+            coeffs_complex = [ComplexF64.(A) for A in coeffs_real]
+            center = 0.0 + 0.0im
+            radius = 4.0
+
+            generic_real = feast_srcipev!(coeffs_real, 2, center, radius, n, copy(fpm_poly))
+            alias_real = FeastKit.difeast_srcipev!(coeffs_real, 2, center, radius, n, copy(fpm_poly))
+            @test alias_real.info == generic_real.info
+            @test alias_real.M == generic_real.M
+            @test isapprox(sort(real.(alias_real.lambda)), sort(real.(generic_real.lambda)); atol=1e-10)
+
+            contour = feast_gcontour(center, radius, copy(fpm_poly))
+            alias_real_x = FeastKit.difeast_srcipevx!(coeffs_real, 2, center, radius,
+                                                      n, copy(fpm_poly),
+                                                      contour.Zne, contour.Wne)
+            @test alias_real_x.info == generic_real.info
+            @test isapprox(sort(real.(alias_real_x.lambda)), sort(real.(generic_real.lambda)); atol=1e-10)
+
+            generic_complex = feast_grcipev!(coeffs_complex, 2, center, radius, n, copy(fpm_poly))
+            alias_complex = FeastKit.zifeast_grcipev!(coeffs_complex, 2, center, radius,
+                                                      n, copy(fpm_poly))
+            @test alias_complex.info == generic_complex.info
+            @test alias_complex.M == generic_complex.M
+            @test isapprox(sort(real.(alias_complex.lambda)), sort(real.(generic_complex.lambda)); atol=1e-10)
+
+            sparse_real = sparse.(coeffs_real)
+            generic_sparse = feast_scsrpev!(sparse_real, 2, center, radius, n, copy(fpm_poly))
+            alias_sparse = FeastKit.difeast_scsrpev!(sparse_real, 2, center, radius, n, copy(fpm_poly))
+            @test alias_sparse.info == generic_sparse.info
+            @test alias_sparse.M == generic_sparse.M
+
+            sparse_complex = sparse.(coeffs_complex)
+            generic_h_sparse = feast_hcsrpev!(sparse_complex, 2, center, radius, n, copy(fpm_poly))
+            alias_h_sparse = FeastKit.zifeast_hcsrpev!(sparse_complex, 2, center, radius, n, copy(fpm_poly))
+            @test alias_h_sparse.info == generic_h_sparse.info
+            @test alias_h_sparse.M == generic_h_sparse.M
+        end
+    end
+
     @testset "PFEAST-compatible precision aliases" begin
         required_parallel_aliases = [
             :psfeast_syev!, :pdfeast_syev!,

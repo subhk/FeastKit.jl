@@ -24,6 +24,11 @@ export feast_gegv!, feast_gegvx!, feast_geev!, feast_geevx!,
 export feast_pep!, feast_gepev!, feast_gepevx!, feast_hepev!, feast_hepevx!,
        feast_sypev!, feast_sypevx!, feast_srcipev!, feast_srcipevx!,
        feast_grcipev!, feast_grcipevx!
+export sifeast_sypev!, difeast_sypev!, sifeast_sypevx!, difeast_sypevx!,
+       sifeast_srcipev!, difeast_srcipev!, sifeast_srcipevx!, difeast_srcipevx!
+export cifeast_gepev!, zifeast_gepev!, cifeast_gepevx!, zifeast_gepevx!,
+       cifeast_hepev!, zifeast_hepev!, cifeast_hepevx!, zifeast_hepevx!,
+       cifeast_grcipev!, zifeast_grcipev!, cifeast_grcipevx!, zifeast_grcipevx!
 # Sparse matrix solver exports
 export feast_scsrgv!, feast_scsrgvx!, feast_scsrev!, feast_scsrevx!,
        feast_scsrgv_iterative!, difeast_scsrgv!, difeast_scsrgvx!
@@ -35,6 +40,9 @@ export feast_hcsrev!, feast_hcsrevx!, feast_hcsrgv!, feast_hcsrgvx!,
 export feast_gcsrev!, feast_gcsrevx!, zifeast_gcsrev!, zifeast_gcsrevx!
 export feast_scsrpev!, feast_scsrpevx!, feast_hcsrpev!, feast_hcsrpevx!
 export feast_gcsrpev!, feast_gcsrpevx!
+export sifeast_scsrpev!, difeast_scsrpev!, sifeast_scsrpevx!, difeast_scsrpevx!,
+       cifeast_hcsrpev!, zifeast_hcsrpev!, cifeast_hcsrpevx!, zifeast_hcsrpevx!,
+       cifeast_gcsrpev!, zifeast_gcsrpev!, cifeast_gcsrpevx!, zifeast_gcsrpevx!
 # Banded matrix solver exports
 export feast_sbgv!, feast_sbgvx!, feast_sbev!, feast_sbevx!,
        difeast_sbgv!, difeast_sbev!

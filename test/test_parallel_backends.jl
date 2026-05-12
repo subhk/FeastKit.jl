@@ -83,6 +83,80 @@ end
         @test mpi_standard_alias.M == length(expected_inside)
         @test sort(mpi_standard_alias.lambda[1:mpi_standard_alias.M]) ≈ expected_inside atol=1e-8
 
+        n_complex = 4
+        complex_interval = (0.4, 1.6)
+        A_h = sparse(Diagonal(ComplexF64[0.5, 1.0, 1.5, 3.0]))
+        B_h = spdiagm(0 => ones(ComplexF64, n_complex))
+        fpm_h = zeros(Int, 64)
+        feastinit!(fpm_h)
+        fpm_h[1] = 0
+        fpm_h[2] = 8
+        fpm_h[4] = 12
+        fpm_h_iter = copy(fpm_h)
+        fpm_h_iter[3] = 8
+        expected_h = [0.5, 1.0, 1.5]
+
+        herm_mpi = mpi_feast_hcsrgv!(copy(A_h), copy(B_h), complex_interval[1], complex_interval[2],
+                                     n_complex, copy(fpm_h); comm=comm)
+        herm_highlevel = feast(copy(A_h), copy(B_h), complex_interval; M0=n_complex,
+                               fpm=copy(fpm_h), backend=:mpi, strict_backend=true, comm=comm)
+        herm_alias = pzfeast_hcsrgv!(copy(A_h), copy(B_h), complex_interval[1], complex_interval[2],
+                                     n_complex, copy(fpm_h); comm=comm)
+        herm_iter_alias = pzifeast_hcsrgv!(copy(A_h), copy(B_h), complex_interval[1], complex_interval[2],
+                                           length(expected_h), copy(fpm_h_iter); comm=comm,
+                                           solver_tol=1e-10, solver_maxiter=100)
+
+        @test herm_mpi.info == 0
+        @test herm_mpi.M == length(expected_h)
+        @test sort(herm_mpi.lambda[1:herm_mpi.M]) ≈ expected_h atol=1e-8
+        @test herm_highlevel.info == 0
+        @test herm_highlevel.M == length(expected_h)
+        @test sort(herm_highlevel.lambda[1:herm_highlevel.M]) ≈ expected_h atol=1e-8
+        @test herm_alias.info == 0
+        @test herm_alias.M == length(expected_h)
+        @test sort(herm_alias.lambda[1:herm_alias.M]) ≈ expected_h atol=1e-8
+        @test herm_iter_alias.info == 0
+        @test herm_iter_alias.M == length(expected_h)
+        @test sort(herm_iter_alias.lambda[1:herm_iter_alias.M]) ≈ expected_h atol=1e-8
+
+        center = 1.0 + 0.1im
+        radius = 1.3
+        A_g = sparse(Diagonal(ComplexF64[0.5 + 0.1im, 1.0 + 0.2im, 2.0 - 0.1im, 4.0 + 0.0im]))
+        B_g = spdiagm(0 => ones(ComplexF64, n_complex))
+        fpm_g = zeros(Int, 64)
+        feastinit!(fpm_g)
+        fpm_g[1] = 0
+        fpm_g[3] = 11
+        fpm_g[4] = 12
+        fpm_g[8] = 12
+        expected_g = ComplexF64[0.5 + 0.1im, 1.0 + 0.2im, 2.0 - 0.1im]
+        sort_complex(vals) = sort(collect(vals), by=x -> (round(real(x), digits=10),
+                                                          round(imag(x), digits=10)))
+
+        general_mpi = mpi_feast_gcsrgv!(copy(A_g), copy(B_g), center, radius,
+                                        n_complex, copy(fpm_g); comm=comm)
+        general_highlevel = feast_general(copy(A_g), copy(B_g), center, radius;
+                                          M0=n_complex, fpm=copy(fpm_g),
+                                          backend=:mpi, strict_backend=true, comm=comm)
+        general_alias = pzfeast_gcsrgv!(copy(A_g), copy(B_g), center, radius,
+                                        n_complex, copy(fpm_g); comm=comm)
+        general_iter_alias = pzifeast_gcsrgv!(copy(A_g), copy(B_g), center, radius,
+                                              n_complex, copy(fpm_g); comm=comm,
+                                              solver_tol=1e-10, solver_maxiter=100)
+
+        @test general_mpi.info == 0
+        @test general_mpi.M == length(expected_g)
+        @test isapprox(sort_complex(general_mpi.lambda[1:general_mpi.M]), sort_complex(expected_g); atol=1e-8)
+        @test general_highlevel.info == 0
+        @test general_highlevel.M == length(expected_g)
+        @test isapprox(sort_complex(general_highlevel.lambda[1:general_highlevel.M]), sort_complex(expected_g); atol=1e-8)
+        @test general_alias.info == 0
+        @test general_alias.M == length(expected_g)
+        @test isapprox(sort_complex(general_alias.lambda[1:general_alias.M]), sort_complex(expected_g); atol=1e-8)
+        @test general_iter_alias.info == 0
+        @test general_iter_alias.M == length(expected_g)
+        @test isapprox(sort_complex(general_iter_alias.lambda[1:general_iter_alias.M]), sort_complex(expected_g); atol=1e-8)
+
         rank == 0 && println("MPI backend verified on $nranks ranks")
         MPI.Finalize()
     else

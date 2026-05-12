@@ -7,7 +7,8 @@ export feast_contour, feast_gcontour, feast_customcontour
 export feast, feast_general, feast_matvec, feast_banded, feast_set_defaults!, feast_clear_all_contours!
 export feast_parallel, pfeast_srci!, ParallelFeastState
 export pfeast_sygv!, pfeast_scsrgv!, pfeast_compute_all_contour_points!, pfeast_show_distribution
-export mpi_feast, feast_hybrid, MPIFeastState
+export mpi_feast, mpi_feast_general, feast_hybrid, MPIFeastState
+export mpi_feast_hcsrev!, mpi_feast_hcsrgv!, mpi_feast_gcsrev!, mpi_feast_gcsrgv!
 export feast_summary, feast_validate_interval
 export check_feast_srci_input, feast_inside_contour, feast_inside_gcontour
 export feast_name, feast_memory_estimate
@@ -85,6 +86,10 @@ export cfeast_heev!, zfeast_heev!, cfeast_hegv!, zfeast_hegv!,
 export psfeast_syev!, pdfeast_syev!, psfeast_sygv!, pdfeast_sygv!,
        psfeast_scsrev!, pdfeast_scsrev!, psfeast_scsrgv!, pdfeast_scsrgv!,
        psfeast_srci!, pdfeast_srci!
+export pcfeast_hcsrev!, pzfeast_hcsrev!, pcfeast_hcsrgv!, pzfeast_hcsrgv!,
+       pcfeast_gcsrev!, pzfeast_gcsrev!, pcfeast_gcsrgv!, pzfeast_gcsrgv!,
+       pcifeast_hcsrev!, pzifeast_hcsrev!, pcifeast_hcsrgv!, pzifeast_hcsrgv!,
+       pcifeast_gcsrev!, pzifeast_gcsrev!, pcifeast_gcsrgv!, pzifeast_gcsrgv!
 export Feast_SUCCESS, Feast_ERROR_N, Feast_ERROR_M0, Feast_ERROR_EMIN_EMAX,
        Feast_ERROR_EMID_R, Feast_ERROR_NO_CONVERGENCE, Feast_ERROR_MEMORY,
        Feast_ERROR_INTERNAL, Feast_ERROR_LAPACK, Feast_ERROR_FPM

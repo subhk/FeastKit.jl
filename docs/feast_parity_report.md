@@ -10,7 +10,7 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
 - **Banded:** Real, complex Hermitian, complex-symmetric, and non-Hermitian FEAST families are present, including precision-prefixed aliases and custom-contour variants. Direct real symmetric, complex Hermitian, complex-symmetric, and fully general non-Hermitian banded solves use LAPACK banded storage; GMRES-backed iterative banded solves use banded matvecs without dense matrix conversion.
 - **RCI:** Base kernels (`feast_srci!`, `feast_hrci!`, `feast_grci!`), iterative-compatible RCI wrappers (`ifeast_srci!`, `ifeast_hrci!`, `ifeast_grci!`), and polynomial kernels (`feast_srcipev!`, `feast_grcipev!`) are implemented.
 - **Utilities:** Contour generators, rational helpers, parameter initialization, custom contour registry, and distribution helpers are present.
-- **Parallel:** High-level threaded and distributed backends support sparse real symmetric standard/generalized problems; MPI supports real symmetric standard/generalized problems through `mpi_feast` and `backend=:mpi` with an explicit communicator. Real symmetric PFEAST-compatible aliases (`psfeast_*`, `pdfeast_*`) cover dense/sparse standard and generalized paths plus the parallel RCI entry point.
+- **Parallel:** High-level threaded and distributed backends support sparse real symmetric standard/generalized problems. MPI supports real symmetric standard/generalized problems and sparse complex Hermitian/general problems through `mpi_feast`, `mpi_feast_general`, and `backend=:mpi` with an explicit communicator. Real symmetric PFEAST-compatible aliases (`psfeast_*`, `pdfeast_*`) cover dense/sparse standard and generalized paths plus the parallel RCI entry point; sparse complex MPI aliases (`pcfeast_*`, `pzfeast_*`, `pcifeast_*`, `pzifeast_*`) cover direct and GMRES-backed Hermitian/general paths.
 - **Precision:** Double- and single-precision (Float64/ComplexF64 and Float32/ComplexF32) workflows are supported end-to-end.
 
 ## Missing Feature High-Priority Items
@@ -19,9 +19,11 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
    - Dense real/complex Hermitian, general, and banded wrappers (`difeast_sygv/syev/sbgv/sbev`, `zifeast_heev/hegv/hbev/hbgv`, `zifeast_gegv/geev/gbgv/gbev`), sparse real CSR and sparse complex Hermitian/complex-symmetric/general families, and polynomial IFEAST aliases are supported.
 
 2. **MPI/Parallel Families**
-   - High-level `backend=:mpi` and `mpi_feast` cover the real symmetric FEAST path.
+   - High-level `backend=:mpi` and `mpi_feast` cover the real symmetric FEAST path and sparse complex Hermitian path.
+   - High-level `backend=:mpi` and `mpi_feast_general` cover sparse complex general FEAST.
    - Real symmetric precision-prefixed PFEAST aliases (`psfeast_syev/sygv/scsrev/scsrgv/srci` and `pdfeast_syev/sygv/scsrev/scsrgv/srci`) forward to the threaded/distributed kernels, or to MPI when `comm=` is provided.
-   - Remaining parity work is the complex/general and iterative PFEAST surface (`pcfeast_*`, `pzfeast_*`, `psifeast_*`, `pdifeast_*`, `pcifeast_*`, `pzifeast_*`) and the corresponding complex/general MPI kernels.
+   - Sparse complex precision-prefixed PFEAST aliases (`pcfeast_hcsrev/hcsrgv/gcsrev/gcsrgv`, `pzfeast_hcsrev/hcsrgv/gcsrev/gcsrgv`) and GMRES-backed aliases (`pcifeast_*`, `pzifeast_*`) route to serial sparse solvers without `comm=` and to MPI kernels when `comm=` is provided.
+   - Remaining parity work is dense complex MPI coverage, threaded/distributed complex/general high-level backends, and broader PFEAST example ports.
 
 3. **Comprehensive Example Ports**
    - `examples/feast/run_feast_examples.jl` covers main cases, but additional Fortran demos (`PFEAST-L*`) still pending translation (especially MPI ones).
@@ -34,5 +36,5 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
 
 ## Suggested Next Steps
 
-1. Expand MPI layer to complex/general and iterative precision-prefixed PFEAST variants.
-2. Complete example suite (translate remaining FEAST/PFEAST sample programs, include README guidance).
+1. Complete example suite (translate remaining FEAST/PFEAST sample programs, include MPI demos).
+2. Extend dense complex/general MPI and non-MPI parallel backend coverage if needed by downstream workloads.

@@ -33,7 +33,7 @@ interfaces:
 | `:serial` | Real symmetric, complex Hermitian, and general problems | None |
 | `:threads` | Sparse real symmetric standard/generalized problems | Explicit requests throw on unsupported inputs |
 | `:distributed` | Sparse real symmetric standard/generalized problems with workers | Explicit requests throw if workers are missing |
-| `:mpi` | Real symmetric standard/generalized problems with an MPI communicator | Explicit requests throw if MPI is unavailable |
+| `:mpi` | Real symmetric standard/generalized plus sparse complex Hermitian/general problems with an MPI communicator | Explicit requests throw if MPI is unavailable or storage is unsupported |
 | `:auto` | Best available supported backend | Falls back to serial when needed |
 
 ### How FEAST Parallelizes
@@ -220,9 +220,10 @@ pfeast_show_distribution(16, nworkers())
 
 For high-performance computing clusters with thousands of cores.
 
-The high-level MPI backend currently supports real symmetric
-standard/generalized problems. Pass the communicator explicitly when using the
-public `feast` API so MPI remains an explicit opt-in.
+The high-level MPI backend supports real symmetric standard/generalized
+problems and sparse complex Hermitian/general problems. Pass the communicator
+explicitly when using the public `feast` and `feast_general` APIs so MPI
+remains an explicit opt-in.
 
 ### Prerequisites
 
@@ -262,6 +263,12 @@ B = sparse(1.0I, n, n)
 # MPI FEAST
 result = feast(A, B, (0.0, 0.1), M0=20, backend=:mpi, comm=comm)
 
+# Sparse complex general MPI FEAST
+Az = sparse(Diagonal(ComplexF64[0.5 + 0.1im, 1.0 + 0.2im, 2.0 - 0.1im]))
+Bz = spdiagm(0 => ones(ComplexF64, 3))
+general = feast_general(Az, Bz, 1.0 + 0.1im, 1.5;
+                        M0=3, backend=:mpi, comm=comm)
+
 if rank == 0
     println("Found $(result.M) eigenvalues")
     println("Eigenvalues: $(result.lambda[1:result.M])")
@@ -285,6 +292,12 @@ result = mpi_feast(A, B, interval, M0=M0, comm=comm, fpm=fpm)
 # FEAST-compatible PFEAST alias with explicit MPI communicator
 result = pdfeast_scsrgv!(A, B, interval[1], interval[2], M0, fpm; comm=comm)
 
+# Sparse complex Hermitian/general PFEAST aliases with explicit MPI communicator
+Ahz = sparse(Diagonal(ComplexF64[0.5, 1.0, 2.0]))
+hz = pzfeast_hcsrgv!(Ahz, Bz, 0.0, 2.5, M0, fpm; comm=comm)
+gz = pzifeast_gcsrgv!(Az, Bz, 1.0 + 0.1im, 1.5, M0, fpm;
+                      comm=comm, solver_tol=1e-10)
+
 # Check MPI availability
 if mpi_available()
     println("MPI is ready!")
@@ -297,6 +310,11 @@ The real symmetric PFEAST-compatible aliases are `psfeast_syev!`,
 and `pdfeast_srci!`. Without `comm=`, these call the threaded/distributed
 parallel kernels. With `comm=`, the dense and sparse generalized/standard
 aliases use the MPI kernels.
+
+Sparse complex MPI aliases are `pcfeast_hcsrev!`, `pzfeast_hcsrev!`,
+`pcfeast_hcsrgv!`, `pzfeast_hcsrgv!`, `pcfeast_gcsrev!`,
+`pzfeast_gcsrev!`, `pcfeast_gcsrgv!`, `pzfeast_gcsrgv!`, and their
+GMRES-backed `pcifeast_*`/`pzifeast_*` counterparts.
 
 ---
 

@@ -129,8 +129,7 @@ Supported prefixes are `sfeast_*` (`Float32`), `dfeast_*` (`Float64`),
 sparse, banded, custom-contour, and polynomial FEAST families implemented by
 FeastKit.
 
-Real symmetric PFEAST-compatible aliases are available for the implemented
-parallel backends:
+PFEAST-compatible aliases are available for the implemented parallel backends:
 
 ```julia
 # Double precision sparse generalized PFEAST using Julia Distributed workers
@@ -140,11 +139,20 @@ result = pdfeast_scsrgv!(A_sparse, B_sparse, 0.5, 1.5, M0, fpm;
 # The same alias can route to MPI when a communicator is supplied
 result = pdfeast_scsrgv!(A_sparse, B_sparse, 0.5, 1.5, M0, fpm;
                          comm=MPI.COMM_WORLD)
+
+# Complex Hermitian/general sparse aliases also route to MPI with comm=
+result = pzfeast_hcsrgv!(A_sparse_z, B_sparse_z, 0.5, 1.5, M0, fpm;
+                         comm=MPI.COMM_WORLD)
+result = pzifeast_gcsrgv!(A_general_z, B_general_z, center, radius, M0, fpm;
+                          comm=MPI.COMM_WORLD, solver_tol=1e-10)
 ```
 
 Supported PFEAST prefixes are `psfeast_*` (`Float32`) and `pdfeast_*`
 (`Float64`) for real symmetric dense/sparse standard and generalized problems,
-plus `psfeast_srci!` and `pdfeast_srci!` for the parallel RCI state machine.
+plus `pcfeast_*` (`ComplexF32`) and `pzfeast_*` (`ComplexF64`) for sparse
+complex Hermitian/general MPI paths. Iterative sparse complex MPI aliases use
+`pcifeast_*` and `pzifeast_*`. `psfeast_srci!` and `pdfeast_srci!` expose the
+parallel RCI state machine.
 
 ### Matrix-Free Operations
 
@@ -175,7 +183,7 @@ Production backend support is intentionally explicit:
 | `:serial` | Real symmetric, complex Hermitian, and general problems through the serial solvers |
 | `:threads` | Sparse real symmetric standard/generalized problems |
 | `:distributed` | Sparse real symmetric standard/generalized problems with Julia workers |
-| `:mpi` | Real symmetric standard/generalized problems with an initialized MPI communicator |
+| `:mpi` | Real symmetric standard/generalized plus sparse complex Hermitian/general problems with an initialized MPI communicator |
 | `:auto` | Best available backend; unsupported selections fall back to serial |
 
 Explicit backend requests fail fast when the backend is unavailable or does not

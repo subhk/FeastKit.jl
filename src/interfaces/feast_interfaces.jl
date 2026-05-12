@@ -85,8 +85,26 @@ function _feast_run_serial(A, B, interval, M0, fpm)
 end
 
 @inline function _execute_feast_general(A, B, center, radius, backend, M0, fpm, comm, use_threads, allow_backend_fallback)
-    if backend != :serial
-        msg = "Parallel execution for general problems is not yet available"
+    if backend == :mpi && _mpi_backend_ready(comm)
+        if A isa SparseMatrixCSC && B isa SparseMatrixCSC &&
+           eltype(A) <: Complex && eltype(B) <: Complex
+            try
+                if comm === nothing
+                    return mpi_feast_general(A, B, center, radius; M0=M0, fpm=fpm)
+                else
+                    return mpi_feast_general(A, B, center, radius; M0=M0, fpm=fpm, comm=comm)
+                end
+            catch e
+                allow_backend_fallback || rethrow(e)
+                @warn "MPI backend for general problems failed; falling back to serial execution" exception=e
+            end
+        else
+            msg = "MPI backend for general problems requires sparse complex matrices"
+            allow_backend_fallback || throw(ArgumentError(msg))
+            @warn "$msg; falling back to serial execution"
+        end
+    elseif backend != :serial
+        msg = "Threaded/distributed execution for general problems is not yet available"
         allow_backend_fallback || throw(ArgumentError(msg))
         @warn "$msg; falling back to serial execution"
     end

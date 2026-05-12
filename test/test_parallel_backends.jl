@@ -92,8 +92,11 @@ end
         fpm_h[1] = 0
         fpm_h[2] = 8
         fpm_h[4] = 12
+<<<<<<< HEAD
         fpm_h_iter = copy(fpm_h)
         fpm_h_iter[3] = 8
+=======
+>>>>>>> 5d0523207432ffb0c73cb4ab5c0aada19c36b623
         expected_h = [0.5, 1.0, 1.5]
 
         herm_mpi = mpi_feast_hcsrgv!(copy(A_h), copy(B_h), complex_interval[1], complex_interval[2],
@@ -103,7 +106,11 @@ end
         herm_alias = pzfeast_hcsrgv!(copy(A_h), copy(B_h), complex_interval[1], complex_interval[2],
                                      n_complex, copy(fpm_h); comm=comm)
         herm_iter_alias = pzifeast_hcsrgv!(copy(A_h), copy(B_h), complex_interval[1], complex_interval[2],
+<<<<<<< HEAD
                                            length(expected_h), copy(fpm_h_iter); comm=comm,
+=======
+                                           n_complex, copy(fpm_h); comm=comm,
+>>>>>>> 5d0523207432ffb0c73cb4ab5c0aada19c36b623
                                            solver_tol=1e-10, solver_maxiter=100)
 
         @test herm_mpi.info == 0
@@ -126,7 +133,10 @@ end
         fpm_g = zeros(Int, 64)
         feastinit!(fpm_g)
         fpm_g[1] = 0
+<<<<<<< HEAD
         fpm_g[3] = 11
+=======
+>>>>>>> 5d0523207432ffb0c73cb4ab5c0aada19c36b623
         fpm_g[4] = 12
         fpm_g[8] = 12
         expected_g = ComplexF64[0.5 + 0.1im, 1.0 + 0.2im, 2.0 - 0.1im]

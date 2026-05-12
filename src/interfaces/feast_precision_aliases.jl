@@ -548,3 +548,211 @@ for (prefix, RT) in ((:ps, Float32), (:pd, Float64))
         end
     end
 end
+
+for (prefix, RT) in ((:pc, Float32), (:pz, Float64))
+    @eval begin
+        function $(Symbol(prefix, "feast_hcsrgv!"))(A::SparseMatrixCSC{Complex{$RT},Int},
+                                                    B::SparseMatrixCSC{Complex{$RT},Int},
+                                                    Emin::$RT, Emax::$RT,
+                                                    M0::Int, fpm::Vector{Int};
+                                                    comm=nothing,
+                                                    root::Int=0,
+                                                    solver::Symbol=:direct,
+                                                    solver_tol::Real=0.0,
+                                                    solver_maxiter::Int=500,
+                                                    solver_restart::Int=30)
+            if comm === nothing
+                return feast_hcsrgv!(A, B, Emin, Emax, M0, fpm;
+                                     solver=solver,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+            end
+            isdefined(@__MODULE__, :mpi_feast_hcsrgv!) ||
+                _pfeast_mpi_unavailable($(QuoteNode(Symbol(prefix, "feast_hcsrgv!"))))
+            return mpi_feast_hcsrgv!(A, B, Emin, Emax, M0, fpm;
+                                     comm=comm, root=root, solver=solver,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+        end
+
+        function $(Symbol(prefix, "feast_hcsrev!"))(A::SparseMatrixCSC{Complex{$RT},Int},
+                                                    Emin::$RT, Emax::$RT,
+                                                    M0::Int, fpm::Vector{Int};
+                                                    comm=nothing,
+                                                    root::Int=0,
+                                                    solver::Symbol=:direct,
+                                                    solver_tol::Real=0.0,
+                                                    solver_maxiter::Int=500,
+                                                    solver_restart::Int=30)
+            if comm === nothing
+                return feast_hcsrev!(A, Emin, Emax, M0, fpm;
+                                     solver=solver,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+            end
+            isdefined(@__MODULE__, :mpi_feast_hcsrev!) ||
+                _pfeast_mpi_unavailable($(QuoteNode(Symbol(prefix, "feast_hcsrev!"))))
+            return mpi_feast_hcsrev!(A, Emin, Emax, M0, fpm;
+                                     comm=comm, root=root, solver=solver,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+        end
+
+        function $(Symbol(prefix, "feast_gcsrgv!"))(A::SparseMatrixCSC{Complex{$RT},Int},
+                                                    B::SparseMatrixCSC{Complex{$RT},Int},
+                                                    Emid::Complex{$RT}, r::$RT,
+                                                    M0::Int, fpm::Vector{Int};
+                                                    comm=nothing,
+                                                    root::Int=0,
+                                                    solver::Symbol=:direct,
+                                                    solver_tol::Real=0.0,
+                                                    solver_maxiter::Int=500,
+                                                    solver_restart::Int=30)
+            if comm === nothing
+                return feast_gcsrgv!(A, B, Emid, r, M0, fpm;
+                                     solver=solver,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+            end
+            isdefined(@__MODULE__, :mpi_feast_gcsrgv!) ||
+                _pfeast_mpi_unavailable($(QuoteNode(Symbol(prefix, "feast_gcsrgv!"))))
+            return mpi_feast_gcsrgv!(A, B, Emid, r, M0, fpm;
+                                     comm=comm, root=root, solver=solver,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+        end
+
+        function $(Symbol(prefix, "feast_gcsrev!"))(A::SparseMatrixCSC{Complex{$RT},Int},
+                                                    Emid::Complex{$RT}, r::$RT,
+                                                    M0::Int, fpm::Vector{Int};
+                                                    comm=nothing,
+                                                    root::Int=0,
+                                                    solver::Symbol=:direct,
+                                                    solver_tol::Real=0.0,
+                                                    solver_maxiter::Int=500,
+                                                    solver_restart::Int=30)
+            if comm === nothing
+                return feast_gcsrev!(A, Emid, r, M0, fpm;
+                                     solver=solver,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+            end
+            isdefined(@__MODULE__, :mpi_feast_gcsrev!) ||
+                _pfeast_mpi_unavailable($(QuoteNode(Symbol(prefix, "feast_gcsrev!"))))
+            return mpi_feast_gcsrev!(A, Emid, r, M0, fpm;
+                                     comm=comm, root=root, solver=solver,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+        end
+    end
+end
+
+for (prefix, RT) in ((:pci, Float32), (:pzi, Float64))
+    @eval begin
+        function $(Symbol(prefix, "feast_hcsrgv!"))(A::SparseMatrixCSC{Complex{$RT},Int},
+                                                    B::SparseMatrixCSC{Complex{$RT},Int},
+                                                    Emin::$RT, Emax::$RT,
+                                                    M0::Int, fpm::Vector{Int};
+                                                    comm=nothing,
+                                                    root::Int=0,
+                                                    solver_tol::Real=0.0,
+                                                    solver_maxiter::Int=500,
+                                                    solver_restart::Int=30)
+            if comm === nothing
+                return feast_hcsrgv!(A, B, Emin, Emax, M0, fpm;
+                                     solver=:gmres,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+            end
+            isdefined(@__MODULE__, :mpi_feast_hcsrgv!) ||
+                _pfeast_mpi_unavailable($(QuoteNode(Symbol(prefix, "feast_hcsrgv!"))))
+            return mpi_feast_hcsrgv!(A, B, Emin, Emax, M0, fpm;
+                                     comm=comm, root=root, solver=:gmres,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+        end
+
+        function $(Symbol(prefix, "feast_hcsrev!"))(A::SparseMatrixCSC{Complex{$RT},Int},
+                                                    Emin::$RT, Emax::$RT,
+                                                    M0::Int, fpm::Vector{Int};
+                                                    comm=nothing,
+                                                    root::Int=0,
+                                                    solver_tol::Real=0.0,
+                                                    solver_maxiter::Int=500,
+                                                    solver_restart::Int=30)
+            if comm === nothing
+                return feast_hcsrev!(A, Emin, Emax, M0, fpm;
+                                     solver=:gmres,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+            end
+            isdefined(@__MODULE__, :mpi_feast_hcsrev!) ||
+                _pfeast_mpi_unavailable($(QuoteNode(Symbol(prefix, "feast_hcsrev!"))))
+            return mpi_feast_hcsrev!(A, Emin, Emax, M0, fpm;
+                                     comm=comm, root=root, solver=:gmres,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+        end
+
+        function $(Symbol(prefix, "feast_gcsrgv!"))(A::SparseMatrixCSC{Complex{$RT},Int},
+                                                    B::SparseMatrixCSC{Complex{$RT},Int},
+                                                    Emid::Complex{$RT}, r::$RT,
+                                                    M0::Int, fpm::Vector{Int};
+                                                    comm=nothing,
+                                                    root::Int=0,
+                                                    solver_tol::Real=0.0,
+                                                    solver_maxiter::Int=500,
+                                                    solver_restart::Int=30)
+            if comm === nothing
+                return feast_gcsrgv!(A, B, Emid, r, M0, fpm;
+                                     solver=:gmres,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+            end
+            isdefined(@__MODULE__, :mpi_feast_gcsrgv!) ||
+                _pfeast_mpi_unavailable($(QuoteNode(Symbol(prefix, "feast_gcsrgv!"))))
+            return mpi_feast_gcsrgv!(A, B, Emid, r, M0, fpm;
+                                     comm=comm, root=root, solver=:gmres,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+        end
+
+        function $(Symbol(prefix, "feast_gcsrev!"))(A::SparseMatrixCSC{Complex{$RT},Int},
+                                                    Emid::Complex{$RT}, r::$RT,
+                                                    M0::Int, fpm::Vector{Int};
+                                                    comm=nothing,
+                                                    root::Int=0,
+                                                    solver_tol::Real=0.0,
+                                                    solver_maxiter::Int=500,
+                                                    solver_restart::Int=30)
+            if comm === nothing
+                return feast_gcsrev!(A, Emid, r, M0, fpm;
+                                     solver=:gmres,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+            end
+            isdefined(@__MODULE__, :mpi_feast_gcsrev!) ||
+                _pfeast_mpi_unavailable($(QuoteNode(Symbol(prefix, "feast_gcsrev!"))))
+            return mpi_feast_gcsrev!(A, Emid, r, M0, fpm;
+                                     comm=comm, root=root, solver=:gmres,
+                                     solver_tol=solver_tol,
+                                     solver_maxiter=solver_maxiter,
+                                     solver_restart=solver_restart)
+        end
+    end
+end

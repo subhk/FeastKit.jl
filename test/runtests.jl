@@ -606,18 +606,19 @@ using Random
         fpm_gmres = copy(fpm)
         fpm_gmres[3] = 8
 
-        direct = feast_sbgv!(copy(A_band), copy(B_band), ka, kb, 0.5, 3.0, n, copy(fpm))
+        Emax_real = 3.1  # Avoid the exact λ = 3.0 endpoint of this tridiagonal spectrum.
+        direct = feast_sbgv!(copy(A_band), copy(B_band), ka, kb, 0.5, Emax_real, n, copy(fpm))
         @test direct.info == 0
         @test direct.M > 0
 
-        gmres_result = feast_sbgv!(copy(A_band), copy(B_band), ka, kb, 0.5, 3.0, n, copy(fpm_gmres);
+        gmres_result = feast_sbgv!(copy(A_band), copy(B_band), ka, kb, 0.5, Emax_real, n, copy(fpm_gmres);
                                    solver=:gmres, solver_tol=1e-8,
                                    solver_maxiter=400, solver_restart=30)
         @test gmres_result.info == 0
         @test gmres_result.M == direct.M
         @test isapprox(sort(gmres_result.lambda[1:gmres_result.M]), sort(direct.lambda[1:direct.M]); atol=1e-8)
 
-        wrapper = difeast_sbgv!(copy(A_band), copy(B_band), ka, kb, 0.5, 3.0, n, copy(fpm_gmres);
+        wrapper = difeast_sbgv!(copy(A_band), copy(B_band), ka, kb, 0.5, Emax_real, n, copy(fpm_gmres);
                                 solver_tol=1e-8, solver_maxiter=400, solver_restart=30)
         @test wrapper.info == 0
         @test wrapper.M == direct.M

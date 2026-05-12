@@ -117,6 +117,10 @@ implementations.
 | `zifeast_*` | `ComplexF64` iterative | `zifeast_gegv!`, `zifeast_hcsrgv!`, `zifeast_grcipev!` |
 | `psfeast_*` | `Float32` parallel real symmetric | `psfeast_syev!`, `psfeast_scsrgv!`, `psfeast_srci!` |
 | `pdfeast_*` | `Float64` parallel real symmetric | `pdfeast_syev!`, `pdfeast_scsrgv!`, `pdfeast_srci!` |
+| `pcfeast_*` | `ComplexF32` parallel Hermitian/general | `pcfeast_hegv!`, `pcfeast_hcsrgv!`, `pcfeast_gegv!` |
+| `pzfeast_*` | `ComplexF64` parallel Hermitian/general | `pzfeast_hegv!`, `pzfeast_hcsrgv!`, `pzfeast_gegv!` |
+| `pcifeast_*` | `ComplexF32` iterative parallel Hermitian/general | `pcifeast_hegv!`, `pcifeast_gcsrgv!` |
+| `pzifeast_*` | `ComplexF64` iterative parallel Hermitian/general | `pzifeast_hegv!`, `pzifeast_gcsrgv!` |
 
 The aliases cover dense, sparse CSC/CSR-style, banded, custom-contour `x`
 variants, and polynomial FEAST entry points where the corresponding generic
@@ -126,7 +130,8 @@ The `psfeast_*` and `pdfeast_*` aliases cover the implemented real symmetric
 PFEAST paths. Dense and sparse standard aliases construct the identity mass
 matrix and call the corresponding generalized parallel solver. Passing
 `comm=MPI.COMM_WORLD` routes supported sparse/dense real symmetric aliases to
-the MPI kernels.
+the MPI kernels. Complex `pc/pz` and iterative `pci/pzi` aliases route dense
+and sparse Hermitian/general problems to MPI when a communicator is supplied.
 
 ---
 

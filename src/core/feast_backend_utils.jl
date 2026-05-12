@@ -85,14 +85,15 @@ function feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads;
                 return mpi_feast(A, B, interval, M0=M0, fpm=fpm, comm=comm)
             end
         elseif eltype(A) <: Complex && eltype(B) <: Complex &&
-               A isa SparseMatrixCSC && B isa SparseMatrixCSC
+               ((A isa SparseMatrixCSC && B isa SparseMatrixCSC) ||
+                (A isa Matrix && B isa Matrix))
             if comm === nothing
                 return mpi_feast(A, B, interval, M0=M0, fpm=fpm)
             else
                 return mpi_feast(A, B, interval, M0=M0, fpm=fpm, comm=comm)
             end
         else
-            return _backend_fallback("MPI backend currently supports real symmetric and sparse complex Hermitian problems",
+            return _backend_fallback("MPI backend currently supports real symmetric and dense/sparse complex Hermitian problems",
                                      strict_backend, A, B, interval, M0, fpm)
         end
     elseif backend in [:threads, :distributed]

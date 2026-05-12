@@ -157,6 +157,59 @@ end
         @test general_iter_alias.M == length(expected_g)
         @test isapprox(sort_complex(general_iter_alias.lambda[1:general_iter_alias.M]), sort_complex(expected_g); atol=1e-8)
 
+        A_hd = Matrix(A_h)
+        B_hd = Matrix(B_h)
+        dense_herm_mpi = mpi_feast_hegv!(copy(A_hd), copy(B_hd), complex_interval[1], complex_interval[2],
+                                         n_complex, copy(fpm_h); comm=comm)
+        dense_herm_highlevel = feast(copy(A_hd), copy(B_hd), complex_interval;
+                                     M0=n_complex, fpm=copy(fpm_h),
+                                     backend=:mpi, strict_backend=true, comm=comm)
+        dense_herm_alias = pzfeast_hegv!(copy(A_hd), copy(B_hd), complex_interval[1], complex_interval[2],
+                                         n_complex, copy(fpm_h); comm=comm)
+        dense_herm_iter_alias = pzifeast_hegv!(copy(A_hd), copy(B_hd),
+                                               complex_interval[1], complex_interval[2],
+                                               length(expected_h), copy(fpm_h_iter); comm=comm,
+                                               solver_tol=1e-10, solver_maxiter=100)
+
+        @test dense_herm_mpi.info == 0
+        @test dense_herm_mpi.M == length(expected_h)
+        @test sort(dense_herm_mpi.lambda[1:dense_herm_mpi.M]) ≈ expected_h atol=1e-8
+        @test dense_herm_highlevel.info == 0
+        @test dense_herm_highlevel.M == length(expected_h)
+        @test sort(dense_herm_highlevel.lambda[1:dense_herm_highlevel.M]) ≈ expected_h atol=1e-8
+        @test dense_herm_alias.info == 0
+        @test dense_herm_alias.M == length(expected_h)
+        @test sort(dense_herm_alias.lambda[1:dense_herm_alias.M]) ≈ expected_h atol=1e-8
+        @test dense_herm_iter_alias.info == 0
+        @test dense_herm_iter_alias.M == length(expected_h)
+        @test sort(dense_herm_iter_alias.lambda[1:dense_herm_iter_alias.M]) ≈ expected_h atol=1e-8
+
+        A_gd = Matrix(A_g)
+        B_gd = Matrix(B_g)
+        dense_general_mpi = mpi_feast_gegv!(copy(A_gd), copy(B_gd), center, radius,
+                                            n_complex, copy(fpm_g); comm=comm)
+        dense_general_highlevel = feast_general(copy(A_gd), copy(B_gd), center, radius;
+                                                M0=n_complex, fpm=copy(fpm_g),
+                                                backend=:mpi, strict_backend=true, comm=comm)
+        dense_general_alias = pzfeast_gegv!(copy(A_gd), copy(B_gd), center, radius,
+                                            n_complex, copy(fpm_g); comm=comm)
+        dense_general_iter_alias = pzifeast_gegv!(copy(A_gd), copy(B_gd), center, radius,
+                                                  n_complex, copy(fpm_g); comm=comm,
+                                                  solver_tol=1e-10, solver_maxiter=100)
+
+        @test dense_general_mpi.info == 0
+        @test dense_general_mpi.M == length(expected_g)
+        @test isapprox(sort_complex(dense_general_mpi.lambda[1:dense_general_mpi.M]), sort_complex(expected_g); atol=1e-8)
+        @test dense_general_highlevel.info == 0
+        @test dense_general_highlevel.M == length(expected_g)
+        @test isapprox(sort_complex(dense_general_highlevel.lambda[1:dense_general_highlevel.M]), sort_complex(expected_g); atol=1e-8)
+        @test dense_general_alias.info == 0
+        @test dense_general_alias.M == length(expected_g)
+        @test isapprox(sort_complex(dense_general_alias.lambda[1:dense_general_alias.M]), sort_complex(expected_g); atol=1e-8)
+        @test dense_general_iter_alias.info == 0
+        @test dense_general_iter_alias.M == length(expected_g)
+        @test isapprox(sort_complex(dense_general_iter_alias.lambda[1:dense_general_iter_alias.M]), sort_complex(expected_g); atol=1e-8)
+
         rank == 0 && println("MPI backend verified on $nranks ranks")
         MPI.Finalize()
     else

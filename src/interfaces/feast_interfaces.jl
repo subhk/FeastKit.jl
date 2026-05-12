@@ -86,7 +86,8 @@ end
 
 @inline function _execute_feast_general(A, B, center, radius, backend, M0, fpm, comm, use_threads, allow_backend_fallback)
     if backend == :mpi && _mpi_backend_ready(comm)
-        if A isa SparseMatrixCSC && B isa SparseMatrixCSC &&
+        if ((A isa SparseMatrixCSC && B isa SparseMatrixCSC) ||
+            (A isa Matrix && B isa Matrix)) &&
            eltype(A) <: Complex && eltype(B) <: Complex
             try
                 if comm === nothing
@@ -99,7 +100,7 @@ end
                 @warn "MPI backend for general problems failed; falling back to serial execution" exception=e
             end
         else
-            msg = "MPI backend for general problems requires sparse complex matrices"
+            msg = "MPI backend for general problems requires dense or sparse complex matrices"
             allow_backend_fallback || throw(ArgumentError(msg))
             @warn "$msg; falling back to serial execution"
         end

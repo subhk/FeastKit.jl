@@ -520,7 +520,7 @@ function _mpi_distribute_complex_contour!(mpi_state::MPIFeastState{T},
     return mpi_state
 end
 
-function mpi_compute_sparse_hermitian_moments(
+function mpi_compute_complex_hermitian_moments(
     A::SparseMatrixCSC{Complex{T},Int},
     B::SparseMatrixCSC{Complex{T},Int},
     Q_basis::Matrix{Complex{T}},
@@ -570,7 +570,90 @@ function mpi_compute_sparse_hermitian_moments(
     return zAq_local, zSq_local, Q_proj_local, local_success
 end
 
-function mpi_compute_sparse_general_projection(
+function mpi_compute_complex_hermitian_moments(
+    A::Matrix{Complex{T}},
+    B::Matrix{Complex{T}},
+    Q_basis::Matrix{Complex{T}},
+    local_Zne::Vector{Complex{T}},
+    local_Wne::Vector{Complex{T}},
+    M0::Int,
+    solver_choice::Symbol,
+    tol::T,
+    maxiter::Int,
+    restart::Int,
+    comm::MPI.Comm,
+) where T<:Real
+    N = size(A, 1)
+    zAq_local = zeros(Complex{T}, M0, M0)
+    zSq_local = zeros(Complex{T}, M0, M0)
+    Q_proj_local = zeros(Complex{T}, N, M0)
+    rhs = Matrix{Complex{T}}(undef, N, M0)
+    solutions = similar(rhs)
+    moment = Matrix{Complex{T}}(undef, M0, M0)
+    local_success = true
+
+    mul!(rhs, B, Q_basis)
+    if solver_choice == :direct
+        shifted = Matrix{Complex{T}}(undef, N, N)
+        for e in eachindex(local_Zne)
+            z = local_Zne[e]
+            weight = 2 * local_Wne[e]
+            try
+                @. shifted = z * B - A
+                F = lu!(shifted)
+                ldiv!(solutions, F, rhs)
+            catch err
+                @warn "MPI rank $(MPI.Comm_rank(comm)): dense complex Hermitian solve failed for contour point $e" exception=err
+                local_success = false
+                break
+            end
+
+            mul!(moment, adjoint(Q_basis), solutions)
+            @. zAq_local += weight * moment
+            @. zSq_local += (weight * z) * moment
+            @. Q_proj_local += weight * solutions
+        end
+    else
+        rhs_copy = similar(rhs)
+        tmpAx = Vector{Complex{T}}(undef, N)
+        tmpBx = Vector{Complex{T}}(undef, N)
+        current_shift = Ref(zero(Complex{T}))
+
+        function shifted_mul!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
+            mul!(tmpBx, B, x)
+            @. tmpBx = current_shift[] * tmpBx
+            mul!(tmpAx, A, x)
+            @. y = tmpBx - tmpAx
+            return y
+        end
+
+        for e in eachindex(local_Zne)
+            z = local_Zne[e]
+            weight = 2 * local_Wne[e]
+            try
+                current_shift[] = z
+                copyto!(rhs_copy, rhs)
+                local_success = solve_dense_shifted!(solutions, rhs_copy,
+                                                     shifted_mul!, solver_choice,
+                                                     tol, maxiter, restart)
+                local_success || break
+            catch err
+                @warn "MPI rank $(MPI.Comm_rank(comm)): dense iterative complex Hermitian solve failed for contour point $e" exception=err
+                local_success = false
+                break
+            end
+
+            mul!(moment, adjoint(Q_basis), solutions)
+            @. zAq_local += weight * moment
+            @. zSq_local += (weight * z) * moment
+            @. Q_proj_local += weight * solutions
+        end
+    end
+
+    return zAq_local, zSq_local, Q_proj_local, local_success
+end
+
+function mpi_compute_complex_general_projection(
     A::SparseMatrixCSC{Complex{T},Int},
     B::SparseMatrixCSC{Complex{T},Int},
     Q_basis::Matrix{Complex{T}},
@@ -612,8 +695,78 @@ function mpi_compute_sparse_general_projection(
     return Q_proj_local, local_success
 end
 
-function mpi_compute_complex_residuals!(A::SparseMatrixCSC{Complex{T},Int},
-                                        B::SparseMatrixCSC{Complex{T},Int},
+function mpi_compute_complex_general_projection(
+    A::Matrix{Complex{T}},
+    B::Matrix{Complex{T}},
+    Q_basis::Matrix{Complex{T}},
+    local_Zne::Vector{Complex{T}},
+    local_Wne::Vector{Complex{T}},
+    M0::Int,
+    solver_choice::Symbol,
+    tol::T,
+    maxiter::Int,
+    restart::Int,
+    comm::MPI.Comm,
+) where T<:Real
+    N = size(A, 1)
+    Q_proj_local = zeros(Complex{T}, N, M0)
+    rhs = Matrix{Complex{T}}(undef, N, M0)
+    solutions = similar(rhs)
+    local_success = true
+
+    mul!(rhs, B, Q_basis)
+    if solver_choice == :direct
+        shifted = Matrix{Complex{T}}(undef, N, N)
+        for e in eachindex(local_Zne)
+            z = local_Zne[e]
+            try
+                @. shifted = z * B - A
+                F = lu!(shifted)
+                ldiv!(solutions, F, rhs)
+            catch err
+                @warn "MPI rank $(MPI.Comm_rank(comm)): dense complex general solve failed for contour point $e" exception=err
+                local_success = false
+                break
+            end
+            @. Q_proj_local += local_Wne[e] * solutions
+        end
+    else
+        rhs_copy = similar(rhs)
+        tmpAx = Vector{Complex{T}}(undef, N)
+        tmpBx = Vector{Complex{T}}(undef, N)
+        current_shift = Ref(zero(Complex{T}))
+
+        function shifted_mul!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
+            mul!(tmpBx, B, x)
+            @. tmpBx = current_shift[] * tmpBx
+            mul!(tmpAx, A, x)
+            @. y = tmpBx - tmpAx
+            return y
+        end
+
+        for e in eachindex(local_Zne)
+            z = local_Zne[e]
+            try
+                current_shift[] = z
+                copyto!(rhs_copy, rhs)
+                local_success = solve_dense_shifted!(solutions, rhs_copy,
+                                                     shifted_mul!, solver_choice,
+                                                     tol, maxiter, restart)
+                local_success || break
+            catch err
+                @warn "MPI rank $(MPI.Comm_rank(comm)): dense iterative complex general solve failed for contour point $e" exception=err
+                local_success = false
+                break
+            end
+            @. Q_proj_local += local_Wne[e] * solutions
+        end
+    end
+
+    return Q_proj_local, local_success
+end
+
+function mpi_compute_complex_residuals!(A::AbstractMatrix{Complex{T}},
+                                        B::AbstractMatrix{Complex{T}},
                                         lambda::AbstractVector,
                                         q::Matrix{Complex{T}},
                                         res::Vector{T},
@@ -640,17 +793,19 @@ function mpi_compute_complex_residuals!(A::SparseMatrixCSC{Complex{T},Int},
     MPI.Allreduce!(local_res, res, MPI.SUM, comm)
 end
 
-function mpi_feast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int},
-                           B::SparseMatrixCSC{Complex{T},Int},
-                           Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
-                           comm::MPI.Comm = MPI.COMM_WORLD,
-                           root::Int = 0,
-                           solver::Symbol = :direct,
-                           solver_tol::Real = 0.0,
-                           solver_maxiter::Int = 500,
-                           solver_restart::Int = 30) where T<:Real
+function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
+                                       B::AbstractMatrix{Complex{T}},
+                                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                                       comm::MPI.Comm = MPI.COMM_WORLD,
+                                       root::Int = 0,
+                                       solver::Symbol = :direct,
+                                       solver_tol::Real = 0.0,
+                                       solver_maxiter::Int = 500,
+                                       solver_restart::Int = 30) where T<:Real
     rank = MPI.Comm_rank(comm)
     N = size(A, 1)
+    size(A, 2) == N || throw(ArgumentError("Matrix A must be square"))
+    size(B) == (N, N) || throw(ArgumentError("Matrix B must match size of A"))
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
     feastdefault!(fpm)
     solver_choice = _mpi_solver_choice(solver)
@@ -687,12 +842,12 @@ function mpi_feast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int},
     for loop_idx in 0:fpm[4]
         loop_count = loop_idx
         local_zAq, local_zSq, local_Q_proj, local_success =
-            mpi_compute_sparse_hermitian_moments(A, B, Q_basis,
-                                                 mpi_state.local_Zne,
-                                                 mpi_state.local_Wne, M0,
-                                                 solver_choice, tol,
-                                                 solver_maxiter, solver_restart,
-                                                 comm)
+            mpi_compute_complex_hermitian_moments(A, B, Q_basis,
+                                                  mpi_state.local_Zne,
+                                                  mpi_state.local_Wne, M0,
+                                                  solver_choice, tol,
+                                                  solver_maxiter, solver_restart,
+                                                  comm)
         if _mpi_success_count(local_success, comm) != MPI.Comm_size(comm)
             info_code = solver_choice == :direct ? Int(Feast_ERROR_LAPACK) : Int(Feast_ERROR_NO_CONVERGENCE)
             break
@@ -753,6 +908,13 @@ function mpi_feast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int},
                                       epsout_val, loop_count)
 end
 
+function mpi_feast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int},
+                           B::SparseMatrixCSC{Complex{T},Int},
+                           Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                           kwargs...) where T<:Real
+    return _mpi_feast_complex_hermitian!(A, B, Emin, Emax, M0, fpm; kwargs...)
+end
+
 function mpi_feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
                            Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                            kwargs...) where T<:Real
@@ -760,17 +922,35 @@ function mpi_feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
     return mpi_feast_hcsrgv!(A, B, Emin, Emax, M0, fpm; kwargs...)
 end
 
-function mpi_feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int},
-                           B::SparseMatrixCSC{Complex{T},Int},
-                           Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
-                           comm::MPI.Comm = MPI.COMM_WORLD,
-                           root::Int = 0,
-                           solver::Symbol = :direct,
-                           solver_tol::Real = 0.0,
-                           solver_maxiter::Int = 500,
-                           solver_restart::Int = 30) where T<:Real
+function mpi_feast_hegv!(A::Matrix{Complex{T}},
+                         B::Matrix{Complex{T}},
+                         Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                         kwargs...) where T<:Real
+    ishermitian(A) || throw(ArgumentError("Matrix A must be Hermitian"))
+    ishermitian(B) || throw(ArgumentError("Matrix B must be Hermitian positive definite"))
+    return _mpi_feast_complex_hermitian!(A, B, Emin, Emax, M0, fpm; kwargs...)
+end
+
+function mpi_feast_heev!(A::Matrix{Complex{T}},
+                         Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                         kwargs...) where T<:Real
+    B = Matrix{Complex{T}}(I, size(A, 1), size(A, 1))
+    return mpi_feast_hegv!(A, B, Emin, Emax, M0, fpm; kwargs...)
+end
+
+function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
+                                     B::AbstractMatrix{Complex{T}},
+                                     Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                                     comm::MPI.Comm = MPI.COMM_WORLD,
+                                     root::Int = 0,
+                                     solver::Symbol = :direct,
+                                     solver_tol::Real = 0.0,
+                                     solver_maxiter::Int = 500,
+                                     solver_restart::Int = 30) where T<:Real
     rank = MPI.Comm_rank(comm)
     N = size(A, 1)
+    size(A, 2) == N || throw(ArgumentError("Matrix A must be square"))
+    size(B) == (N, N) || throw(ArgumentError("Matrix B must match size of A"))
     check_feast_grci_input(N, M0, Emid, r, fpm)
     feastdefault!(fpm)
     solver_choice = _mpi_solver_choice(solver)
@@ -807,12 +987,12 @@ function mpi_feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int},
     for loop_idx in 0:fpm[4]
         loop_count = loop_idx
         local_Q_proj, local_success =
-            mpi_compute_sparse_general_projection(A, B, Q_basis,
-                                                  mpi_state.local_Zne,
-                                                  mpi_state.local_Wne, M0,
-                                                  solver_choice, tol,
-                                                  solver_maxiter, solver_restart,
-                                                  comm)
+            mpi_compute_complex_general_projection(A, B, Q_basis,
+                                                   mpi_state.local_Zne,
+                                                   mpi_state.local_Wne, M0,
+                                                   solver_choice, tol,
+                                                   solver_maxiter, solver_restart,
+                                                   comm)
         if _mpi_success_count(local_success, comm) != MPI.Comm_size(comm)
             info_code = solver_choice == :direct ? Int(Feast_ERROR_LAPACK) : Int(Feast_ERROR_NO_CONVERGENCE)
             break
@@ -865,11 +1045,32 @@ function mpi_feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int},
                                  epsout_val, loop_count)
 end
 
+function mpi_feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int},
+                           B::SparseMatrixCSC{Complex{T},Int},
+                           Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                           kwargs...) where T<:Real
+    return _mpi_feast_complex_general!(A, B, Emid, r, M0, fpm; kwargs...)
+end
+
 function mpi_feast_gcsrev!(A::SparseMatrixCSC{Complex{T},Int},
                            Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
                            kwargs...) where T<:Real
     B = spdiagm(0 => fill(one(Complex{T}), size(A, 1)))
     return mpi_feast_gcsrgv!(A, B, Emid, r, M0, fpm; kwargs...)
+end
+
+function mpi_feast_gegv!(A::Matrix{Complex{T}},
+                         B::Matrix{Complex{T}},
+                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                         kwargs...) where T<:Real
+    return _mpi_feast_complex_general!(A, B, Emid, r, M0, fpm; kwargs...)
+end
+
+function mpi_feast_geev!(A::Matrix{Complex{T}},
+                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                         kwargs...) where T<:Real
+    B = Matrix{Complex{T}}(I, size(A, 1), size(A, 1))
+    return mpi_feast_gegv!(A, B, Emid, r, M0, fpm; kwargs...)
 end
 
 # High-level MPI FeastKit interface
@@ -957,6 +1158,44 @@ function mpi_feast(A::SparseMatrixCSC{Complex{T},Int},
     return mpi_feast(A, B, interval; M0=M0, fpm=fpm, comm=comm, root=root, kwargs...)
 end
 
+function mpi_feast(A::Matrix{Complex{T}},
+                   B::Matrix{Complex{T}},
+                   interval::Tuple{T,T}; M0::Int = 10,
+                   fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
+                   comm::MPI.Comm = MPI.COMM_WORLD,
+                   root::Int = 0,
+                   solver::Symbol = :direct,
+                   solver_tol::Real = 0.0,
+                   solver_maxiter::Int = 500,
+                   solver_restart::Int = 30) where T<:Real
+    Emin, Emax = interval
+    params = if fpm === nothing
+        values = zeros(Int, 64)
+        feastinit!(values)
+        values
+    elseif fpm isa FeastParameters
+        fpm.fpm
+    else
+        fpm
+    end
+
+    return mpi_feast_hegv!(A, B, Emin, Emax, M0, params;
+                           comm=comm, root=root, solver=solver,
+                           solver_tol=solver_tol,
+                           solver_maxiter=solver_maxiter,
+                           solver_restart=solver_restart)
+end
+
+function mpi_feast(A::Matrix{Complex{T}},
+                   interval::Tuple{T,T}; M0::Int = 10,
+                   fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
+                   comm::MPI.Comm = MPI.COMM_WORLD,
+                   root::Int = 0,
+                   kwargs...) where T<:Real
+    B = Matrix{Complex{T}}(I, size(A, 1), size(A, 1))
+    return mpi_feast(A, B, interval; M0=M0, fpm=fpm, comm=comm, root=root, kwargs...)
+end
+
 function mpi_feast_general(A::SparseMatrixCSC{Complex{T},Int},
                            B::SparseMatrixCSC{Complex{T},Int},
                            center::Complex{T}, radius::T; M0::Int = 10,
@@ -991,6 +1230,44 @@ function mpi_feast_general(A::SparseMatrixCSC{Complex{T},Int},
                            root::Int = 0,
                            kwargs...) where T<:Real
     B = spdiagm(0 => fill(one(Complex{T}), size(A, 1)))
+    return mpi_feast_general(A, B, center, radius; M0=M0, fpm=fpm,
+                             comm=comm, root=root, kwargs...)
+end
+
+function mpi_feast_general(A::Matrix{Complex{T}},
+                           B::Matrix{Complex{T}},
+                           center::Complex{T}, radius::T; M0::Int = 10,
+                           fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
+                           comm::MPI.Comm = MPI.COMM_WORLD,
+                           root::Int = 0,
+                           solver::Symbol = :direct,
+                           solver_tol::Real = 0.0,
+                           solver_maxiter::Int = 500,
+                           solver_restart::Int = 30) where T<:Real
+    params = if fpm === nothing
+        values = zeros(Int, 64)
+        feastinit!(values)
+        values
+    elseif fpm isa FeastParameters
+        fpm.fpm
+    else
+        fpm
+    end
+
+    return mpi_feast_gegv!(A, B, center, radius, M0, params;
+                           comm=comm, root=root, solver=solver,
+                           solver_tol=solver_tol,
+                           solver_maxiter=solver_maxiter,
+                           solver_restart=solver_restart)
+end
+
+function mpi_feast_general(A::Matrix{Complex{T}},
+                           center::Complex{T}, radius::T; M0::Int = 10,
+                           fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
+                           comm::MPI.Comm = MPI.COMM_WORLD,
+                           root::Int = 0,
+                           kwargs...) where T<:Real
+    B = Matrix{Complex{T}}(I, size(A, 1), size(A, 1))
     return mpi_feast_general(A, B, center, radius; M0=M0, fpm=fpm,
                              comm=comm, root=root, kwargs...)
 end

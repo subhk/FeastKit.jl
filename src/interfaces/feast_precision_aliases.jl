@@ -551,6 +551,74 @@ end
 
 for (prefix, RT) in ((:pc, Float32), (:pz, Float64))
     @eval begin
+        function $(Symbol(prefix, "feast_hegv!"))(A::Matrix{Complex{$RT}},
+                                                  B::Matrix{Complex{$RT}},
+                                                  Emin::$RT, Emax::$RT,
+                                                  M0::Int, fpm::Vector{Int};
+                                                  comm=nothing,
+                                                  root::Int=0,
+                                                  solver::Symbol=:direct,
+                                                  solver_tol::Real=0.0,
+                                                  solver_maxiter::Int=500,
+                                                  solver_restart::Int=30)
+            if comm === nothing
+                return feast_hegv!(A, B, Emin, Emax, M0, fpm;
+                                   solver=solver,
+                                   solver_tol=solver_tol,
+                                   solver_maxiter=solver_maxiter,
+                                   solver_restart=solver_restart)
+            end
+            isdefined(@__MODULE__, :mpi_feast_hegv!) ||
+                _pfeast_mpi_unavailable($(QuoteNode(Symbol(prefix, "feast_hegv!"))))
+            return mpi_feast_hegv!(A, B, Emin, Emax, M0, fpm;
+                                   comm=comm, root=root, solver=solver,
+                                   solver_tol=solver_tol,
+                                   solver_maxiter=solver_maxiter,
+                                   solver_restart=solver_restart)
+        end
+
+        function $(Symbol(prefix, "feast_heev!"))(A::Matrix{Complex{$RT}},
+                                                  Emin::$RT, Emax::$RT,
+                                                  M0::Int, fpm::Vector{Int};
+                                                  kwargs...)
+            B = Matrix{Complex{$RT}}(I, size(A, 1), size(A, 1))
+            return $(Symbol(prefix, "feast_hegv!"))(A, B, Emin, Emax, M0, fpm; kwargs...)
+        end
+
+        function $(Symbol(prefix, "feast_gegv!"))(A::Matrix{Complex{$RT}},
+                                                  B::Matrix{Complex{$RT}},
+                                                  Emid::Complex{$RT}, r::$RT,
+                                                  M0::Int, fpm::Vector{Int};
+                                                  comm=nothing,
+                                                  root::Int=0,
+                                                  solver::Symbol=:direct,
+                                                  solver_tol::Real=0.0,
+                                                  solver_maxiter::Int=500,
+                                                  solver_restart::Int=30)
+            if comm === nothing
+                return feast_gegv!(A, B, Emid, r, M0, fpm;
+                                   solver=solver,
+                                   solver_tol=solver_tol,
+                                   solver_maxiter=solver_maxiter,
+                                   solver_restart=solver_restart)
+            end
+            isdefined(@__MODULE__, :mpi_feast_gegv!) ||
+                _pfeast_mpi_unavailable($(QuoteNode(Symbol(prefix, "feast_gegv!"))))
+            return mpi_feast_gegv!(A, B, Emid, r, M0, fpm;
+                                   comm=comm, root=root, solver=solver,
+                                   solver_tol=solver_tol,
+                                   solver_maxiter=solver_maxiter,
+                                   solver_restart=solver_restart)
+        end
+
+        function $(Symbol(prefix, "feast_geev!"))(A::Matrix{Complex{$RT}},
+                                                  Emid::Complex{$RT}, r::$RT,
+                                                  M0::Int, fpm::Vector{Int};
+                                                  kwargs...)
+            B = Matrix{Complex{$RT}}(I, size(A, 1), size(A, 1))
+            return $(Symbol(prefix, "feast_gegv!"))(A, B, Emid, r, M0, fpm; kwargs...)
+        end
+
         function $(Symbol(prefix, "feast_hcsrgv!"))(A::SparseMatrixCSC{Complex{$RT},Int},
                                                     B::SparseMatrixCSC{Complex{$RT},Int},
                                                     Emin::$RT, Emax::$RT,
@@ -657,6 +725,72 @@ end
 
 for (prefix, RT) in ((:pci, Float32), (:pzi, Float64))
     @eval begin
+        function $(Symbol(prefix, "feast_hegv!"))(A::Matrix{Complex{$RT}},
+                                                  B::Matrix{Complex{$RT}},
+                                                  Emin::$RT, Emax::$RT,
+                                                  M0::Int, fpm::Vector{Int};
+                                                  comm=nothing,
+                                                  root::Int=0,
+                                                  solver_tol::Real=0.0,
+                                                  solver_maxiter::Int=500,
+                                                  solver_restart::Int=30)
+            if comm === nothing
+                return feast_hegv!(A, B, Emin, Emax, M0, fpm;
+                                   solver=:gmres,
+                                   solver_tol=solver_tol,
+                                   solver_maxiter=solver_maxiter,
+                                   solver_restart=solver_restart)
+            end
+            isdefined(@__MODULE__, :mpi_feast_hegv!) ||
+                _pfeast_mpi_unavailable($(QuoteNode(Symbol(prefix, "feast_hegv!"))))
+            return mpi_feast_hegv!(A, B, Emin, Emax, M0, fpm;
+                                   comm=comm, root=root, solver=:gmres,
+                                   solver_tol=solver_tol,
+                                   solver_maxiter=solver_maxiter,
+                                   solver_restart=solver_restart)
+        end
+
+        function $(Symbol(prefix, "feast_heev!"))(A::Matrix{Complex{$RT}},
+                                                  Emin::$RT, Emax::$RT,
+                                                  M0::Int, fpm::Vector{Int};
+                                                  kwargs...)
+            B = Matrix{Complex{$RT}}(I, size(A, 1), size(A, 1))
+            return $(Symbol(prefix, "feast_hegv!"))(A, B, Emin, Emax, M0, fpm; kwargs...)
+        end
+
+        function $(Symbol(prefix, "feast_gegv!"))(A::Matrix{Complex{$RT}},
+                                                  B::Matrix{Complex{$RT}},
+                                                  Emid::Complex{$RT}, r::$RT,
+                                                  M0::Int, fpm::Vector{Int};
+                                                  comm=nothing,
+                                                  root::Int=0,
+                                                  solver_tol::Real=0.0,
+                                                  solver_maxiter::Int=500,
+                                                  solver_restart::Int=30)
+            if comm === nothing
+                return feast_gegv!(A, B, Emid, r, M0, fpm;
+                                   solver=:gmres,
+                                   solver_tol=solver_tol,
+                                   solver_maxiter=solver_maxiter,
+                                   solver_restart=solver_restart)
+            end
+            isdefined(@__MODULE__, :mpi_feast_gegv!) ||
+                _pfeast_mpi_unavailable($(QuoteNode(Symbol(prefix, "feast_gegv!"))))
+            return mpi_feast_gegv!(A, B, Emid, r, M0, fpm;
+                                   comm=comm, root=root, solver=:gmres,
+                                   solver_tol=solver_tol,
+                                   solver_maxiter=solver_maxiter,
+                                   solver_restart=solver_restart)
+        end
+
+        function $(Symbol(prefix, "feast_geev!"))(A::Matrix{Complex{$RT}},
+                                                  Emid::Complex{$RT}, r::$RT,
+                                                  M0::Int, fpm::Vector{Int};
+                                                  kwargs...)
+            B = Matrix{Complex{$RT}}(I, size(A, 1), size(A, 1))
+            return $(Symbol(prefix, "feast_gegv!"))(A, B, Emid, r, M0, fpm; kwargs...)
+        end
+
         function $(Symbol(prefix, "feast_hcsrgv!"))(A::SparseMatrixCSC{Complex{$RT},Int},
                                                     B::SparseMatrixCSC{Complex{$RT},Int},
                                                     Emin::$RT, Emax::$RT,

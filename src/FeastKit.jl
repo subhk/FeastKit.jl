@@ -8,6 +8,7 @@ export feast, feast_general, feast_matvec, feast_banded, feast_set_defaults!, fe
 export feast_parallel, pfeast_srci!, ParallelFeastState
 export pfeast_sygv!, pfeast_scsrgv!, pfeast_compute_all_contour_points!, pfeast_show_distribution
 export mpi_feast, mpi_feast_general, feast_hybrid, MPIFeastState
+export mpi_feast_heev!, mpi_feast_hegv!, mpi_feast_geev!, mpi_feast_gegv!
 export mpi_feast_hcsrev!, mpi_feast_hcsrgv!, mpi_feast_gcsrev!, mpi_feast_gcsrgv!
 export feast_summary, feast_validate_interval
 export check_feast_srci_input, feast_inside_contour, feast_inside_gcontour
@@ -86,6 +87,10 @@ export cfeast_heev!, zfeast_heev!, cfeast_hegv!, zfeast_hegv!,
 export psfeast_syev!, pdfeast_syev!, psfeast_sygv!, pdfeast_sygv!,
        psfeast_scsrev!, pdfeast_scsrev!, psfeast_scsrgv!, pdfeast_scsrgv!,
        psfeast_srci!, pdfeast_srci!
+export pcfeast_heev!, pzfeast_heev!, pcfeast_hegv!, pzfeast_hegv!,
+       pcfeast_geev!, pzfeast_geev!, pcfeast_gegv!, pzfeast_gegv!,
+       pcifeast_heev!, pzifeast_heev!, pcifeast_hegv!, pzifeast_hegv!,
+       pcifeast_geev!, pzifeast_geev!, pcifeast_gegv!, pzifeast_gegv!
 export pcfeast_hcsrev!, pzfeast_hcsrev!, pcfeast_hcsrgv!, pzfeast_hcsrgv!,
        pcfeast_gcsrev!, pzfeast_gcsrev!, pcfeast_gcsrgv!, pzfeast_gcsrgv!,
        pcifeast_hcsrev!, pzifeast_hcsrev!, pcifeast_hcsrgv!, pzifeast_hcsrgv!,

@@ -326,6 +326,65 @@ function feast_grcix!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
     end
 end
 
+"""
+    ifeast_srci!(...)
+
+Iterative-FEAST-compatible RCI entry point for real symmetric problems. The RCI
+kernel is solver-neutral: it issues the same factorize, solve, multiply, and
+done jobs as `feast_srci!`, while the caller decides whether each shifted solve
+uses a direct or iterative method.
+"""
+function ifeast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
+                      work::Matrix{T}, workc::Matrix{Complex{T}},
+                      Aq::Matrix{T}, Sq::Matrix{T}, fpm::Vector{Int},
+                      epsout::Ref{T}, loop::Ref{Int},
+                      Emin::T, Emax::T, M0::Int,
+                      lambda::Vector{T}, q::Matrix{T}, mode::Ref{Int},
+                      res::Vector{T}, info::Ref{Int};
+                      state::FeastSRCIState{T} = FeastSRCIState{T}()) where T<:Real
+    return feast_srci!(ijob, N, Ze, work, workc, Aq, Sq, fpm, epsout, loop,
+                       Emin, Emax, M0, lambda, q, mode, res, info; state=state)
+end
+
+"""
+    ifeast_hrci!(...)
+
+Iterative-FEAST-compatible RCI entry point for complex Hermitian problems. The
+caller owns the shifted linear solve requested by the RCI job code, so this
+wrapper preserves the existing `feast_hrci!` state machine and exposes the
+iterative FEAST API name.
+"""
+function ifeast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
+                      work::Matrix{T}, workc::Matrix{Complex{T}},
+                      zAq::Matrix{Complex{T}}, zSq::Matrix{Complex{T}},
+                      fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
+                      Emin::T, Emax::T, M0::Int,
+                      lambda::Vector{T}, q::Matrix{Complex{T}},
+                      mode::Ref{Int}, res::Vector{T}, info::Ref{Int};
+                      state::FeastHRCIState{T} = FeastHRCIState{T}()) where T<:Real
+    return feast_hrci!(ijob, N, Ze, work, workc, zAq, zSq, fpm, epsout, loop,
+                       Emin, Emax, M0, lambda, q, mode, res, info; state=state)
+end
+
+"""
+    ifeast_grci!(...)
+
+Iterative-FEAST-compatible RCI entry point for general non-Hermitian problems.
+It is a solver-neutral wrapper around `feast_grci!`; callers provide the
+direct, GMRES, or other shifted-system solve whenever `ijob` requests it.
+"""
+function ifeast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
+                      work::Matrix{T}, workc::Matrix{Complex{T}},
+                      Aq::Matrix{Complex{T}}, Sq::Matrix{Complex{T}},
+                      fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
+                      Emid::Complex{T}, r::T, M0::Int,
+                      lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
+                      mode::Ref{Int}, res::Vector{T}, info::Ref{Int};
+                      state::FeastGRCIState{T} = FeastGRCIState{T}()) where T<:Real
+    return feast_grci!(ijob, N, Ze, work, workc, Aq, Sq, fpm, epsout, loop,
+                       Emid, r, M0, lambda, q, mode, res, info; state=state)
+end
+
 @views function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                             work::Matrix{T}, workc::Matrix{Complex{T}},
                             zAq::Matrix{Complex{T}}, zSq::Matrix{Complex{T}},

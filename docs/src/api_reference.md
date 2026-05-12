@@ -432,6 +432,17 @@ abstract type MatrixFreeOperator{T} end
 
 Explicit state objects for Reverse Communication Interface (RCI) kernels. These must be created once before the RCI loop and reused across all iterations.
 
+The `ifeast_srci!`, `ifeast_hrci!`, and `ifeast_grci!` entry points expose
+IFEAST-compatible RCI names. They are solver-neutral wrappers around the base
+RCI kernels; callers still provide the shifted-system solve when the RCI job
+code requests it, using either direct or iterative linear solvers.
+
+```@docs
+FeastKit.ifeast_srci!
+FeastKit.ifeast_hrci!
+FeastKit.ifeast_grci!
+```
+
 ```@docs
 FeastKit.FeastSRCIState
 FeastKit.FeastHRCIState

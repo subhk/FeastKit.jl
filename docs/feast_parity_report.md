@@ -8,7 +8,7 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
 - **Dense:** Standard/generalized/polynomial real and complex FEAST families are covered, with precision-prefixed aliases (`sfeast_*`, `dfeast_*`, `cfeast_*`, `zfeast_*`) forwarding to the type-generic Julia implementations. GMRES-backed iterative variants exist for real symmetric (`difeast_sygv/syev`), complex Hermitian (`zifeast_heev/hegv`), general non-Hermitian (`zifeast_gegv/geev`), and dense complex-symmetric wrappers, which use a dedicated transpose-bilinear projection.
 - **Sparse:** Real, Hermitian, complex-symmetric, and general CSC/CSR-style families are covered, including custom-contour `x` aliases and precision-prefixed FEAST names. GMRES-backed variants cover real CSR (`difeast_scsrgv/x`) and complex Hermitian, complex-symmetric, and general/non-Hermitian (`zifeast_hcsrev/hcsrgv/scsrev/scsrgv/gcsrgv/gcsrev`).
 - **Banded:** Real, complex Hermitian, complex-symmetric, and non-Hermitian FEAST families are present, including precision-prefixed aliases and custom-contour variants. Direct real symmetric, complex Hermitian, complex-symmetric, and fully general non-Hermitian banded solves use LAPACK banded storage; GMRES-backed iterative banded solves use banded matvecs without dense matrix conversion.
-- **RCI:** Base kernels (`feast_srci!`, `feast_hrci!`, `feast_grci!`) plus the polynomial kernels (`feast_srcipev!`, `feast_grcipev!`) are implemented; iterative variants are still absent.
+- **RCI:** Base kernels (`feast_srci!`, `feast_hrci!`, `feast_grci!`), iterative-compatible RCI wrappers (`ifeast_srci!`, `ifeast_hrci!`, `ifeast_grci!`), and polynomial kernels (`feast_srcipev!`, `feast_grcipev!`) are implemented.
 - **Utilities:** Contour generators, rational helpers, parameter initialization, custom contour registry, and distribution helpers are present.
 - **Parallel:** High-level threaded and distributed backends support sparse real symmetric standard/generalized problems; MPI supports real symmetric standard/generalized problems through `mpi_feast` and `backend=:mpi` with an explicit communicator. Real symmetric PFEAST-compatible aliases (`psfeast_*`, `pdfeast_*`) cover dense/sparse standard and generalized paths plus the parallel RCI entry point.
 - **Precision:** Double- and single-precision (Float64/ComplexF64 and Float32/ComplexF32) workflows are supported end-to-end.
@@ -34,6 +34,6 @@ and the reference Fortran FEAST implementation shipped under `FEAST/`.
 
 ## Suggested Next Steps
 
-1. Implement iterative RCI kernels (new module, reuse Krylov.jl or custom GMRES).
+1. Expand polynomial IFEAST aliases and tests for the remaining polynomial wrapper surface.
 2. Expand MPI layer to complex/general and iterative precision-prefixed PFEAST variants.
 3. Complete example suite (translate remaining FEAST/PFEAST sample programs, include README guidance).

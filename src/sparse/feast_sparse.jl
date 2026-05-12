@@ -142,7 +142,10 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
         @. residual -= b
         res_norm = norm(residual)
         b_norm = norm(b)
-        if !stats.solved || res_norm > tol * max(b_norm, one(b_norm))
+        # Keep this independent check aligned with Krylov's convergence test;
+        # the explicit residual may be slightly larger from roundoff alone.
+        residual_limit = 10 * tol * max(b_norm, one(b_norm))
+        if !stats.solved || res_norm > residual_limit
             return false
         end
         dest[:, j] .= x_sol
@@ -173,9 +176,10 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
     feastdefault!(fpm)
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
 
-    solver_choice = solver in (:direct, :gmres) ? solver : :invalid
+    solver_choice = solver == :iterative ? :gmres : solver
+    solver_choice = solver_choice in (:direct, :gmres) ? solver_choice : :invalid
     solver_choice == :invalid &&
-        throw(ArgumentError("Unsupported solver option '$solver'. Use :direct or :gmres."))
+        throw(ArgumentError("Unsupported solver option '$solver'. Use :direct, :gmres, or :iterative."))
     solver_is_direct = solver_choice == :direct
     solver_is_iterative = !solver_is_direct
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
@@ -211,7 +215,7 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
     Wne = contour.Wne
 
     maxloop = fpm[4]
-    eps_tol = feast_tolerance(fpm)
+    eps_tol = feast_tolerance(fpm, T)
     epsout_val = T(Inf)
     loop_count = 0
     info_code = Int(Feast_SUCCESS)
@@ -373,6 +377,191 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
 
     return FeastResult{T, Complex{T}}(lambda, q, M_found, res,
                                       info_code, epsout_val, loop_count)
+end
+
+"""
+    _feast_sparse_complex_symmetric(A, B, Emid, r, M0, fpm; solver=:direct)
+
+Shared sparse complex-symmetric FEAST implementation. The shifted systems still
+use sparse LU or GMRES, while the reduced Ritz pencil is formed with the
+transpose bilinear form `Qᵀ A Q` and `Qᵀ B Q` required by complex-symmetric
+problems.
+"""
+@views function _feast_sparse_complex_symmetric(A::SparseMatrixCSC{Complex{T},Int},
+                                                B::SparseMatrixCSC{Complex{T},Int},
+                                                Emid::Complex{T}, r::T,
+                                                M0::Int, fpm::Vector{Int};
+                                                solver::Symbol = :direct,
+                                                solver_tol::Real = 0.0,
+                                                solver_maxiter::Int = 500,
+                                                solver_restart::Int = 30) where T<:Real
+    N = size(A, 1)
+    size(A, 2) == N || throw(ArgumentError("A must be square"))
+    size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
+    _check_complex_symmetric(A)
+    _check_complex_symmetric(B)
+
+    feastdefault!(fpm)
+    check_feast_grci_input(N, M0, Emid, r, fpm)
+
+    solver_choice = solver == :iterative ? :gmres : solver
+    solver_choice = solver_choice in (:direct, :gmres) ? solver_choice : :invalid
+    solver_choice == :invalid &&
+        throw(ArgumentError("Unsupported solver option '$solver'. Use :direct, :gmres, or :iterative."))
+    solver_is_direct = solver_choice == :direct
+    solver_is_iterative = !solver_is_direct
+    solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
+        throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Please ensure it is in the environment."))
+    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+
+    workspace = FeastWorkspaceComplex{T}(N, M0)
+    Q_basis = view(workspace.workc, :, 1:M0)
+    _feast_seeded_subspace_complex!(Q_basis)
+    shifted_solutions = workspace.q
+    lambda_vec = Vector{Complex{T}}(undef, M0)
+    res_vec = workspace.res
+
+    rhs_buffer = Matrix{Complex{T}}(undef, N, M0)
+    rhs_iterative = solver_is_iterative ? similar(rhs_buffer) : nothing
+    Q_proj = zeros(Complex{T}, N, M0)
+    AQ = Matrix{Complex{T}}(undef, N, M0)
+    BQ = Matrix{Complex{T}}(undef, N, M0)
+    Ared = Matrix{Complex{T}}(undef, M0, M0)
+    Bred = Matrix{Complex{T}}(undef, M0, M0)
+    lambda_tmp = similar(lambda_vec)
+    perm = Vector{Int}(undef, M0)
+    solutions_tmp = similar(shifted_solutions)
+    residual_vec = Vector{Complex{T}}(undef, N)
+    Bq_vec = Vector{Complex{T}}(undef, N)
+
+    contour = feast_get_custom_contour(T, fpm)
+    contour === nothing && (contour = feast_gcontour(Emid, r, fpm))
+    Zne = contour.Zne
+    Wne = contour.Wne
+
+    maxloop = fpm[4]
+    eps_tol = feast_tolerance(fpm, T)
+    epsout_val = T(Inf)
+    loop_count = 0
+    info_code = Int(Feast_SUCCESS)
+    M_found = 0
+
+    for loop_idx in 0:maxloop
+        loop_count = loop_idx
+        fill!(Q_proj, zero(Complex{T}))
+
+        solve_failed = false
+        for e in eachindex(Zne)
+            z = Zne[e]
+            weight = Wne[e]
+            mul!(rhs_buffer, B, Q_basis)
+
+            if solver_is_direct
+                shifted_matrix = z * B - A
+                try
+                    solver_factor = lu(shifted_matrix)
+                    ldiv!(shifted_solutions, solver_factor, rhs_buffer)
+                catch err
+                    info_code = Int(Feast_ERROR_LAPACK)
+                    @warn "Sparse complex-symmetric direct solve failed for shift $z" exception=err
+                    solve_failed = true
+                    break
+                end
+            else
+                copyto!(rhs_iterative, rhs_buffer)
+                success = solve_shifted_iterative!(shifted_solutions, rhs_iterative,
+                                                   A, B, z, tol_value,
+                                                   solver_maxiter, solver_restart)
+                if !success
+                    info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                    solve_failed = true
+                    break
+                end
+            end
+
+            @. Q_proj += weight * shifted_solutions
+        end
+        solve_failed && break
+
+        try
+            # Complex-symmetric problems use the bilinear transpose form.
+            # Using adjoint here would turn this path back into the general
+            # non-Hermitian projection and lose the structure we validated.
+            mul!(AQ, A, Q_proj)
+            mul!(BQ, B, Q_proj)
+            mul!(Ared, transpose(Q_proj), AQ)
+            mul!(Bred, transpose(Q_proj), BQ)
+
+            F = eigen(Ared, Bred)
+            lambda_red = F.values
+            v_red = F.vectors
+
+            for idx in 1:M0
+                mul!(view(shifted_solutions, :, idx), Q_proj, view(v_red, :, idx))
+                lambda_vec[idx] = lambda_red[idx]
+            end
+
+            M = _feast_reorder_by_gcontour!(lambda_vec, shifted_solutions, perm,
+                                            lambda_tmp, solutions_tmp,
+                                            Emid, r, fpm, M0)
+            if M == 0
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
+
+            for idx in 1:M0
+                vec = view(shifted_solutions, :, idx)
+                nrm = norm(vec)
+                if nrm > zero(T)
+                    vec ./= nrm
+                else
+                    fill!(vec, zero(Complex{T}))
+                    vec[mod1(idx, N)] = one(Complex{T})
+                end
+            end
+
+            max_res = zero(T)
+            for j in 1:M
+                q_col = view(shifted_solutions, :, j)
+                mul!(residual_vec, A, q_col)
+                mul!(Bq_vec, B, q_col)
+                @. residual_vec = residual_vec - lambda_vec[j] * Bq_vec
+                res_val = norm(residual_vec) / max(abs(lambda_vec[j]), one(T))
+                res_vec[j] = res_val
+                max_res = max(max_res, res_val)
+            end
+
+            epsout_val = max_res
+            M_found = M
+
+            if epsout_val <= eps_tol
+                break
+            end
+
+            if loop_idx == maxloop
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
+
+            copyto!(Q_basis, shifted_solutions)
+        catch err
+            info_code = Int(Feast_ERROR_LAPACK)
+            @warn "Reduced eigenvalue problem failed during sparse complex-symmetric FEAST" exception=err
+            break
+        end
+    end
+
+    if M_found == 0 && info_code == Int(Feast_SUCCESS)
+        info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+    end
+    M_found > 1 && feast_sort_general!(lambda_vec, shifted_solutions, res_vec, M_found)
+
+    lambda = lambda_vec[1:M_found]
+    q = shifted_solutions[:, 1:M_found]
+    res = res_vec[1:M_found]
+
+    return FeastGeneralResult{T}(lambda, q, M_found, res,
+                                 info_code, epsout_val, loop_count)
 end
 
 function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
@@ -562,9 +751,10 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     # Check inputs
     check_feast_grci_input(N, M0, Emid, r, fpm)
 
-    solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
+    solver_choice = solver == :iterative ? :gmres : solver
+    solver_choice = solver_choice in (:direct, :gmres) ? solver_choice : :invalid
     solver_choice == :invalid &&
-        throw(ArgumentError("Unsupported solver option '$solver'. Use :direct or :gmres."))
+        throw(ArgumentError("Unsupported solver option '$solver'. Use :direct, :gmres, or :iterative."))
     solver_is_direct = solver_choice == :direct
     solver_is_iterative = !solver_is_direct
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
@@ -712,9 +902,10 @@ function feast_scsrgv_complex!(A::SparseMatrixCSC{Complex{T},Int},
                                solver_restart::Int = 30) where T<:Real
     _check_complex_symmetric(A)
     _check_complex_symmetric(B)
-    return feast_gcsrgv!(A, B, Emid, r, M0, fpm;
-                         solver=solver, solver_tol=solver_tol,
-                         solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+    return _feast_sparse_complex_symmetric(A, B, Emid, r, M0, fpm;
+                                           solver=solver, solver_tol=solver_tol,
+                                           solver_maxiter=solver_maxiter,
+                                           solver_restart=solver_restart)
 end
 
 function feast_scsrgvx_complex!(A::SparseMatrixCSC{Complex{T},Int},
@@ -740,7 +931,7 @@ function feast_scsrev_complex!(A::SparseMatrixCSC{Complex{T},Int},
                                solver_maxiter::Int = 500,
                                solver_restart::Int = 30) where T<:Real
     _check_complex_symmetric(A)
-    B = sparse(Complex{T}(1.0) * I, size(A, 1), size(A, 2))
+    B = spdiagm(0 => fill(Complex{T}(1), size(A, 1)))
     return feast_scsrgv_complex!(A, B, Emid, r, M0, fpm;
                                  solver=solver, solver_tol=solver_tol,
                                  solver_maxiter=solver_maxiter, solver_restart=solver_restart)
@@ -980,7 +1171,7 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
     ne = length(Zne)
 
     maxloop = fpm[4]
-    eps_tol = feast_tolerance(fpm)
+    eps_tol = feast_tolerance(fpm, T)
 
     shifted_operator = MatrixFreeShiftedOperator(N, zero(Complex{T}), A_matvec!, B_matvec!, T)
 

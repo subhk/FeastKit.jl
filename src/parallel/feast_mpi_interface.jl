@@ -47,12 +47,12 @@ function feast_hybrid(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     # Initialize workspace
     N = size(A, 1)
     workspace = FeastWorkspaceReal{T}(N, M0)
-    randn!(workspace.work)
+    _feast_seeded_subspace!(workspace.work)
     MPI.Bcast!(workspace.work, 0, comm)
     
     # Feast parameters
     feastdefault!(fpm)
-    eps_tolerance = feast_tolerance(fpm)
+    eps_tolerance = feast_tolerance(fpm, T)
     max_loops = fpm[4]
     
     # Main refinement loop

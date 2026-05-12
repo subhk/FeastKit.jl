@@ -395,6 +395,15 @@ function feast_tolerance(fpm::Vector{Int})
     return 10.0^(-fpm[3])
 end
 
+function feast_tolerance(fpm::Vector{Int}, ::Type{T}) where T<:AbstractFloat
+    tol = T(feast_tolerance(fpm))
+    # The default FEAST exponent targets Float64 accuracy. For Float32,
+    # requiring 1e-12 convergence reports false non-convergence after the
+    # eigenpairs have reached the precision the storage type can represent.
+    T === Float32 && return max(tol, sqrt(eps(T)))
+    return tol
+end
+
 # Get machine epsilon
 function feast_epsilon(::Type{Float64})
     return eps(Float64)

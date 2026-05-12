@@ -134,6 +134,66 @@ function _feast_reorder_by_interval!(lambda::AbstractVector{Tλ},
     return ninside
 end
 
+"""
+    _feast_reorder_by_gcontour!(lambda, vectors, perm, lambda_tmp,
+                                vector_tmp, Emid, r, fpm, M0)
+
+Move eigenpairs inside the FEAST general complex contour to the front of the
+eigenvalue and eigenvector workspaces. The caller owns all scratch buffers so
+general-problem solvers can reorder Ritz pairs without allocating masks or
+temporary column slices during refinement.
+"""
+function _feast_reorder_by_gcontour!(lambda::AbstractVector{Complex{T}},
+                                     vectors::AbstractMatrix{Complex{T}},
+                                     perm::AbstractVector{Int},
+                                     lambda_tmp::AbstractVector{Complex{T}},
+                                     vector_tmp::AbstractMatrix{Complex{T}},
+                                     Emid::Complex{T}, r::T,
+                                     fpm::Vector{Int}, M0::Int) where T<:Real
+    @boundscheck begin
+        length(lambda) >= M0 || throw(BoundsError(lambda, M0))
+        length(perm) >= M0 || throw(BoundsError(perm, M0))
+        length(lambda_tmp) >= M0 || throw(BoundsError(lambda_tmp, M0))
+        size(vectors, 2) >= M0 || throw(BoundsError(vectors, (1, M0)))
+        size(vector_tmp, 1) == size(vectors, 1) || throw(DimensionMismatch("vector scratch row count mismatch"))
+        size(vector_tmp, 2) >= M0 || throw(BoundsError(vector_tmp, (1, M0)))
+    end
+
+    ninside = 0
+    @inbounds for i in 1:M0
+        if feast_inside_gcontour(lambda[i], Emid, r; fpm=fpm)
+            ninside += 1
+            perm[ninside] = i
+        end
+    end
+
+    next_index = ninside
+    @inbounds for i in 1:M0
+        if !feast_inside_gcontour(lambda[i], Emid, r; fpm=fpm)
+            next_index += 1
+            perm[next_index] = i
+        end
+    end
+
+    nrows = size(vectors, 1)
+    @inbounds for j in 1:M0
+        src_col = perm[j]
+        lambda_tmp[j] = lambda[src_col]
+        for i in 1:nrows
+            vector_tmp[i, j] = vectors[i, src_col]
+        end
+    end
+
+    @inbounds for j in 1:M0
+        lambda[j] = lambda_tmp[j]
+        for i in 1:nrows
+            vectors[i, j] = vector_tmp[i, j]
+        end
+    end
+
+    return ninside
+end
+
 function feast_set_custom_contour!(fpm::Vector{Int}, contour::FeastContour{T}) where T<:Real
     validate_contour(contour.Zne, contour.Wne)
     lock(_feast_contour_lock) do

@@ -1,5 +1,6 @@
 using Test
 using FeastKit
+using Distributed
 using LinearAlgebra
 using SparseArrays
 
@@ -36,16 +37,29 @@ end
     @test_throws ArgumentError feast(A, B, interval; M0=n, fpm=copy(fpm),
                                      backend=:bogus)
 
-    if Threads.nthreads() > 1
-        dense_threaded_fallback = feast(A, B, interval; M0=n, fpm=copy(fpm),
-                                        backend=:threads)
-        @test dense_threaded_fallback.info == serial.info
-        @test dense_threaded_fallback.M == serial.M
-        @test _sorted_lambda(dense_threaded_fallback) ≈ _sorted_lambda(serial) atol=1e-10
+    auto = feast(A, B, interval; M0=n, fpm=copy(fpm), backend=:auto)
+    @test auto.info == serial.info
+    @test auto.M == serial.M
+    @test _sorted_lambda(auto) ≈ _sorted_lambda(serial) atol=1e-10
 
+    @test_throws ArgumentError feast(A, B, interval; M0=n, fpm=copy(fpm),
+                                     backend=:threads)
+    @test_throws ArgumentError feast(A, B, interval; M0=n, fpm=copy(fpm),
+                                     parallel=:threads)
+    @test_throws ArgumentError feast_general(ComplexF64.(A), 0.0 + 0.0im, 3.0;
+                                             M0=n, fpm=copy(fpm), backend=:threads)
+
+    if !mpi_available()
         @test_throws ArgumentError feast(A, B, interval; M0=n, fpm=copy(fpm),
-                                         backend=:threads, strict_backend=true)
+                                         backend=:mpi)
+    end
 
+    if nworkers() == 1
+        @test_throws ArgumentError feast(sparse(A), sparse(B), interval; M0=n,
+                                         fpm=copy(fpm), backend=:distributed)
+    end
+
+    if Threads.nthreads() > 1
         sparse_serial = feast(sparse(A), sparse(B), interval; M0=n,
                               fpm=copy(fpm), backend=:serial)
         sparse_threaded = feast(sparse(A), sparse(B), interval; M0=n,

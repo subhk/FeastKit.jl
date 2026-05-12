@@ -94,14 +94,14 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     
     # Initialize workspace (all ranks need full workspace)
     workspace = FeastWorkspaceReal{T}(N, M0)
-    randn!(workspace.work)  # Random initial guess
+    _feast_seeded_subspace!(workspace.work)
     
     # Broadcast initial subspace from root
     MPI.Bcast!(workspace.work, root, comm)
     
     # Initialize Feast parameters
     feastdefault!(fpm)
-    eps_tolerance = feast_tolerance(fpm)
+    eps_tolerance = feast_tolerance(fpm, T)
     max_loops = fpm[4]
     
     # Main Feast refinement loop
@@ -268,8 +268,10 @@ function mpi_compute_residuals!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     local_count = eigs_per_rank + (rank < remainder ? 1 : 0)
     end_idx = start_idx + local_count - 1
     
-    # Compute local residuals
-    local_res = zeros(T, M)
+    # `res` is the full M0 workspace vector. MPI reductions require send and
+    # receive buffers with matching lengths, even though only the first M
+    # entries are active for the current iteration.
+    local_res = zeros(T, length(res))
     for j in start_idx:min(end_idx, M)
         # Relative residual: ||A*q - λ*B*q|| / max(|λ|, 1)
         Aq = A * q[:, j]
@@ -316,12 +318,12 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     
     # Initialize workspace
     workspace = FeastWorkspaceReal{T}(N, M0)
-    randn!(workspace.work)
+    _feast_seeded_subspace!(workspace.work)
     MPI.Bcast!(workspace.work, root, comm)
     
     # Feast parameters
     feastdefault!(fpm)
-    eps_tolerance = feast_tolerance(fpm)
+    eps_tolerance = feast_tolerance(fpm, T)
     max_loops = fpm[4]
     
     # Main refinement loop
@@ -479,8 +481,10 @@ function mpi_compute_sparse_residuals!(A::SparseMatrixCSC{T,Int}, B::SparseMatri
     local_count = eigs_per_rank + (rank < remainder ? 1 : 0)
     end_idx = start_idx + local_count - 1
     
-    # Compute local sparse residuals
-    local_res = zeros(T, M)
+    # `res` is the full M0 workspace vector. MPI reductions require send and
+    # receive buffers with matching lengths, even though only the first M
+    # entries are active for the current iteration.
+    local_res = zeros(T, length(res))
     for j in start_idx:min(end_idx, M)
         Aq = A * q[:, j]
         Bq = B * q[:, j]

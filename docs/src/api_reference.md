@@ -35,7 +35,7 @@ feast(A, B, interval; M0=10, fpm=nothing, kwargs...)
 - `fpm::Vector{Int}`: FeastKit parameter array (auto-initialized if `nothing`)
 - `backend::Symbol=:serial`: Execution backend (`:serial`, `:auto`, `:threads`, `:distributed`, `:mpi`)
 - `parallel::Union{Bool,Symbol}`: Legacy alias for `backend`
-- `strict_backend::Bool=false`: Throw an error instead of falling back to serial when a requested backend is unavailable or unsupported
+- `strict_backend::Bool=false`: Compatibility switch for legacy `parallel` requests; explicit `backend` requests already fail if unavailable or unsupported
 - `use_threads::Bool=true`: Enable threading
 - `comm`: MPI communicator (if using MPI)
 
@@ -92,6 +92,37 @@ feast_banded(A, kla, interval; B=nothing, klb=0, M0=10, fpm=nothing)
 - `interval::Tuple{Real,Real}`: Search interval
 - `B::Matrix`: Banded mass matrix (optional)
 - `klb::Int`: Number of super-diagonals of B
+
+Use `full_to_banded` for symmetric/Hermitian or upper-stored banded data.
+Use `full_to_general_banded` for fully general non-Hermitian banded matrices
+where both lower and upper bands must be preserved.
+Direct banded solvers use LAPACK banded factorizations; `solver=:gmres` keeps
+the same compact storage and applies shifted systems through banded matvecs.
+
+### FEAST-compatible precision aliases
+
+FeastKit's native solver names are type-generic. For users porting FEAST code,
+precision-prefixed aliases are also available and forward to the same tested
+implementations.
+
+| FEAST prefix | Julia element type | Examples |
+| --- | --- | --- |
+| `sfeast_*` | `Float32` | `sfeast_syev!`, `sfeast_scsrgv!`, `sfeast_sbev!` |
+| `dfeast_*` | `Float64` | `dfeast_syev!`, `dfeast_scsrgv!`, `dfeast_sbev!` |
+| `cfeast_*` | `ComplexF32` | `cfeast_heev!`, `cfeast_gcsrgv!`, `cfeast_hbev!` |
+| `zfeast_*` | `ComplexF64` | `zfeast_heev!`, `zfeast_gcsrgv!`, `zfeast_hbev!` |
+| `psfeast_*` | `Float32` parallel real symmetric | `psfeast_syev!`, `psfeast_scsrgv!`, `psfeast_srci!` |
+| `pdfeast_*` | `Float64` parallel real symmetric | `pdfeast_syev!`, `pdfeast_scsrgv!`, `pdfeast_srci!` |
+
+The aliases cover dense, sparse CSC/CSR-style, banded, custom-contour `x`
+variants, and polynomial FEAST entry points where the corresponding generic
+FeastKit function exists.
+
+The `psfeast_*` and `pdfeast_*` aliases cover the implemented real symmetric
+PFEAST paths. Dense and sparse standard aliases construct the identity mass
+matrix and call the corresponding generalized parallel solver. Passing
+`comm=MPI.COMM_WORLD` routes supported sparse/dense real symmetric aliases to
+the MPI kernels.
 
 ---
 
@@ -183,10 +214,12 @@ feast_general(A_op::MatrixFreeOperator{Complex}, B_op, center, radius; kwargs...
 - `maxiter::Int=20`: Maximum refinement iterations
 
 **Solvers:**
-- `:cg`: Conjugate Gradient (symmetric positive definite)
-- `:gmres`: Generalized Minimal Residual (general)
+- `:gmres`: Generalized Minimal Residual (recommended)
 - `:bicgstab`: BiConjugate Gradient Stabilized
 - Custom function: `(Y, z, X) -> solve (z*B - A)*Y = X`
+
+FEAST shifted systems use complex contour points, so `:cg` is rejected by
+`create_iterative_solver`; use `:gmres` or `:bicgstab`.
 
 ### create_iterative_solver
 

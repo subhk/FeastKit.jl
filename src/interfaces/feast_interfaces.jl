@@ -42,6 +42,17 @@ function _normalize_backend(parallel::Union{Bool,Symbol,Nothing},
     return requested
 end
 
+function _allow_backend_fallback(parallel::Union{Bool,Symbol,Nothing},
+                                 backend::Union{Symbol,Nothing},
+                                 strict_backend::Bool)
+    strict_backend && return false
+    backend === :auto && return true
+    backend !== nothing && return false
+    parallel === true && return true
+    parallel === :auto && return true
+    return false
+end
+
 function _materialize_matrix(A::AbstractMatrix)
     if A isa Matrix || A isa SparseMatrixCSC
         return A
@@ -56,13 +67,13 @@ function _materialize_matrix(A::AbstractMatrix)
     end
 end
 
-@inline function _execute_feast(A, B, interval, backend, M0, fpm, comm, use_threads, strict_backend)
+@inline function _execute_feast(A, B, interval, backend, M0, fpm, comm, use_threads, allow_backend_fallback)
     if backend != :serial
         try
             return feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads;
-                                      strict_backend=strict_backend)
+                                      strict_backend=!allow_backend_fallback)
         catch e
-            strict_backend && rethrow(e)
+            allow_backend_fallback || rethrow(e)
             @warn "Backend $backend failed; falling back to serial execution" exception=e
         end
     end
@@ -73,10 +84,10 @@ function _feast_run_serial(A, B, interval, M0, fpm)
     return feast_serial(A, B, interval, M0, fpm)
 end
 
-@inline function _execute_feast_general(A, B, center, radius, backend, M0, fpm, comm, use_threads, strict_backend)
+@inline function _execute_feast_general(A, B, center, radius, backend, M0, fpm, comm, use_threads, allow_backend_fallback)
     if backend != :serial
         msg = "Parallel execution for general problems is not yet available"
-        strict_backend && throw(ArgumentError(msg))
+        allow_backend_fallback || throw(ArgumentError(msg))
         @warn "$msg; falling back to serial execution"
     end
     return _feast_run_general_serial(A, B, center, radius, M0, fpm)
@@ -114,13 +125,16 @@ function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     params = _ensure_feast_parameters(fpm)
     N = size(A, 1)
     M0 = min(M0, N)
-    backend_choice = determine_parallel_backend(_normalize_backend(parallel, backend), comm)
+    requested_backend = _normalize_backend(parallel, backend)
+    allow_backend_fallback = _allow_backend_fallback(parallel, backend, strict_backend)
+    backend_choice = _select_parallel_backend(requested_backend, comm;
+                                              allow_fallback=allow_backend_fallback)
 
     A_exec = _materialize_matrix(A)
     B_exec = _materialize_matrix(B)
 
     return _execute_feast(A_exec, B_exec, interval, backend_choice, M0, params,
-                          comm, use_threads, strict_backend)
+                          comm, use_threads, allow_backend_fallback)
 end
 
 function feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
@@ -142,13 +156,16 @@ function feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
     params = _ensure_feast_parameters(fpm)
     N = size(A, 1)
     M0 = min(M0, N)
-    backend_choice = determine_parallel_backend(_normalize_backend(parallel, backend), comm)
+    requested_backend = _normalize_backend(parallel, backend)
+    allow_backend_fallback = _allow_backend_fallback(parallel, backend, strict_backend)
+    backend_choice = _select_parallel_backend(requested_backend, comm;
+                                              allow_fallback=allow_backend_fallback)
 
     A_exec = _materialize_matrix(A)
     B_exec = _materialize_matrix(B)
 
     return _execute_feast(A_exec, B_exec, interval, backend_choice, M0, params,
-                          comm, use_threads, strict_backend)
+                          comm, use_threads, allow_backend_fallback)
 end
 
 function feast(A::AbstractMatrix{T}, interval::Tuple{T,T};
@@ -200,7 +217,10 @@ function feast_general(A::AbstractMatrix, B::AbstractMatrix,
     M0 = min(M0, N)
 
     params = _ensure_feast_parameters(fpm)
-    backend_choice = determine_parallel_backend(_normalize_backend(parallel, backend), comm)
+    requested_backend = _normalize_backend(parallel, backend)
+    allow_backend_fallback = _allow_backend_fallback(parallel, backend, strict_backend)
+    backend_choice = _select_parallel_backend(requested_backend, comm;
+                                              allow_fallback=allow_backend_fallback)
 
     real_type = promote_type(_real_component_type(eltype(A_complex)),
                              _real_component_type(eltype(B_complex)),
@@ -218,7 +238,7 @@ function feast_general(A::AbstractMatrix, B::AbstractMatrix,
 
     return _execute_feast_general(A_exec, B_exec, center_exec, radius_exec,
                                   backend_choice, M0, params, comm, use_threads,
-                                  strict_backend)
+                                  allow_backend_fallback)
 end
 
 function feast_general(A::AbstractMatrix, B::AbstractMatrix,

@@ -52,7 +52,11 @@ function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
         @. residual -= b
         res_norm = norm(residual)
         b_norm = norm(b)
-        if !stats.solved || res_norm > tol * max(b_norm, one(T))
+        # Krylov reports convergence using its own recurrence. The explicit
+        # residual recomputation can differ by a few ulps, so validate it with a
+        # small slack instead of making this check stricter than the solver.
+        residual_limit = T(10) * tol * max(b_norm, one(T))
+        if !stats.solved || res_norm > residual_limit
             @warn "GMRES failed to converge" iteration_stats=stats residual=res_norm rhs_norm=b_norm
             return false
         end
@@ -88,9 +92,10 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
     feastdefault!(fpm)
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
 
-    solver_choice = solver in (:direct, :gmres) ? solver : :invalid
+    solver_choice = solver == :iterative ? :gmres : solver
+    solver_choice = solver_choice in (:direct, :gmres) ? solver_choice : :invalid
     solver_choice == :invalid &&
-        throw(ArgumentError("Unsupported solver '$solver'. Use :direct or :gmres."))
+        throw(ArgumentError("Unsupported solver '$solver'. Use :direct, :gmres, or :iterative."))
     solver_is_direct = solver_choice == :direct
     solver_is_iterative = !solver_is_direct
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
@@ -144,7 +149,7 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
     Wne = contour.Wne
 
     maxloop = fpm[4]
-    eps_tol = feast_tolerance(fpm)
+    eps_tol = feast_tolerance(fpm, T)
     epsout_val = T(Inf)
     info_code = Int(Feast_SUCCESS)
     loop_count = 0
@@ -372,9 +377,10 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
     # Check inputs
     check_feast_grci_input(N, M0, Emid, r, fpm)
     
-    solver_choice = solver in (:direct, :gmres, :iterative) ? solver : :invalid
+    solver_choice = solver == :iterative ? :gmres : solver
+    solver_choice = solver_choice in (:direct, :gmres) ? solver_choice : :invalid
     solver_choice == :invalid &&
-        throw(ArgumentError("Unsupported solver '$solver'. Use :direct or :gmres."))
+        throw(ArgumentError("Unsupported solver '$solver'. Use :direct, :gmres, or :iterative."))
     use_direct = solver_choice == :direct
     use_iterative = !use_direct
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
@@ -941,16 +947,237 @@ function feast_grcipevx!(A::Vector{Matrix{Complex{T}}}, d::Int,
         feast_grcipev!(A, d, Emid, r, M0, fpm)
     end
 end
+
+"""
+    _feast_dense_complex_symmetric(A, B, Emid, r, M0, fpm; solver=:direct)
+
+Dense complex-symmetric FEAST implementation. The shifted systems are solved
+with dense LU or GMRES, and the reduced Ritz pencil is formed with the
+transpose bilinear form `Qᵀ A Q`, not the conjugate-adjoint form used by
+Hermitian/general dense paths.
+"""
+@views function _feast_dense_complex_symmetric(A::Matrix{Complex{T}},
+                                               B::Union{Matrix{Complex{T}},Nothing},
+                                               Emid::Complex{T}, r::T,
+                                               M0::Int, fpm::Vector{Int};
+                                               solver::Symbol = :direct,
+                                               solver_tol::Real = 0.0,
+                                               solver_maxiter::Int = 500,
+                                               solver_restart::Int = 30) where T<:Real
+    N = size(A, 1)
+    size(A, 2) == N || throw(ArgumentError("A must be square"))
+    B === nothing || size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
+    check_complex_symmetric(A)
+    B !== nothing && check_complex_symmetric(B)
+
+    feastdefault!(fpm)
+    check_feast_grci_input(N, M0, Emid, r, fpm)
+
+    solver_choice = solver == :iterative ? :gmres : solver
+    solver_choice = solver_choice in (:direct, :gmres) ? solver_choice : :invalid
+    solver_choice == :invalid &&
+        throw(ArgumentError("Unsupported solver '$solver'. Use :direct, :gmres, or :iterative."))
+    solver_is_direct = solver_choice == :direct
+    solver_is_iterative = !solver_is_direct
+    solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
+        throw(ArgumentError("Krylov.jl is required for iterative dense FEAST solves."))
+    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+
+    B_is_identity = B === nothing
+    B_matrix = B_is_identity ? Matrix{Complex{T}}(undef, 0, 0) : copy(B)
+
+    Q_basis = zeros(Complex{T}, N, M0)
+    _feast_seeded_subspace_complex!(Q_basis)
+    shifted_solutions = similar(Q_basis)
+    rhs_buffer = similar(Q_basis)
+    rhs_copy = similar(rhs_buffer)
+    Q_proj = zeros(Complex{T}, N, M0)
+    AQ = Matrix{Complex{T}}(undef, N, M0)
+    BQ = Matrix{Complex{T}}(undef, N, M0)
+    Ared = Matrix{Complex{T}}(undef, M0, M0)
+    Bred = Matrix{Complex{T}}(undef, M0, M0)
+    lambda_vec = Vector{Complex{T}}(undef, M0)
+    lambda_tmp = similar(lambda_vec)
+    perm = Vector{Int}(undef, M0)
+    solutions_tmp = similar(shifted_solutions)
+    res_vec = zeros(T, M0)
+    residual_vec = Vector{Complex{T}}(undef, N)
+    Bq_vec = Vector{Complex{T}}(undef, N)
+    shifted_matrix = similar(A)
+    current_shift = Ref(zero(Complex{T}))
+    tmpAx = Vector{Complex{T}}(undef, N)
+    tmpBx = Vector{Complex{T}}(undef, N)
+
+    function shifted_mul!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
+        if B_is_identity
+            @. tmpBx = current_shift[] * x
+        else
+            mul!(tmpBx, B_matrix, x)
+            @. tmpBx = current_shift[] * tmpBx
+        end
+        mul!(tmpAx, A, x)
+        @. y = tmpBx - tmpAx
+        return y
+    end
+
+    contour = feast_get_custom_contour(T, fpm)
+    contour === nothing && (contour = feast_gcontour(Emid, r, fpm))
+    Zne = contour.Zne
+    Wne = contour.Wne
+
+    maxloop = fpm[4]
+    eps_tol = feast_tolerance(fpm, T)
+    epsout_val = T(Inf)
+    loop_count = 0
+    info_code = Int(Feast_SUCCESS)
+    M_found = 0
+
+    for loop_idx in 0:maxloop
+        loop_count = loop_idx
+        fill!(Q_proj, zero(Complex{T}))
+
+        solve_failed = false
+        for e in eachindex(Zne)
+            z = Zne[e]
+            weight = Wne[e]
+
+            if B_is_identity
+                copyto!(rhs_buffer, Q_basis)
+            else
+                mul!(rhs_buffer, B_matrix, Q_basis)
+            end
+
+            if solver_is_direct
+                if B_is_identity
+                    @. shifted_matrix = -A
+                    for i in 1:N
+                        shifted_matrix[i, i] += z
+                    end
+                else
+                    @. shifted_matrix = z * B_matrix - A
+                end
+                copyto!(rhs_copy, rhs_buffer)
+                try
+                    factor = lu!(shifted_matrix)
+                    ldiv!(shifted_solutions, factor, rhs_copy)
+                catch err
+                    info_code = Int(Feast_ERROR_LAPACK)
+                    @warn "Dense complex-symmetric direct solve failed for shift $z" exception=err
+                    solve_failed = true
+                    break
+                end
+            else
+                copyto!(rhs_copy, rhs_buffer)
+                current_shift[] = z
+                success = solve_dense_shifted!(shifted_solutions, rhs_copy,
+                                               shifted_mul!, solver_choice,
+                                               tol_value, solver_maxiter,
+                                               solver_restart)
+                if !success
+                    info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                    solve_failed = true
+                    break
+                end
+            end
+
+            @. Q_proj += weight * shifted_solutions
+        end
+        solve_failed && break
+
+        try
+            mul!(AQ, A, Q_proj)
+            if B_is_identity
+                copyto!(BQ, Q_proj)
+            else
+                mul!(BQ, B_matrix, Q_proj)
+            end
+            mul!(Ared, transpose(Q_proj), AQ)
+            mul!(Bred, transpose(Q_proj), BQ)
+
+            F = eigen(Ared, Bred)
+            lambda_red = F.values
+            v_red = F.vectors
+
+            for idx in 1:M0
+                mul!(view(shifted_solutions, :, idx), Q_proj, view(v_red, :, idx))
+                lambda_vec[idx] = lambda_red[idx]
+            end
+
+            M = _feast_reorder_by_gcontour!(lambda_vec, shifted_solutions, perm,
+                                            lambda_tmp, solutions_tmp,
+                                            Emid, r, fpm, M0)
+            if M == 0
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
+
+            for idx in 1:M0
+                vec = view(shifted_solutions, :, idx)
+                nrm = norm(vec)
+                if nrm > zero(T)
+                    vec ./= nrm
+                else
+                    fill!(vec, zero(Complex{T}))
+                    vec[mod1(idx, N)] = one(Complex{T})
+                end
+            end
+
+            max_res = zero(T)
+            for j in 1:M
+                q_col = view(shifted_solutions, :, j)
+                mul!(residual_vec, A, q_col)
+                if B_is_identity
+                    @. residual_vec = residual_vec - lambda_vec[j] * q_col
+                else
+                    mul!(Bq_vec, B_matrix, q_col)
+                    @. residual_vec = residual_vec - lambda_vec[j] * Bq_vec
+                end
+                res_val = norm(residual_vec) / max(abs(lambda_vec[j]), one(T))
+                res_vec[j] = res_val
+                max_res = max(max_res, res_val)
+            end
+
+            epsout_val = max_res
+            M_found = M
+            epsout_val <= eps_tol && break
+
+            if loop_idx == maxloop
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
+
+            copyto!(Q_basis, shifted_solutions)
+        catch err
+            info_code = Int(Feast_ERROR_LAPACK)
+            @warn "Reduced eigenvalue problem failed during dense complex-symmetric FEAST" exception=err
+            break
+        end
+    end
+
+    if M_found == 0 && info_code == Int(Feast_SUCCESS)
+        info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+    end
+    M_found > 1 && feast_sort_general!(lambda_vec, shifted_solutions, res_vec, M_found)
+
+    lambda = lambda_vec[1:M_found]
+    q = shifted_solutions[:, 1:M_found]
+    res = res_vec[1:M_found]
+
+    return FeastGeneralResult{T}(lambda, q, M_found, res,
+                                 info_code, epsout_val, loop_count)
+end
+
 function feast_geev_complex_sym!(A::Matrix{Complex{T}},
                                  Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
                                  solver::Symbol = :direct,
                                  solver_tol::Real = 0.0,
                                  solver_maxiter::Int = 500,
                                  solver_restart::Int = 30) where T<:Real
-    check_complex_symmetric(A)
-    return feast_geev!(A, Emid, r, M0, fpm;
-                       solver=solver, solver_tol=solver_tol,
-                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+    return _feast_dense_complex_symmetric(A, nothing, Emid, r, M0, fpm;
+                                          solver=solver,
+                                          solver_tol=solver_tol,
+                                          solver_maxiter=solver_maxiter,
+                                          solver_restart=solver_restart)
 end
 
 function feast_gegv_complex_sym!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
@@ -959,9 +1186,9 @@ function feast_gegv_complex_sym!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
                                  solver_tol::Real = 0.0,
                                  solver_maxiter::Int = 500,
                                  solver_restart::Int = 30) where T<:Real
-    check_complex_symmetric(A)
-    check_complex_symmetric(B)
-    return feast_gegv!(A, B, Emid, r, M0, fpm;
-                       solver=solver, solver_tol=solver_tol,
-                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+    return _feast_dense_complex_symmetric(A, B, Emid, r, M0, fpm;
+                                          solver=solver,
+                                          solver_tol=solver_tol,
+                                          solver_maxiter=solver_maxiter,
+                                          solver_restart=solver_restart)
 end

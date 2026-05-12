@@ -39,6 +39,63 @@ jobs:
           JULIA_NUM_THREADS: '2'
         run: julia --project -e 'using Pkg; Pkg.test()'
 
+  distributed-backend:
+    name: Distributed Backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@v1
+        with:
+          version: '1.10'
+
+      - name: Cache Julia artifacts
+        uses: julia-actions/cache@v1
+
+      - name: Instantiate
+        run: julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
+      - name: Run distributed backend tests
+        env:
+          FEASTKIT_TEST_DISTRIBUTED: 'true'
+        run: |
+          julia --project -e '
+            using Distributed
+            addprocs(2; exeflags=`--project=$(Base.active_project())`)
+            @everywhere using FeastKit, LinearAlgebra, SparseArrays
+            include("test/test_parallel_backends.jl")
+          '
+
+  mpi-backend:
+    name: MPI Backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Julia
+        uses: julia-actions/setup-julia@v1
+        with:
+          version: '1.10'
+
+      - name: Cache Julia artifacts
+        uses: julia-actions/cache@v1
+
+      - name: Instantiate
+        run: julia --project -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
+      - name: Run MPI backend tests
+        env:
+          FEASTKIT_ENABLE_MPI: 'true'
+          FEASTKIT_TEST_MPI: 'true'
+        run: |
+          julia --project -e '
+            using MPI
+            run(`$(MPI.mpiexec()) -n 2 julia --project test/test_parallel_backends.jl`)
+          '
+
   docs-links:
     name: Docs Link Check
     runs-on: ubuntu-latest

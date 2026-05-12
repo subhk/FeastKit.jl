@@ -6,6 +6,7 @@ using FeastKit
 makedocs(
     sitename = "FeastKit.jl",
     modules = [FeastKit],
+    checkdocs = :exports,
     authors = "FeastKit.jl Contributors",
     repo = Remotes.GitHub("subhk", "FeastKit.jl"),
     doctest = false,

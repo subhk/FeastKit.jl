@@ -25,6 +25,17 @@ FeastKit supports three parallel backends:
 | **Distributed** | Multi-process Julia | `addprocs(N)` | Multiple nodes |
 | **MPI** | HPC clusters | MPI installation | 1000s of cores |
 
+High-level production support is intentionally narrower than the lower-level
+interfaces:
+
+| Backend | Supported high-level problems | Fallback behavior |
+|---------|--------------------------------|-------------------|
+| `:serial` | Real symmetric, complex Hermitian, and general problems | None |
+| `:threads` | Sparse real symmetric standard/generalized problems | Explicit requests throw on unsupported inputs |
+| `:distributed` | Sparse real symmetric standard/generalized problems with workers | Explicit requests throw if workers are missing |
+| `:mpi` | Real symmetric standard/generalized problems with an MPI communicator | Explicit requests throw if MPI is unavailable |
+| `:auto` | Best available supported backend | Falls back to serial when needed |
+
 ### How FEAST Parallelizes
 
 The FEAST algorithm computes eigenvalues using contour integration:
@@ -109,15 +120,14 @@ A = SymTridiagonal(2.0*ones(n), -ones(n-1))
 B = Matrix(1.0I, n, n)
 
 # Threaded computation. The threaded high-level backend currently supports
-# sparse real symmetric problems; unsupported cases fall back to serial unless
-# strict_backend=true is set.
+# sparse real symmetric problems. Explicit backend requests throw if the
+# backend cannot run the problem.
 A_sparse = sparse(A)
 B_sparse = sparse(B)
 result = feast(A_sparse, B_sparse, (0.5, 1.5), M0=20, backend=:threads)
 
-# Require a true threaded backend instead of fallback.
-result = feast(A_sparse, B_sparse, (0.5, 1.5), M0=20,
-               backend=:threads, strict_backend=true)
+# Use automatic selection when serial fallback is acceptable.
+result = feast(A_sparse, B_sparse, (0.5, 1.5), M0=20, backend=:auto)
 
 println("Found $(result.M) eigenvalues using $(Threads.nthreads()) threads")
 ```
@@ -151,6 +161,10 @@ end
 
 For multi-process parallelization using Julia's `Distributed` module.
 
+The high-level distributed backend currently supports sparse real symmetric
+standard/generalized problems. Requesting `backend=:distributed` requires active
+Julia workers; use `backend=:auto` if serial fallback is acceptable.
+
 ### Setup
 
 ```julia
@@ -180,7 +194,7 @@ A = sprandn(n, n, 0.001)
 A = A + A' + 10I
 B = sparse(1.0I, n, n)
 
-# Distributed computation
+# Distributed computation. Throws if no workers are available.
 result = feast(A, B, (9.0, 11.0), M0=30, backend=:distributed)
 
 println("Found $(result.M) eigenvalues using $(nworkers()) workers")
@@ -205,6 +219,10 @@ pfeast_show_distribution(16, nworkers())
 ## MPI Parallelization
 
 For high-performance computing clusters with thousands of cores.
+
+The high-level MPI backend currently supports real symmetric
+standard/generalized problems. Pass the communicator explicitly when using the
+public `feast` API so MPI remains an explicit opt-in.
 
 ### Prerequisites
 
@@ -242,7 +260,7 @@ A = spdiagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))
 B = sparse(1.0I, n, n)
 
 # MPI FEAST
-result = mpi_feast(A, B, (0.0, 0.1), M0=20, comm=comm)
+result = feast(A, B, (0.0, 0.1), M0=20, backend=:mpi, comm=comm)
 
 if rank == 0
     println("Found $(result.M) eigenvalues")
@@ -255,7 +273,7 @@ MPI.Finalize()
 Run with MPI:
 
 ```bash
-mpiexec -n 8 julia --project feast_mpi.jl
+julia --project -e 'using MPI; run(`$(MPI.mpiexec()) -n 8 julia --project feast_mpi.jl`)'
 ```
 
 ### MPI-Specific Functions
@@ -264,11 +282,21 @@ mpiexec -n 8 julia --project feast_mpi.jl
 # Direct MPI interface
 result = mpi_feast(A, B, interval, M0=M0, comm=comm, fpm=fpm)
 
+# FEAST-compatible PFEAST alias with explicit MPI communicator
+result = pdfeast_scsrgv!(A, B, interval[1], interval[2], M0, fpm; comm=comm)
+
 # Check MPI availability
 if mpi_available()
     println("MPI is ready!")
 end
 ```
+
+The real symmetric PFEAST-compatible aliases are `psfeast_syev!`,
+`pdfeast_syev!`, `psfeast_sygv!`, `pdfeast_sygv!`, `psfeast_scsrev!`,
+`pdfeast_scsrev!`, `psfeast_scsrgv!`, `pdfeast_scsrgv!`, `psfeast_srci!`,
+and `pdfeast_srci!`. Without `comm=`, these call the threaded/distributed
+parallel kernels. With `comm=`, the dense and sparse generalized/standard
+aliases use the MPI kernels.
 
 ---
 

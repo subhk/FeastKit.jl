@@ -236,7 +236,7 @@
         end
         epsout[] = maximum(res[1:M])
 
-        eps_tolerance = feast_tolerance(fpm)
+        eps_tolerance = feast_tolerance(fpm, T)
         maxloop = fpm[4]
 
         if epsout[] <= eps_tolerance || loop[] >= maxloop
@@ -364,7 +364,7 @@ end
         state.Zne = copy(contour.Zne)
         state.Wne = copy(contour.Wne)
         state.ne = length(contour.Zne)
-        state.eps = feast_tolerance(fpm)
+        state.eps = feast_tolerance(fpm, T)
         state.maxloop = fpm[4]
         state.e = 1
         state.M = 0
@@ -828,7 +828,7 @@ end
 
             epsout[] = maximum(res[1:M])
 
-            eps_tolerance = feast_tolerance(fpm)
+            eps_tolerance = feast_tolerance(fpm, T)
             maxloop = fpm[4]
 
             if epsout[] <= eps_tolerance || loop[] >= maxloop
@@ -1087,7 +1087,7 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
         end
         epsout[] = max_res
 
-        eps_tolerance = feast_tolerance(fpm)
+        eps_tolerance = feast_tolerance(fpm, T)
         maxloop = max(1, fpm[4])
 
         if epsout[] <= eps_tolerance || loop[] >= maxloop

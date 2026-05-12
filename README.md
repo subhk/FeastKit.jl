@@ -108,6 +108,44 @@ A_banded = zeros(k+1, n)
 result = feast_banded(A_banded, k, (0.5, 1.5), M0=10)
 ```
 
+### FEAST-Compatible Routine Names
+
+The native Julia APIs are type-generic, but FEAST-style precision-prefixed names
+are available for porting existing code:
+
+```julia
+# Double precision real symmetric dense FEAST
+result = dfeast_syev!(A64, 0.5, 1.5, M0, fpm)
+
+# Double precision complex Hermitian sparse FEAST
+result = zfeast_hcsrev!(A_sparse_z, 0.5, 1.5, M0, fpm)
+
+# Single precision real banded FEAST
+result = sfeast_sbev!(A_band_f32, ka, 0.5f0, 1.5f0, M0, fpm)
+```
+
+Supported prefixes are `sfeast_*` (`Float32`), `dfeast_*` (`Float64`),
+`cfeast_*` (`ComplexF32`), and `zfeast_*` (`ComplexF64`) for the dense,
+sparse, banded, custom-contour, and polynomial FEAST families implemented by
+FeastKit.
+
+Real symmetric PFEAST-compatible aliases are available for the implemented
+parallel backends:
+
+```julia
+# Double precision sparse generalized PFEAST using Julia Distributed workers
+result = pdfeast_scsrgv!(A_sparse, B_sparse, 0.5, 1.5, M0, fpm;
+                         use_threads=false)
+
+# The same alias can route to MPI when a communicator is supplied
+result = pdfeast_scsrgv!(A_sparse, B_sparse, 0.5, 1.5, M0, fpm;
+                         comm=MPI.COMM_WORLD)
+```
+
+Supported PFEAST prefixes are `psfeast_*` (`Float32`) and `pdfeast_*`
+(`Float64`) for real symmetric dense/sparse standard and generalized problems,
+plus `psfeast_srci!` and `pdfeast_srci!` for the parallel RCI state machine.
+
 ### Matrix-Free Operations
 
 ```julia
@@ -130,6 +168,20 @@ result = feast_matvec(A_mul!, B_mul!, n, (0.5, 1.5), M0=10)
 
 FeastKit.jl supports parallel computation where each contour integration point is solved independently, leading to significant speedups for large problems.
 
+Production backend support is intentionally explicit:
+
+| Backend | Supported high-level problems |
+| --- | --- |
+| `:serial` | Real symmetric, complex Hermitian, and general problems through the serial solvers |
+| `:threads` | Sparse real symmetric standard/generalized problems |
+| `:distributed` | Sparse real symmetric standard/generalized problems with Julia workers |
+| `:mpi` | Real symmetric standard/generalized problems with an initialized MPI communicator |
+| `:auto` | Best available backend; unsupported selections fall back to serial |
+
+Explicit backend requests fail fast when the backend is unavailable or does not
+support the requested problem. Use `backend=:auto` when serial fallback is
+acceptable.
+
 ### Multi-threaded Execution
 
 ```julia
@@ -137,14 +189,13 @@ FeastKit.jl supports parallel computation where each contour integration point i
 # Threaded backend currently supports sparse real symmetric problems.
 result = feast(A_sparse, (0.5, 1.5), M0=10, backend=:threads)
 
-# Ask for an error instead of automatic serial fallback.
-result = feast(A_sparse, (0.5, 1.5), M0=10,
-               backend=:threads, strict_backend=true)
+# Let FeastKit choose a backend and fall back if needed.
+result = feast(A_sparse, (0.5, 1.5), M0=10, backend=:auto)
 ```
 
 The older `parallel=:threads` keyword remains supported as an alias. Dense
-threaded FEAST is disabled in the high-level API until it matches serial
-results reliably.
+threaded FEAST is disabled in the high-level API until it matches serial results
+reliably; requesting it explicitly throws an `ArgumentError`.
 
 ### Distributed Computing
 
@@ -170,10 +221,10 @@ using FeastKit
 MPI.Init()
 
 # Basic MPI FeastKit
-result = feast(A, B, (0.5, 1.5), M0=10, backend=:mpi)
+comm = MPI.COMM_WORLD
+result = feast(A, B, (0.5, 1.5), M0=10, backend=:mpi, comm=comm)
 
 # Explicit MPI interface with communicator
-comm = MPI.COMM_WORLD
 result = mpi_feast(A, B, (0.5, 1.5), M0=10, comm=comm)
 
 # Hybrid MPI + threading (best for modern HPC)
@@ -275,13 +326,13 @@ end
 ### Automatic Backend Selection
 
 ```julia
-# FeastKit automatically selects the best available backend
+# FeastKit automatically selects the best available backend and can fall back
 result = feast(A, B, (0.5, 1.5), M0=10, backend=:auto)
 
-# Manual backend selection
-result = feast(A, B, (0.5, 1.5), M0=10, backend=:mpi)      # Force MPI
-result = feast(A, B, (0.5, 1.5), M0=10, backend=:threads)  # Force threading
-result = feast(A, B, (0.5, 1.5), M0=10, backend=:serial)   # Force serial
+# Manual backend selection fails if that backend cannot run the problem
+result = feast(A, B, (0.5, 1.5), M0=10, backend=:mpi, comm=comm)
+result = feast(A_sparse, B_sparse, (0.5, 1.5), M0=10, backend=:threads)
+result = feast(A, B, (0.5, 1.5), M0=10, backend=:serial)
 ```
 
 ## Algorithm Overview
@@ -338,13 +389,14 @@ end
 7. **Hybrid parallelism**: Combine MPI processes with threading for maximum performance
 8. **Load balancing**: FeastKit automatically distributes contour points for optimal load balancing
 
-## Limitations
+## Scope
 
-This is a Julia translation of the original FEAST library. Some features from the original may not be fully implemented:
+FeastKit focuses on the public APIs covered by the test suite rather than
+mirroring every optional routine from the original FEAST library:
 
-- Custom contour integration is partially implemented
-- Some advanced PFEAST (parallel) features are not included
-- Matrix-free interface is simplified compared to the original
+- Custom contour integration is supported for the FEAST interfaces documented here
+- Advanced PFEAST routines outside the documented backend matrix are out of scope
+- Matrix-free APIs use FeastKit's Julia-native operator interface
 
 ## References
 

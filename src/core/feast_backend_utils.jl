@@ -9,11 +9,15 @@ function mpi_available()
     return isdefined(FeastKit, :MPI_AVAILABLE) && FeastKit.MPI_AVAILABLE[]
 end
 
+# A caller-provided communicator is an explicit MPI opt-in, even if package
+# initialization happened before MPI.Init() set MPI_AVAILABLE[].
+_mpi_backend_ready(comm=nothing) = comm !== nothing || mpi_available()
+
 # Determine the available backend for a requested execution mode.
 function determine_parallel_backend(parallel::Symbol, comm=nothing)
     if parallel == :mpi
         # Explicit MPI request
-        if !mpi_available()
+        if !_mpi_backend_ready(comm)
             @warn "MPI requested but not available, falling back to distributed"
             return nworkers() > 1 ? :distributed : (Threads.nthreads() > 1 ? :threads : :serial)
         end
@@ -30,7 +34,7 @@ function determine_parallel_backend(parallel::Symbol, comm=nothing)
         
     elseif parallel == :auto
         # Automatic backend selection based on available resources
-        if comm !== nothing || mpi_available()
+        if _mpi_backend_ready(comm)
             return :mpi
         elseif nworkers() > 1
             return :distributed
@@ -45,6 +49,22 @@ function determine_parallel_backend(parallel::Symbol, comm=nothing)
     end
 end
 
+function _select_parallel_backend(requested::Symbol, comm=nothing; allow_fallback::Bool=false)
+    if !allow_fallback && requested == :mpi && !_mpi_backend_ready(comm)
+        throw(ArgumentError("Requested backend :mpi is not available. Initialize MPI and pass comm=MPI.COMM_WORLD, or use backend=:auto to allow fallback."))
+    elseif !allow_fallback && requested == :distributed && nworkers() <= 1
+        throw(ArgumentError("Requested backend :distributed requires at least one Julia worker. Call Distributed.addprocs(...) first, or use backend=:auto to allow fallback."))
+    elseif !allow_fallback && requested == :threads && Threads.nthreads() <= 1
+        throw(ArgumentError("Requested backend :threads requires Julia to run with more than one thread. Start Julia with JULIA_NUM_THREADS>1, or use backend=:auto to allow fallback."))
+    end
+
+    selected = determine_parallel_backend(requested, comm)
+    if !allow_fallback && requested != :auto && selected != requested
+        throw(ArgumentError("Requested backend :$requested is not available (would fall back to :$selected). Use backend=:auto to allow fallback."))
+    end
+    return selected
+end
+
 function _backend_fallback(reason::AbstractString, strict_backend::Bool,
                            A, B, interval, M0, fpm)
     if strict_backend
@@ -56,7 +76,7 @@ end
 
 function feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads;
                             strict_backend::Bool = false)
-    if backend == :mpi && mpi_available()
+    if backend == :mpi && _mpi_backend_ready(comm)
         if eltype(A) <: Real && eltype(B) <: Real
             # Handle comm=nothing by omitting the keyword to use MPI.COMM_WORLD default
             if comm === nothing

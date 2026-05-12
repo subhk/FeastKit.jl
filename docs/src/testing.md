@@ -47,8 +47,11 @@ julia> include("test/test_matrix_free.jl")
 # Keep artifacts local
 JULIA_DEPOT_PATH=$PWD/.julia julia --project -e 'using Pkg; Pkg.test()'
 
-# Test with MPI (if available)
-FEASTKIT_ENABLE_MPI=true mpiexec -n 4 julia --project test/runtests.jl
+# Test distributed workers
+FEASTKIT_TEST_DISTRIBUTED=true julia --project -e 'using Distributed; addprocs(2; exeflags=`--project=$(Base.active_project())`); @everywhere using FeastKit, LinearAlgebra, SparseArrays; include("test/test_parallel_backends.jl")'
+
+# Test MPI with the launcher selected by MPI.jl
+FEASTKIT_TEST_MPI=true FEASTKIT_ENABLE_MPI=true julia --project -e 'using MPI; run(`$(MPI.mpiexec()) -n 4 julia --project test/test_parallel_backends.jl`)'
 ```
 
 ---

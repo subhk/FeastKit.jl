@@ -10,7 +10,7 @@ export mpi_feast, feast_hybrid, MPIFeastState
 export feast_summary, feast_validate_interval
 export check_feast_srci_input, feast_inside_contour, feast_inside_gcontour
 export feast_name, feast_memory_estimate
-export full_to_banded, banded_to_full, feast_banded_info
+export full_to_banded, full_to_general_banded, banded_to_full, feast_banded_info
 export distribute_contour_points
 # Dense matrix solver exports
 export feast_sygv!, feast_sygvx!, feast_syev!, feast_syevx!,
@@ -18,6 +18,7 @@ export feast_sygv!, feast_sygvx!, feast_syev!, feast_syevx!,
 export feast_heev!, feast_heevx!, feast_hegv!, feast_hegvx!,
        zifeast_heev!, zifeast_hegv!
 export feast_gegv!, feast_gegvx!, feast_geev!, feast_geevx!,
+       feast_geev_complex_sym!, feast_gegv_complex_sym!,
        zifeast_gegv!, zifeast_geev!
 export feast_pep!, feast_gepev!, feast_gepevx!, feast_hepev!, feast_hepevx!,
        feast_sypev!, feast_sypevx!, feast_srcipev!, feast_srcipevx!,
@@ -39,7 +40,42 @@ export feast_sbgv!, feast_sbgvx!, feast_sbev!, feast_sbevx!,
 export feast_hbev!, feast_hbevx!, feast_hbgv!, feast_hbgvx!,
        zifeast_hbev!, zifeast_hbgv!
 export feast_gbgv!, feast_gbgvx!, feast_gbev!, feast_gbevx!,
-       zifeast_gbgv!, zifeast_gbev!
+       feast_sbgv_complex!, feast_sbgvx_complex!, feast_sbev_complex!, feast_sbevx_complex!,
+       zifeast_gbgv!, zifeast_gbev!, zifeast_sbgv_complex!, zifeast_sbev_complex!
+# FEAST-compatible precision-prefixed aliases
+export sfeast_syev!, dfeast_syev!, sfeast_sygv!, dfeast_sygv!,
+       sfeast_syevx!, dfeast_syevx!, sfeast_sygvx!, dfeast_sygvx!,
+       sfeast_sypev!, dfeast_sypev!, sfeast_sypevx!, dfeast_sypevx!,
+       sfeast_srcipev!, dfeast_srcipev!, sfeast_srcipevx!, dfeast_srcipevx!,
+       sfeast_scsrev!, dfeast_scsrev!, sfeast_scsrgv!, dfeast_scsrgv!,
+       sfeast_scsrevx!, dfeast_scsrevx!, sfeast_scsrgvx!, dfeast_scsrgvx!,
+       sfeast_scsrpev!, dfeast_scsrpev!, sfeast_scsrpevx!, dfeast_scsrpevx!,
+       sfeast_sbev!, dfeast_sbev!, sfeast_sbgv!, dfeast_sbgv!,
+       sfeast_sbevx!, dfeast_sbevx!, sfeast_sbgvx!, dfeast_sbgvx!
+export cfeast_heev!, zfeast_heev!, cfeast_hegv!, zfeast_hegv!,
+       cfeast_heevx!, zfeast_heevx!, cfeast_hegvx!, zfeast_hegvx!,
+       cfeast_geev!, zfeast_geev!, cfeast_gegv!, zfeast_gegv!,
+       cfeast_geevx!, zfeast_geevx!, cfeast_gegvx!, zfeast_gegvx!,
+       cfeast_gepev!, zfeast_gepev!, cfeast_gepevx!, zfeast_gepevx!,
+       cfeast_hepev!, zfeast_hepev!, cfeast_hepevx!, zfeast_hepevx!,
+       cfeast_grcipev!, zfeast_grcipev!, cfeast_grcipevx!, zfeast_grcipevx!,
+       cfeast_hcsrev!, zfeast_hcsrev!, cfeast_hcsrgv!, zfeast_hcsrgv!,
+       cfeast_hcsrevx!, zfeast_hcsrevx!, cfeast_hcsrgvx!, zfeast_hcsrgvx!,
+       cfeast_scsrev!, zfeast_scsrev!, cfeast_scsrgv!, zfeast_scsrgv!,
+       cfeast_scsrevx!, zfeast_scsrevx!, cfeast_scsrgvx!, zfeast_scsrgvx!,
+       cfeast_gcsrev!, zfeast_gcsrev!, cfeast_gcsrgv!, zfeast_gcsrgv!,
+       cfeast_gcsrevx!, zfeast_gcsrevx!, cfeast_gcsrgvx!, zfeast_gcsrgvx!,
+       cfeast_hcsrpev!, zfeast_hcsrpev!, cfeast_hcsrpevx!, zfeast_hcsrpevx!,
+       cfeast_gcsrpev!, zfeast_gcsrpev!, cfeast_gcsrpevx!, zfeast_gcsrpevx!,
+       cfeast_hbev!, zfeast_hbev!, cfeast_hbgv!, zfeast_hbgv!,
+       cfeast_hbevx!, zfeast_hbevx!, cfeast_hbgvx!, zfeast_hbgvx!,
+       cfeast_sbev!, zfeast_sbev!, cfeast_sbgv!, zfeast_sbgv!,
+       cfeast_sbevx!, zfeast_sbevx!, cfeast_sbgvx!, zfeast_sbgvx!,
+       cfeast_gbev!, zfeast_gbev!, cfeast_gbgv!, zfeast_gbgv!,
+       cfeast_gbevx!, zfeast_gbevx!, cfeast_gbgvx!, zfeast_gbgvx!
+export psfeast_syev!, pdfeast_syev!, psfeast_sygv!, pdfeast_sygv!,
+       psfeast_scsrev!, pdfeast_scsrev!, psfeast_scsrgv!, pdfeast_scsrgv!,
+       psfeast_srci!, pdfeast_srci!
 export Feast_SUCCESS, Feast_ERROR_N, Feast_ERROR_M0, Feast_ERROR_EMIN_EMAX,
        Feast_ERROR_EMID_R, Feast_ERROR_NO_CONVERGENCE, Feast_ERROR_MEMORY,
        Feast_ERROR_INTERNAL, Feast_ERROR_LAPACK, Feast_ERROR_FPM
@@ -95,6 +131,7 @@ include("kernel/feast_kernel.jl")
 include("dense/feast_dense.jl")
 include("sparse/feast_sparse.jl")
 include("banded/feast_banded.jl")
+include("interfaces/feast_precision_aliases.jl")
 include("parallel/feast_parallel.jl")
 include("parallel/feast_parallel_rci.jl")
 include("interfaces/feast_interfaces.jl")

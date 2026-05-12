@@ -137,10 +137,9 @@ end
         # For this tridiagonal matrix: λ_k = 2 - 2*cos(kπ/(n+1))
         interval = (0.8, 1.2)
         
-        # Mock iterative solver for testing (very simplified)
+        # Small deterministic solver used to exercise the matrix-free callback path.
         function mock_iterative_solver(Y::AbstractMatrix, z::Number, X::AbstractMatrix)
-            # This is a placeholder - in practice you'd use a real iterative method
-            # For testing purposes, we'll use a direct method on the small problem
+            # For testing purposes, use a direct method on this small problem.
             if n <= 200  # Only for small test cases
                 # Build actual tridiagonal matrix for direct solve
                 T_full = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))

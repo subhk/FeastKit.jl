@@ -28,16 +28,15 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
     # Initialize workspace for subspace
     workspace = FeastWorkspaceReal{T}(N, M0)
 
-    # Generate random initial subspace and normalize columns (matches serial FEAST)
-    randn!(workspace.work)
-    for j in 1:M0
-        col_norm = norm(view(workspace.work, :, j))
-        if col_norm > 0
-            workspace.work[:, j] ./= col_norm
-        end
-    end
-    eps_tolerance = feast_tolerance(fpm)
+    # Match the serial kernels: deterministic seeded subspaces make production
+    # runs reproducible and keep Float32 tests independent of global RNG state.
+    _feast_seeded_subspace!(workspace.work)
+    eps_tolerance = feast_tolerance(fpm, T)
     max_loops = fpm[4]
+    distributed_serial_fallback = !use_threads && nworkers() == 1
+    if distributed_serial_fallback
+        @warn "No worker processes available, falling back to serial computation"
+    end
     
     # Complex moment matrices for accumulation
     zAq = zeros(Complex{T}, M0, M0)
@@ -58,6 +57,8 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
             # Use threading for shared memory parallelism
             # Only print verbose output on first iteration to avoid spam
             moments = pfeast_compute_moments_threaded(A, B, workspace.work, contour, M0; verbose=(verbose && loop == 1))
+        elseif distributed_serial_fallback
+            moments = pfeast_compute_moments_serial(A, B, workspace.work, contour, M0)
         else
             # Use distributed computing for multiple processes
             moments = pfeast_compute_moments_distributed(A, B, workspace.work, contour, M0)
@@ -405,16 +406,11 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     contour = feast_contour(Emin, Emax, fpm)
     ne = length(contour.Zne)
 
-    # Initialize workspace with normalized random vectors (matches serial FEAST)
+    # Initialize workspace with the same deterministic subspace policy used by
+    # the serial kernels.
     workspace = FeastWorkspaceReal{T}(N, M0)
-    randn!(workspace.work)
-    for j in 1:M0
-        col_norm = norm(view(workspace.work, :, j))
-        if col_norm > 0
-            workspace.work[:, j] ./= col_norm
-        end
-    end
-    eps_tolerance = feast_tolerance(fpm)
+    _feast_seeded_subspace!(workspace.work)
+    eps_tolerance = feast_tolerance(fpm, T)
     max_loops = fpm[4]
 
     # Filtered subspace accumulator (spectral projector applied to Q)

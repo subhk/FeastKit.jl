@@ -199,7 +199,7 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
 
         # Check convergence
         state.epsout = maximum(res[1:M])
-        eps_tolerance = feast_tolerance(fpm)
+        eps_tolerance = feast_tolerance(fpm, T)
         
         if state.epsout <= eps_tolerance || state.loop >= fpm[4]
             # Converged or maximum iterations reached
@@ -350,8 +350,8 @@ function feast_parallel(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     q = Matrix{T}(undef, N, M0)
     res = Vector{T}(undef, M0)
     
-    # Generate initial random subspace
-    randn!(work)
+    # Use the same deterministic initial subspace policy as the serial kernels.
+    _feast_seeded_subspace!(work)
     
     while true
         # Call parallel RCI

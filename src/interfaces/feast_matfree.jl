@@ -674,26 +674,30 @@ function create_iterative_solver(A_op::MatrixFreeOperator{T},
                                 preconditioner = nothing) where T
 
     N = size(A_op, 1)
+    CT = T <: Real ? Complex{T} : T
+    current_shift = Ref(zero(CT))
+    temp = Vector{CT}(undef, N)
+    temp_A = Vector{CT}(undef, N)
+    xj = Vector{CT}(undef, N)
+    gmres_workspace = Krylov.GmresWorkspace(N, N, Vector{CT};
+                                            memory=max(restart, 2))
+
+    function shifted_mul!(y, x)
+        # y = (z*B - A) * x
+        z = current_shift[]
+        mul!(temp, B_op, x)
+        @. temp = z * temp
+        mul!(temp_A, A_op, x)
+        @. y = temp - temp_A
+        return y
+    end
+
+    shifted_op = LinearOperator{CT}(shifted_mul!, (N, N))
 
     function linear_solver(Y::AbstractMatrix, z::Number, X::AbstractMatrix)
-        # Create shifted operator: (z*B - A)
-        # Note: z is always complex in FEAST, so output must be complex
-        CT = promote_type(T, typeof(z))
-        temp = Vector{CT}(undef, N)
-        temp_A = Vector{CT}(undef, N)
-        xj = Vector{CT}(undef, N)
-
-        function shifted_mul!(y, x)
-            # y = (z*B - A) * x = z*(B*x) - A*x
-            mul!(temp, B_op, x)
-            @. temp = z * temp
-            mul!(temp_A, A_op, x)
-            @. y = temp - temp_A
-            return y
-        end
-
-        shifted_op = LinearOperator{CT}(shifted_mul!, (N, N))
-
+        # FEAST contour shifts are complex; keep the Krylov operator and
+        # conversion scratch alive across contour points.
+        current_shift[] = CT(z)
         M0 = size(X, 2)
         for j in 1:M0
             # Convert RHS to complex since z is complex (Krylov needs matching types)
@@ -701,14 +705,13 @@ function create_iterative_solver(A_op::MatrixFreeOperator{T},
                 xj[i] = CT(X[i, j])
             end
             if solver_type == :gmres
-                result, stats = Krylov.gmres(shifted_op, xj;
-                                             restart=true,
-                                             memory=max(restart, 2),
-                                             rtol=rtol,
-                                             atol=rtol,
-                                             itmax=maxiter)
-                @views Y[:, j] .= result
-                converged = stats.solved
+                Krylov.gmres!(gmres_workspace, shifted_op, xj;
+                              restart=true,
+                              rtol=rtol,
+                              atol=rtol,
+                              itmax=maxiter)
+                copyto!(view(Y, :, j), gmres_workspace.x)
+                converged = gmres_workspace.stats.solved
             elseif solver_type == :bicgstab
                 result, stats = Krylov.bicgstab(shifted_op, xj;
                                                 rtol=rtol, atol=rtol,

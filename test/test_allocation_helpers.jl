@@ -22,6 +22,13 @@ function _repeat_copy_real!(dest, src, nrepeat)
     return dest
 end
 
+function _repeat_dense_shifted_identity!(dest, z, A, nrepeat)
+    for _ in 1:nrepeat
+        FeastKit._feast_dense_shifted_identity_minus!(dest, z, A)
+    end
+    return dest
+end
+
 @testset "Allocation helper regressions" begin
     @testset "In-place interval reorder" begin
         lambda_src = [4.0, 2.0, 1.0, 3.0]
@@ -62,6 +69,8 @@ end
         FeastKit._feast_copy_real!(dest, src)
         @test dest == real.(src)
 
+        _repeat_copy_real!(dest, src, 1)
+        _ = @allocated _repeat_copy_real!(dest, src, 1)
         bytes = @allocated _repeat_copy_real!(dest, src, 1_000)
         @test bytes < 1024
     end
@@ -143,11 +152,11 @@ end
         FeastKit._feast_dense_shifted_identity_minus!(shifted_dense, z, A_dense)
         @test shifted_dense ≈ z * Matrix{ComplexF64}(I, n, n) - A_dense
 
-        bytes_dense = @allocated begin
-            for _ in 1:1_000
-                FeastKit._feast_dense_shifted_identity_minus!(shifted_dense, z, A_dense)
-            end
-        end
+        _repeat_dense_shifted_identity!(shifted_dense, z, A_dense, 1)
+        _ = @allocated _repeat_dense_shifted_identity!(shifted_dense, z, A_dense, 1)
+        bytes_dense = @allocated _repeat_dense_shifted_identity!(shifted_dense,
+                                                                 z, A_dense,
+                                                                 1_000)
         @test bytes_dense < 1024
 
         A_sparse = sparse(A_dense)
@@ -216,5 +225,66 @@ end
         @test hasproperty(workspace, :rhs)
         @test size(workspace.rhs) == (8, 3)
         @test eltype(workspace.rhs) === ComplexF64
+    end
+
+    @testset "Matrix-free GMRES reuses shifted solve scratch" begin
+        n = 32
+        M0 = 10
+        values = collect(range(1.0, 6.0; length=n))
+        A = Matrix(Diagonal(values))
+        A_op = LinearOperator{Float64}((y, x) -> mul!(y, A, x), (n, n);
+                                       issymmetric=true)
+        B_op = LinearOperator{Float64}((y, x) -> copyto!(y, x), (n, n);
+                                       issymmetric=true, isposdef=true)
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        fpm[2] = 6
+        fpm[4] = 1
+
+        feast(A_op, B_op, (1.5, 4.8); M0=M0, fpm=copy(fpm))
+        GC.gc()
+        bytes = @allocated feast(A_op, B_op, (1.5, 4.8); M0=M0, fpm=copy(fpm))
+
+        @test bytes < 500_000
+    end
+
+    @testset "Matrix-free general RCI avoids projection temporaries" begin
+        n = 32
+        M0 = 10
+        values = complex.(collect(range(1.0, 6.0; length=n)),
+                          0.02 .* collect(1.0:n))
+        A = Matrix(Diagonal(values))
+        A_op = LinearOperator{ComplexF64}((y, x) -> mul!(y, A, x), (n, n))
+        B_op = LinearOperator{ComplexF64}((y, x) -> copyto!(y, x), (n, n))
+        workspace = allocate_matfree_workspace(ComplexF64, n, M0)
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        fpm[2] = 6
+        fpm[4] = 1
+        center = 3.0 + 0.15im
+        radius = 2.4
+
+        exact_solver = function (Y, z, X)
+            @inbounds for j in axes(X, 2), i in axes(X, 1)
+                Y[i, j] = X[i, j] / (z - A[i, i])
+            end
+            return Y
+        end
+
+        result = FeastKit.feast_matfree_grci!(A_op, B_op, center, radius, M0;
+                                              fpm=copy(fpm),
+                                              linear_solver=exact_solver,
+                                              workspace=workspace)
+        @test result.M > 0
+        GC.gc()
+        bytes = @allocated FeastKit.feast_matfree_grci!(A_op, B_op, center,
+                                                        radius, M0;
+                                                        fpm=copy(fpm),
+                                                        linear_solver=exact_solver,
+                                                        workspace=workspace)
+
+        @test bytes < 2_000_000
     end
 end

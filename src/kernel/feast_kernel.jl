@@ -471,7 +471,7 @@ end
         ijob[] = Int(Feast_RCI_SOLVE)
         Q0 = state.Q0
         M_current = size(Q0, 2)
-        workc[:, 1:M_current] = Q0
+        copyto!(view(workc, :, 1:M_current), Q0)
         return
     end
 
@@ -778,7 +778,9 @@ end
     if ijob[] == Int(Feast_RCI_MULT_B)
         # User has computed workc = B*Q
         # Form zBq = Q^H * (B*Q) = Q^H * workc
-        Sq[1:M0, 1:M0] = q[:, 1:M0]' * workc[:, 1:M0]
+        mul!(view(Sq, 1:M0, 1:M0),
+             adjoint(view(q, :, 1:M0)),
+             view(workc, :, 1:M0))
 
         # Now ask user to compute work = A*Q
         fill!(workc, zero(Complex{T}))
@@ -791,12 +793,14 @@ end
     if ijob[] == Int(Feast_RCI_MULT_A)
         if state.mult_a_for_projection
             # Computing zAq = Q^H * A * Q
-            Aq[1:M0, 1:M0] = q[:, 1:M0]' * workc[:, 1:M0]
+            mul!(view(Aq, 1:M0, 1:M0),
+                 adjoint(view(q, :, 1:M0)),
+                 view(workc, :, 1:M0))
             state.mult_a_for_projection = false
 
             # Now solve reduced eigenvalue problem: zAq*v = lambda*zBq*v
             try
-                F = eigen(Aq[1:M0, 1:M0], Sq[1:M0, 1:M0])
+                F = eigen(Aq, Sq)
                 lambda_red = F.values
                 v_red = F.vectors
 
@@ -849,14 +853,21 @@ end
 
                 # Normalize eigenvectors
                 for idx in 1:M0
-                    q_norm = norm(view(workc, :, idx))
-                    if q_norm > 0
-                        workc[:, idx] ./= q_norm
+                    q_norm_sq = zero(T)
+                    @inbounds for k in 1:N
+                        q_norm_sq += abs2(workc[k, idx])
+                    end
+                    q_norm = sqrt(q_norm_sq)
+                    if q_norm > zero(T)
+                        inv_norm = inv(q_norm)
+                        @inbounds for k in 1:N
+                            workc[k, idx] *= inv_norm
+                        end
                     end
                 end
 
                 # Copy all M0 back to q for next iteration
-                q[:, 1:M0] = workc[:, 1:M0]
+                copyto!(view(q, :, 1:M0), view(workc, :, 1:M0))
 
                 # Now compute residuals: need A*q_new
                 fill!(workc, zero(Complex{T}))
@@ -885,7 +896,11 @@ end
                 res[j] = norm(residual) / max(abs(lambda[j]), one(T))
             end
 
-            epsout[] = maximum(res[1:M])
+            max_res = zero(T)
+            @inbounds for j in 1:M
+                max_res = max(max_res, res[j])
+            end
+            epsout[] = max_res
 
             eps_tolerance = feast_tolerance(fpm, T)
             maxloop = fpm[4]

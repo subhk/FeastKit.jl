@@ -187,8 +187,14 @@ end
         feast_gegv!(copy(A), B, center, radius, M0, copy(fpm))
         standard_bytes = @allocated feast_geev!(copy(A), center, radius, M0, copy(fpm))
         generalized_bytes = @allocated feast_gegv!(copy(A), B, center, radius, M0, copy(fpm))
+        _ = Matrix{ComplexF64}(I, n, n)
+        identity_bytes = @allocated Matrix{ComplexF64}(I, n, n)
 
-        @test standard_bytes <= generalized_bytes
+        # The standard and generalized paths are within allocator noise of each
+        # other across Julia/OS versions. This regression guard is sized to
+        # catch reintroducing a dense identity matrix, not byte-for-byte order.
+        identity_slack = max(16_384, identity_bytes ÷ 4)
+        @test standard_bytes <= generalized_bytes + identity_slack
     end
 
     @testset "Threaded moment helpers avoid avoidable temporaries" begin

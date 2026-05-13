@@ -361,7 +361,7 @@ function feast_heev!(A::Matrix{Complex{T}},
                                           solver_restart=solver_restart)
 end
 
-function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
+function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing},
                      Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
                      solver::Symbol = :direct,
                      solver_tol::Real = 0.0,
@@ -372,7 +372,8 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
     
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
-    size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
+    B === nothing || size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
+    B_is_identity = B === nothing
 
     # Apply defaults FIRST before using any fpm values
     feastdefault!(fpm)
@@ -392,7 +393,7 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
         throw(ArgumentError("Krylov.jl is required for iterative dense FEAST solves."))
 
     A_iter = use_iterative ? Matrix{Complex{T}}(A) : nothing
-    B_iter = use_iterative ? Matrix{Complex{T}}(B) : nothing
+    B_iter = use_iterative && !B_is_identity ? Matrix{Complex{T}}(B) : nothing
     tmpAx = use_iterative ? zeros(Complex{T}, N) : nothing
     tmpBx = use_iterative ? zeros(Complex{T}, N) : nothing
     current_shift = Ref(zero(Complex{T}))
@@ -444,7 +445,11 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             # Factorize Ze*B - A
             z = Ze[]
-            temp_matrix .= z .* B .- A
+            if B_is_identity
+                _feast_dense_shifted_identity_minus!(temp_matrix, z, A)
+            else
+                @. temp_matrix = z * B - A
+            end
 
             if use_direct
                 try
@@ -461,7 +466,11 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
             # Solve linear systems: (Ze*B - A) * X = B * workspace.workc
             rhs = view(rhs_buffer, :, 1:M0)
             workc_block = view(workspace.workc, :, 1:M0)
-            mul!(rhs, B, workc_block)
+            if B_is_identity
+                copyto!(rhs, workc_block)
+            else
+                mul!(rhs, B, workc_block)
+            end
 
             if use_direct
                 try
@@ -474,8 +483,12 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
             else
                 copyto!(rhs_copy, rhs)
                 function shifted_mul!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
-                    mul!(tmpBx, B_iter, x)
-                    @. tmpBx = current_shift[] * tmpBx
+                    if B_is_identity
+                        @. tmpBx = current_shift[] * x
+                    else
+                        mul!(tmpBx, B_iter, x)
+                        @. tmpBx = current_shift[] * tmpBx
+                    end
                     mul!(tmpAx, A_iter, x)
                     @. y = tmpBx - tmpAx
                     return y
@@ -485,7 +498,11 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
                                                solver_maxiter, solver_restart)
                 if !success
                     # Fall back to direct solve if iterative solver failed
-                    temp_matrix .= current_shift[] .* B_iter .- A_iter
+                    if B_is_identity
+                        _feast_dense_shifted_identity_minus!(temp_matrix, current_shift[], A_iter)
+                    else
+                        @. temp_matrix = current_shift[] * B_iter - A_iter
+                    end
                     try
                         LU_factorization[] = lu!(temp_matrix)
                         copyto!(workc_block, rhs_copy)
@@ -501,7 +518,11 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
         elseif ijob[] == Int(Feast_RCI_MULT_B)
             # Compute B * q (for forming reduced matrix zBq = Q^H * B * Q)
             M = mode[]
-            mul!(view(workspace.workc, :, 1:M), B, view(q_complex, :, 1:M))
+            if B_is_identity
+                copyto!(view(workspace.workc, :, 1:M), view(q_complex, :, 1:M))
+            else
+                mul!(view(workspace.workc, :, 1:M), B, view(q_complex, :, 1:M))
+            end
 
         elseif ijob[] == Int(Feast_RCI_MULT_A)
             # Compute A * q (for forming zAq or computing residuals)
@@ -755,11 +776,7 @@ function feast_geev!(A::Matrix{Complex{T}},
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
 
-    # Create identity matrix for B
-    B = Matrix{Complex{T}}(I, N, N)
-
-    # Call generalized version with B = I
-    return feast_gegv!(A, B, Emid, r, M0, fpm;
+    return feast_gegv!(A, nothing, Emid, r, M0, fpm;
                        solver=solver, solver_tol=solver_tol,
                        solver_maxiter=solver_maxiter, solver_restart=solver_restart)
 end

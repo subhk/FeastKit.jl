@@ -5,6 +5,55 @@ using Distributed
 using SharedArrays
 using LinearAlgebra
 
+function _pfeast_dense_shifted_system!(dest::AbstractMatrix{Complex{T}},
+                                       z::Complex{T},
+                                       A::AbstractMatrix{T},
+                                       B::AbstractMatrix{T}) where T<:Real
+    @boundscheck size(dest) == size(A) == size(B) || throw(DimensionMismatch("matrix sizes must match"))
+    @inbounds @simd for i in eachindex(dest, A, B)
+        dest[i] = z * B[i] - A[i]
+    end
+    return dest
+end
+
+function _pfeast_store_complex_moments!(Aq::AbstractMatrix{Complex{T}},
+                                        Sq::AbstractMatrix{Complex{T}},
+                                        Q_proj::AbstractMatrix{Complex{T}},
+                                        temp::AbstractMatrix{Complex{T}},
+                                        workc::AbstractMatrix{Complex{T}},
+                                        weight::Complex{T},
+                                        z::Complex{T}) where T<:Real
+    weighted_z = weight * z
+    @inbounds for j in axes(temp, 2), i in axes(temp, 1)
+        val = temp[i, j]
+        Aq[i, j] = weight * val
+        Sq[i, j] = weighted_z * val
+    end
+    @inbounds for j in axes(workc, 2), i in axes(workc, 1)
+        Q_proj[i, j] = weight * workc[i, j]
+    end
+    return Aq, Sq, Q_proj
+end
+
+function _pfeast_store_real_moments!(Aq::AbstractMatrix{T},
+                                     Sq::AbstractMatrix{T},
+                                     Q_proj::AbstractMatrix{T},
+                                     temp::AbstractMatrix{Complex{T}},
+                                     workc::AbstractMatrix{Complex{T}},
+                                     weight::Complex{T},
+                                     z::Complex{T}) where T<:Real
+    weighted_z = weight * z
+    @inbounds for j in axes(temp, 2), i in axes(temp, 1)
+        val = temp[i, j]
+        Aq[i, j] = real(weight * val)
+        Sq[i, j] = real(weighted_z * val)
+    end
+    @inbounds for j in axes(workc, 2), i in axes(workc, 1)
+        Q_proj[i, j] = real(weight * workc[i, j])
+    end
+    return Aq, Sq, Q_proj
+end
+
 # Parallel FeastKit for real symmetric problems
 function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
@@ -167,12 +216,13 @@ function pfeast_compute_moments_threaded(A::Matrix{T}, B::Matrix{T},
     moments = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, ne)
 
     # Track which thread processes each contour point (for verification)
-    thread_assignments = zeros(Int, ne)
+    thread_assignments = verbose ? zeros(Int, ne) : Int[]
+    work_block = view(work, :, 1:M0)
 
     # Parallel loop over integration points - each contour point goes to a thread
     Threads.@threads for e in 1:ne
         # Record which thread is handling this contour point
-        thread_assignments[e] = Threads.threadid()
+        verbose && (thread_assignments[e] = Threads.threadid())
 
         z = contour.Zne[e]
         w = contour.Wne[e]
@@ -181,36 +231,41 @@ function pfeast_compute_moments_threaded(A::Matrix{T}, B::Matrix{T},
         Aq_local = zeros(Complex{T}, M0, M0)
         Sq_local = zeros(Complex{T}, M0, M0)
         Q_proj_local = zeros(Complex{T}, N, M0)
-
-        # Form and factorize (z*B - A)
-        system_matrix = z * B - A
+        system_matrix = Matrix{Complex{T}}(undef, N, N)
+        rhs = Matrix{Complex{T}}(undef, N, M0)
+        workc_local = Matrix{Complex{T}}(undef, N, M0)
+        temp = Matrix{Complex{T}}(undef, M0, M0)
 
         try
+            # Form and factorize (z*B - A)
+            _pfeast_dense_shifted_system!(system_matrix, z, A, B)
+
             # LU factorization
-            F = lu(system_matrix)
+            F = lu!(system_matrix)
 
             # Right-hand side: B * Q0
-            rhs = Complex{T}.(B * work[:, 1:M0])
+            mul!(rhs, B, work_block)
 
             # Solve all linear systems at once: Y = (z*B - A) \ (B*Q0)
-            workc_local = F \ rhs
+            copyto!(workc_local, rhs)
+            ldiv!(F, workc_local)
 
             # Compute complex moment contribution with factor of 2 for half-contour symmetry
             # Keep as complex - symmetrization happens when accumulating
-            temp = work[:, 1:M0]' * workc_local
+            mul!(temp, adjoint(work_block), workc_local)
             weight = 2 * w  # Factor of 2 for conjugate half-contour
-            Aq_local .= weight .* temp
-            Sq_local .= weight * z .* temp
-
-            # Accumulate filtered subspace contribution
-            Q_proj_local .= weight .* workc_local
+            _pfeast_store_complex_moments!(Aq_local, Sq_local, Q_proj_local,
+                                           temp, workc_local, weight, z)
 
             moments[e] = (Aq_local, Sq_local, Q_proj_local)
 
         catch err
             # Handle factorization failure
             @warn "Factorization failed for contour point $e: $err"
-            moments[e] = (zeros(Complex{T}, M0, M0), zeros(Complex{T}, M0, M0), zeros(Complex{T}, N, M0))
+            fill!(Aq_local, zero(Complex{T}))
+            fill!(Sq_local, zero(Complex{T}))
+            fill!(Q_proj_local, zero(Complex{T}))
+            moments[e] = (Aq_local, Sq_local, Q_proj_local)
         end
     end
 
@@ -517,11 +572,12 @@ function pfeast_compute_sparse_moments_threaded(A::SparseMatrixCSC{T,Int},
     N = size(A, 1)
     nthreads = Threads.nthreads()
     moments = Vector{Tuple{Matrix{T}, Matrix{T}, Matrix{T}}}(undef, ne)
-    thread_assignments = zeros(Int, ne)
+    thread_assignments = verbose ? zeros(Int, ne) : Int[]
+    work_block = view(work, :, 1:M0)
 
     Threads.@threads for e in 1:ne
         # Record which thread is handling this contour point
-        thread_assignments[e] = Threads.threadid()
+        verbose && (thread_assignments[e] = Threads.threadid())
 
         z = contour.Zne[e]
         w = contour.Wne[e]
@@ -530,6 +586,9 @@ function pfeast_compute_sparse_moments_threaded(A::SparseMatrixCSC{T,Int},
         Aq_local = zeros(T, M0, M0)
         Sq_local = zeros(T, M0, M0)
         Q_proj_local = zeros(T, N, M0)
+        rhs = Matrix{Complex{T}}(undef, N, M0)
+        workc_local = Matrix{Complex{T}}(undef, N, M0)
+        temp = Matrix{Complex{T}}(undef, M0, M0)
 
         try
             # Form sparse system matrix
@@ -539,25 +598,26 @@ function pfeast_compute_sparse_moments_threaded(A::SparseMatrixCSC{T,Int},
             F = lu(system_matrix)
 
             # Right-hand side: B * Q0
-            rhs = B * work[:, 1:M0]
+            mul!(rhs, B, work_block)
 
             # Solve sparse linear systems: Y = (z*B - A) \ (B*Q0)
-            workc_local = F \ rhs
+            copyto!(workc_local, rhs)
+            ldiv!(F, workc_local)
 
             # Compute moment contribution with factor of 2 for half-contour symmetry
-            temp = work[:, 1:M0]' * workc_local
+            mul!(temp, adjoint(work_block), workc_local)
             weight = 2 * w  # Factor of 2 for conjugate half-contour
-            Aq_local .= real.(weight .* temp)
-            Sq_local .= real.(weight * z .* temp)
-
-            # Accumulate filtered subspace contribution
-            Q_proj_local .= real.(weight .* workc_local)
+            _pfeast_store_real_moments!(Aq_local, Sq_local, Q_proj_local,
+                                        temp, workc_local, weight, z)
 
             moments[e] = (Aq_local, Sq_local, Q_proj_local)
 
         catch err
             @warn "Sparse solve failed for contour point $e: $err"
-            moments[e] = (zeros(T, M0, M0), zeros(T, M0, M0), zeros(T, N, M0))
+            fill!(Aq_local, zero(T))
+            fill!(Sq_local, zero(T))
+            fill!(Q_proj_local, zero(T))
+            moments[e] = (Aq_local, Sq_local, Q_proj_local)
         end
     end
 

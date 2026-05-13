@@ -160,6 +160,57 @@ end
         @test helper_bytes < generic_bytes
     end
 
+    @testset "Dense general standard avoids explicit identity matrix" begin
+        n = 80
+        M0 = 16
+        eigenvalues = complex.(collect(1.0:n), 0.02 .* collect(1.0:n))
+        A = Matrix(Diagonal(eigenvalues))
+        B = Matrix{ComplexF64}(I, n, n)
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        fpm[2] = 8
+        fpm[4] = 1
+        center = 20.0 + 0.4im
+        radius = 12.0
+
+        feast_geev!(copy(A), center, radius, M0, copy(fpm))
+        feast_gegv!(copy(A), B, center, radius, M0, copy(fpm))
+        standard_bytes = @allocated feast_geev!(copy(A), center, radius, M0, copy(fpm))
+        generalized_bytes = @allocated feast_gegv!(copy(A), B, center, radius, M0, copy(fpm))
+
+        @test standard_bytes <= generalized_bytes
+    end
+
+    @testset "Threaded moment helpers avoid avoidable temporaries" begin
+        n = 48
+        M0 = 8
+        A = Matrix(Diagonal(collect(1.0:n)))
+        B = Matrix{Float64}(I, n, n)
+        A_sparse = sparse(A)
+        B_sparse = sparse(B)
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        fpm[2] = 6
+        fpm[4] = 1
+        contour = FeastKit.feast_contour(5.5, 18.5, fpm)
+        work = randn(n, M0)
+
+        FeastKit.pfeast_compute_moments_threaded(A, B, work, contour, M0)
+        FeastKit.pfeast_compute_sparse_moments_threaded(A_sparse, B_sparse, work, contour, M0)
+        dense_bytes = @allocated FeastKit.pfeast_compute_moments_threaded(A, B, work,
+                                                                          contour, M0)
+        sparse_bytes = @allocated FeastKit.pfeast_compute_sparse_moments_threaded(A_sparse,
+                                                                                 B_sparse,
+                                                                                 work,
+                                                                                 contour,
+                                                                                 M0)
+
+        @test dense_bytes < 600_000
+        @test sparse_bytes < 420_000
+    end
+
     @testset "Matrix-free complex workspace has RHS scratch" begin
         workspace = allocate_matfree_workspace(ComplexF64, 8, 3)
         @test hasproperty(workspace, :rhs)

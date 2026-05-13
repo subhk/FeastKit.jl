@@ -195,10 +195,29 @@ function feast(A::AbstractMatrix{T}, interval::Tuple{T,T};
                use_threads::Bool = true, comm = nothing) where T<:Real
     # Feast interface for standard real symmetric eigenvalue problems (B = I)
     N = size(A, 1)
-    B = isa(A, SparseMatrixCSC) ? spdiagm(0 => fill(one(T), N)) : Matrix{T}(I, N, N)
-    return feast(A, B, interval, M0=M0, fpm=fpm, backend=backend,
-                 parallel=parallel, strict_backend=strict_backend,
-                 use_threads=use_threads, comm=comm)
+    size(A, 2) == N || throw(ArgumentError("A must be square"))
+    issymmetric(A) || throw(ArgumentError("feast expects a symmetric real matrix A; use feast_general for non-symmetric problems"))
+    feast_validate_interval(A, interval)
+
+    params = _ensure_feast_parameters(fpm)
+    M0 = min(M0, N)
+    requested_backend = _normalize_backend(parallel, backend)
+    allow_backend_fallback = _allow_backend_fallback(parallel, backend, strict_backend)
+    backend_choice = _select_parallel_backend(requested_backend, comm;
+                                              allow_fallback=allow_backend_fallback)
+    A_exec = _materialize_matrix(A)
+
+    if backend_choice == :serial
+        if A_exec isa Matrix
+            return feast_syev!(A_exec, interval[1], interval[2], M0, params)
+        elseif A_exec isa SparseMatrixCSC
+            return feast_scsrev!(A_exec, interval[1], interval[2], M0, params)
+        end
+    end
+
+    B = A_exec isa SparseMatrixCSC ? spdiagm(0 => fill(one(T), N)) : Matrix{T}(I, N, N)
+    return _execute_feast(A_exec, B, interval, backend_choice, M0, params,
+                          comm, use_threads, allow_backend_fallback)
 end
 
 function feast(A::AbstractMatrix{Complex{T}}, interval::Tuple{T,T};
@@ -209,11 +228,30 @@ function feast(A::AbstractMatrix{Complex{T}}, interval::Tuple{T,T};
                use_threads::Bool = true, comm = nothing) where T<:Real
     # Feast interface for standard complex Hermitian eigenvalue problems (B = I)
     N = size(A, 1)
+    size(A, 2) == N || throw(ArgumentError("A must be square"))
+    ishermitian(A) || throw(ArgumentError("feast expects a Hermitian matrix A when using real intervals; call feast_general for non-Hermitian problems"))
+    feast_validate_interval(A, interval)
+
+    params = _ensure_feast_parameters(fpm)
+    M0 = min(M0, N)
+    requested_backend = _normalize_backend(parallel, backend)
+    allow_backend_fallback = _allow_backend_fallback(parallel, backend, strict_backend)
+    backend_choice = _select_parallel_backend(requested_backend, comm;
+                                              allow_fallback=allow_backend_fallback)
+    A_exec = _materialize_matrix(A)
+
+    if backend_choice == :serial
+        if A_exec isa Matrix
+            return feast_heev!(A_exec, interval[1], interval[2], M0, params)
+        elseif A_exec isa SparseMatrixCSC
+            return feast_hcsrev!(A_exec, interval[1], interval[2], M0, params)
+        end
+    end
+
     identity_vals = fill(one(Complex{T}), N)
-    B = isa(A, SparseMatrixCSC) ? spdiagm(0 => identity_vals) : Matrix{Complex{T}}(I, N, N)
-    return feast(A, B, interval, M0=M0, fpm=fpm, backend=backend,
-                 parallel=parallel, strict_backend=strict_backend,
-                 use_threads=use_threads, comm=comm)
+    B = A_exec isa SparseMatrixCSC ? spdiagm(0 => identity_vals) : Matrix{Complex{T}}(I, N, N)
+    return _execute_feast(A_exec, B, interval, backend_choice, M0, params,
+                          comm, use_threads, allow_backend_fallback)
 end
 
 function feast_general(A::AbstractMatrix, B::AbstractMatrix,

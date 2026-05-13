@@ -44,6 +44,10 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
 
     # Filtered subspace accumulator (spectral projector applied to Q)
     Q_proj = zeros(Complex{T}, N, M0)
+    Q_proj_real = zeros(T, N, M0)
+    lambda_tmp = similar(workspace.lambda)
+    perm = Vector{Int}(undef, M0)
+    q_tmp = similar(workspace.q)
 
     # Main Feast refinement loop
     for loop in 1:max_loops
@@ -74,8 +78,8 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
         # Solve reduced eigenvalue problem
         try
             # For half-contour integration, take real part directly (no 0.5 symmetrization needed)
-            Aq .= real.(zAq)
-            Sq .= real.(zSq)
+            _feast_copy_real!(Aq, zAq)
+            _feast_copy_real!(Sq, zSq)
 
             # Symmetrize reduced matrices using wrapper
             Aq_sym = Symmetric(Aq)
@@ -94,25 +98,18 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
             v_red = real.(F.vectors)
 
             # Get real part of filtered subspace for projection
-            Q_proj_real = real.(Q_proj)
+            _feast_copy_real!(Q_proj_real, Q_proj)
 
             # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q
             # This is the core FEAST algorithm - use spectral projector output
             for idx in 1:M0
-                workspace.q[:, idx] = Q_proj_real * view(v_red, :, idx)
+                mul!(view(workspace.q, :, idx), Q_proj_real, view(v_red, :, idx))
                 workspace.lambda[idx] = lambda_red[idx]
             end
 
             # Reorder: put eigenvalues inside interval first while maintaining pairing
-            inside_mask = [Emin <= workspace.lambda[i] <= Emax for i in 1:M0]
-            inside_indices = findall(inside_mask)
-            outside_indices = findall(.!inside_mask)
-            perm = vcat(inside_indices, outside_indices)
-
-            workspace.lambda[1:M0] = workspace.lambda[perm]
-            workspace.q[:, 1:M0] = workspace.q[:, perm]
-
-            M = length(inside_indices)
+            M = _feast_reorder_by_interval!(workspace.lambda, workspace.q, perm,
+                                             lambda_tmp, q_tmp, Emin, Emax, M0)
 
             if M == 0
                 return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[],
@@ -123,7 +120,7 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
             for j in 1:M
                 q_norm = norm(view(workspace.q, :, j))
                 if q_norm > 0
-                    workspace.q[:, j] ./= q_norm
+                    view(workspace.q, :, j) ./= q_norm
                 end
             end
 
@@ -139,7 +136,7 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
             end
 
             # Prepare for next iteration - update ALL M0 columns to maintain subspace
-            workspace.work[:, 1:M0] = workspace.q[:, 1:M0]
+            copyto!(view(workspace.work, :, 1:M0), view(workspace.q, :, 1:M0))
             
         catch e
             return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
@@ -415,6 +412,11 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
 
     # Filtered subspace accumulator (spectral projector applied to Q)
     Q_proj = zeros(T, N, M0)
+    Aq = zeros(T, M0, M0)
+    Sq = zeros(T, M0, M0)
+    lambda_tmp = similar(workspace.lambda)
+    perm = Vector{Int}(undef, M0)
+    q_tmp = similar(workspace.q)
 
     # Main Feast refinement loop
     for loop in 1:max_loops
@@ -430,8 +432,8 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
         end
 
         # Accumulate moments AND Q_proj
-        Aq = zeros(T, M0, M0)
-        Sq = zeros(T, M0, M0)
+        fill!(Aq, zero(T))
+        fill!(Sq, zero(T))
         for (aq_contrib, sq_contrib, qproj_contrib) in moments
             Aq .+= aq_contrib
             Sq .+= sq_contrib
@@ -457,20 +459,13 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
 
             # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q
             for idx in 1:M0
-                workspace.q[:, idx] = Q_proj * view(v_red, :, idx)
+                mul!(view(workspace.q, :, idx), Q_proj, view(v_red, :, idx))
                 workspace.lambda[idx] = lambda_red[idx]
             end
 
             # Reorder: put eigenvalues inside interval first while maintaining pairing
-            inside_mask = [Emin <= workspace.lambda[i] <= Emax for i in 1:M0]
-            inside_indices = findall(inside_mask)
-            outside_indices = findall(.!inside_mask)
-            perm = vcat(inside_indices, outside_indices)
-
-            workspace.lambda[1:M0] = workspace.lambda[perm]
-            workspace.q[:, 1:M0] = workspace.q[:, perm]
-
-            M = length(inside_indices)
+            M = _feast_reorder_by_interval!(workspace.lambda, workspace.q, perm,
+                                             lambda_tmp, q_tmp, Emin, Emax, M0)
 
             if M == 0
                 return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[],
@@ -481,7 +476,7 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             for j in 1:M
                 q_norm = norm(view(workspace.q, :, j))
                 if q_norm > 0
-                    workspace.q[:, j] ./= q_norm
+                    view(workspace.q, :, j) ./= q_norm
                 end
             end
 
@@ -496,7 +491,7 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             end
 
             # Prepare for next iteration - update ALL M0 columns to maintain subspace
-            workspace.work[:, 1:M0] = workspace.q[:, 1:M0]
+            copyto!(view(workspace.work, :, 1:M0), view(workspace.q, :, 1:M0))
             
         catch e
             return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 

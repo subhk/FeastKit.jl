@@ -51,6 +51,29 @@ function _feast_copy_real!(dest::AbstractArray{T}, src::AbstractArray) where T<:
 end
 
 """
+    _feast_dense_shifted_identity_minus!(dest, z, A)
+
+Write `z * I - A` into `dest` without materializing the dense identity matrix.
+Used by standard Hermitian/symmetric FEAST paths where `B = I`.
+"""
+function _feast_dense_shifted_identity_minus!(dest::AbstractMatrix{Complex{T}},
+                                              z::Complex{T},
+                                              A::AbstractMatrix{Complex{T}}) where T<:Real
+    @boundscheck begin
+        size(A, 1) == size(A, 2) || throw(DimensionMismatch("A must be square"))
+        size(dest) == size(A) || throw(DimensionMismatch("destination must match A"))
+    end
+
+    @inbounds @simd for i in eachindex(dest, A)
+        dest[i] = -A[i]
+    end
+    @inbounds for i in axes(A, 1)
+        dest[i, i] += z
+    end
+    return dest
+end
+
+"""
     _feast_hermitian_part!(dest, src)
 
 Write `(src + src') / 2` into `dest` without allocating temporary adjoint or

@@ -288,6 +288,14 @@ using Random
         result = feast_sygv!(copy(A), copy(B), 0.0f0, 4.0f0, n, fpm)
         @test result.info == 0
         @test result.M >= 1
+        @test eltype(result.lambda) === Float32
+        @test eltype(result.q) === Float32
+
+        high_level = feast(A, B, (0.0f0, 4.0f0); M0=n, fpm=copy(fpm), backend=:serial)
+        @test high_level.info == 0
+        @test high_level.M >= 1
+        @test eltype(high_level.lambda) === Float32
+        @test eltype(high_level.q) === Float32
 
         A_complex = Matrix(Diagonal(ComplexF32[0.25f0, 1.25f0, 2.25f0, 3.25f0]))
         result_complex = feast_heev!(copy(A_complex), -2.0f0, 2.0f0, n, fpm)

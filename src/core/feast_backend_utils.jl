@@ -161,7 +161,9 @@ function feast_serial(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{T,T}
 
     if elem_type <: Real
         if isa(A, Matrix) && isa(B, Matrix)
-            return feast_sygv!(Matrix{Float64}(A), Matrix{Float64}(B), Emin, Emax, M0, fpm)
+            return feast_sygv!(Matrix{elem_type}(A), Matrix{elem_type}(B),
+                                convert(elem_type, Emin), convert(elem_type, Emax),
+                                M0, fpm)
         elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
             if _is_identity_matrix(B)
                 return feast_scsrev!(A, Emin, Emax, M0, fpm)

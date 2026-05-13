@@ -102,10 +102,8 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
         throw(ArgumentError("Krylov.jl is required for iterative dense FEAST solves."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
 
-    # Always use an explicit identity matrix when B is nothing
-    # (matches sparse solver pattern and avoids subtle numerical differences)
-    B_matrix = B === nothing ? Matrix{Complex{T}}(I, N, N) : copy(B)
     B_is_identity = B === nothing
+    B_matrix = B_is_identity ? Matrix{Complex{T}}(undef, 0, 0) : copy(B)
 
     # Main FEAST workspaces. The rhs/reorder buffers look redundant, but they
     # prevent per-contour copies and slice allocations in the inner iteration.
@@ -180,7 +178,11 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
             end
 
             if solver_is_direct
-                @. shifted_matrix = z * B_matrix - A
+                if B_is_identity
+                    _feast_dense_shifted_identity_minus!(shifted_matrix, z, A)
+                else
+                    @. shifted_matrix = z * B_matrix - A
+                end
                 copyto!(rhs_copy, rhs_buffer)
                 try
                     factor = lu(shifted_matrix)
@@ -333,11 +335,15 @@ end
     M = result.M
     N = size(result.q, 1)
     q_real = Array{T}(undef, N, M)
-    for j in 1:M
-        @inbounds q_real[:, j] .= real.(result.q[:, j])
+    @inbounds for j in 1:M, i in 1:N
+        q_real[i, j] = real(result.q[i, j])
     end
-    lambda_real = real.(result.lambda[1:M])
-    res_real = result.res[1:M]
+    lambda_real = Vector{T}(undef, M)
+    res_real = Vector{T}(undef, M)
+    @inbounds for i in 1:M
+        lambda_real[i] = result.lambda[i]
+        res_real[i] = result.res[i]
+    end
     return FeastResult{T, T}(lambda_real, q_real, M, res_real,
                              result.info, result.epsout, result.loop)
 end
@@ -349,13 +355,10 @@ function feast_heev!(A::Matrix{Complex{T}},
                      solver_tol::Real = 0.0,
                      solver_maxiter::Int = 500,
                      solver_restart::Int = 30) where T<:Real
-    # Delegate to generalized solver with B = I, matching feast_syev! pattern
-    N = size(A, 1)
-    B = Matrix{Complex{T}}(I, N, N)
-    return feast_hegv!(A, B, Emin, Emax, M0, fpm;
-                       solver=solver, solver_tol=solver_tol,
-                       solver_maxiter=solver_maxiter,
-                       solver_restart=solver_restart)
+    return _feast_dense_complex_hermitian(A, nothing, Emin, Emax, M0, fpm;
+                                          solver=solver, solver_tol=solver_tol,
+                                          solver_maxiter=solver_maxiter,
+                                          solver_restart=solver_restart)
 end
 
 function feast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
@@ -716,13 +719,14 @@ function feast_syev!(A::Matrix{T},
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
 
-    # Create identity matrix for B
-    B = Matrix{T}(I, N, N)
-
-    # Call generalized version with B = I
-    return feast_sygv!(A, B, Emin, Emax, M0, fpm;
-                       solver=solver, solver_tol=solver_tol,
-                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+    complex_A = Complex{T}.(A)
+    complex_result = _feast_dense_complex_hermitian(complex_A, nothing,
+                                                   Emin, Emax, M0, fpm;
+                                                   solver=solver,
+                                                   solver_tol=solver_tol,
+                                                   solver_maxiter=solver_maxiter,
+                                                   solver_restart=solver_restart)
+    return _complex_to_real_result(complex_result)
 end
 
 function feast_hegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},

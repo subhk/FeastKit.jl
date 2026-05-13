@@ -99,6 +99,54 @@ end
                                            Complex{T}.(A.nzval))
 end
 
+function _feast_sparse_shifted_identity_minus(A::SparseMatrixCSC{Complex{T},Int},
+                                              z::Complex{T}) where T<:Real
+    N = size(A, 1)
+    size(A, 2) == N || throw(DimensionMismatch("A must be square"))
+
+    shifted = copy(A)
+    @inbounds @simd for i in eachindex(shifted.nzval)
+        shifted.nzval[i] = -shifted.nzval[i]
+    end
+
+    @inbounds for col in 1:N
+        diagonal_found = false
+        for p in shifted.colptr[col]:(shifted.colptr[col + 1] - 1)
+            row = shifted.rowval[p]
+            if row == col
+                shifted.nzval[p] += z
+                diagonal_found = true
+                break
+            elseif row > col
+                break
+            end
+        end
+
+        if !diagonal_found
+            return spdiagm(0 => fill(z, N)) - A
+        end
+    end
+
+    return shifted
+end
+
+struct SparseIdentityShiftedOperator{CT<:Complex,TA<:SparseMatrixCSC}
+    A::TA
+    z::CT
+    tmpA::Vector{CT}
+end
+
+Base.size(op::SparseIdentityShiftedOperator) = size(op.A)
+Base.eltype(::SparseIdentityShiftedOperator{CT}) where {CT} = CT
+
+function LinearAlgebra.mul!(y::AbstractVector{CT},
+                            op::SparseIdentityShiftedOperator{CT},
+                            x::AbstractVector{CT}) where CT
+    mul!(op.tmpA, op.A, x)
+    @. y = op.z * x - op.tmpA
+    return y
+end
+
 @inline function _copyto_complex!(dest::AbstractVector{Complex{T}}, src::AbstractVector{T}) where T<:Real
     @inbounds for i in eachindex(src)
         dest[i] = Complex{T}(src[i])
@@ -154,6 +202,39 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
     return true
 end
 
+function solve_shifted_iterative_identity!(dest::AbstractMatrix{CT},
+                                           rhs::AbstractMatrix{CT},
+                                           A::SparseMatrixCSC,
+                                           z::CT, tol::TR,
+                                           maxiter::Int, gmres_restart::Int) where {CT<:Complex, TR<:Real}
+    N = size(A, 1)
+    ncols = size(rhs, 2)
+    tmpA = Vector{CT}(undef, N)
+    op = SparseIdentityShiftedOperator(A, z, tmpA)
+    residual = Vector{CT}(undef, N)
+
+    for j in 1:ncols
+        b = view(rhs, :, j)
+        x_sol, stats = gmres(op, b;
+                             restart=true,
+                             memory=max(gmres_restart, 2),
+                             rtol=tol,
+                             atol=tol,
+                             itmax=maxiter)
+        mul!(residual, op, x_sol)
+        @. residual -= b
+        res_norm = norm(residual)
+        b_norm = norm(b)
+        residual_limit = 10 * tol * max(b_norm, one(b_norm))
+        if !stats.solved || res_norm > residual_limit
+            return false
+        end
+        dest[:, j] .= x_sol
+    end
+
+    return true
+end
+
 """
     _feast_sparse_hermitian(A, B, Emin, Emax, M0, fpm; solver=:direct)
 
@@ -170,8 +251,6 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                                  solver_maxiter::Int = 500,
                                  solver_restart::Int = 30) where T<:Real
     N = size(A, 1)
-    identity_sparse = spdiagm(0 => fill(Complex{T}(1), N))
-    B_matrix = B === nothing ? identity_sparse : B
 
     feastdefault!(fpm)
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
@@ -243,11 +322,11 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
             if B === nothing
                 rhs_buffer .= Q_basis
             else
-                mul!(rhs_buffer, B_matrix, Q_basis)
+                mul!(rhs_buffer, B, Q_basis)
             end
 
             if solver_is_direct
-                shifted_matrix = z * B_matrix - A
+                shifted_matrix = B === nothing ? _feast_sparse_shifted_identity_minus(A, z) : z * B - A
                 try
                     solver_factor = lu(shifted_matrix)
                     ldiv!(solutions, solver_factor, rhs_buffer)
@@ -258,8 +337,15 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                     break
                 end
             else
-                success = solve_shifted_iterative!(solutions, rhs_buffer, A, B_matrix,
-                                                   z, tol_value, solver_maxiter, solver_restart)
+                success = if B === nothing
+                    solve_shifted_iterative_identity!(solutions, rhs_buffer, A, z,
+                                                      tol_value, solver_maxiter,
+                                                      solver_restart)
+                else
+                    solve_shifted_iterative!(solutions, rhs_buffer, A, B,
+                                             z, tol_value, solver_maxiter,
+                                             solver_restart)
+                end
                 if !success
                     info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                     gmres_failed = true
@@ -334,7 +420,7 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                 if B === nothing
                     @. residual_vec = residual_vec - lambda_vec[j] * q_col
                 else
-                    mul!(Bq_vec, B_matrix, q_col)
+                    mul!(Bq_vec, B, q_col)
                     @. residual_vec = residual_vec - lambda_vec[j] * Bq_vec
                 end
                 # Relative residual: normalize by max(|λ|, 1)
@@ -581,15 +667,7 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                                              solver=solver, solver_tol=solver_tol,
                                              solver_maxiter=solver_maxiter,
                                              solver_restart=solver_restart)
-    lambda = real.(complex_result.lambda)
-    q_real = Array{T}(undef, N, complex_result.M)
-    for j in 1:complex_result.M
-        @inbounds q_real[:, j] .= real.(complex_result.q[:, j])
-    end
-    res = complex_result.res
-    return FeastResult{T, T}(lambda, q_real, complex_result.M, res,
-                              complex_result.info, complex_result.epsout,
-                              complex_result.loop)
+    return _complex_to_real_result(complex_result)
 end
 
 function feast_scsrgvx!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
@@ -1380,11 +1458,10 @@ function feast_scsrev!(A::SparseMatrixCSC{T,Int},
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
 
-    # Create sparse identity matrix for B
-    B = spdiagm(0 => fill(one(T), N))
-
-    # Call generalized version with B = I
-    return feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
+    complex_A = _convert_sparse_complex(A, Complex{T})
+    complex_result = _feast_sparse_hermitian(complex_A, nothing,
+                                             Emin, Emax, M0, fpm)
+    return _complex_to_real_result(complex_result)
 end
 
 function feast_gcsrev!(A::SparseMatrixCSC{Complex{T},Int},

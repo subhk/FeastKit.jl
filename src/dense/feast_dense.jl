@@ -116,7 +116,6 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
     zSq = zeros(Complex{T}, M0, M0)
     Aq_herm = similar(zAq)
     Sq_herm = similar(zSq)
-    moment = Matrix{Complex{T}}(undef, M0, M0)
     lambda_vec = zeros(T, M0)
     lambda_tmp = similar(lambda_vec)
     perm = Vector{Int}(undef, M0)
@@ -154,13 +153,14 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
     info_code = Int(Feast_SUCCESS)
     loop_count = 0
     M_found = 0
+    active_dim = M0
 
     # Allocate buffer for accumulated filtered subspace
     Q_proj = zeros(Complex{T}, N, M0)
 
     @views for loop_idx in 0:maxloop
-        # Each refinement starts from a fresh projected subspace and moment
-        # accumulator; the basis itself is updated only after convergence checks.
+        # Each refinement starts from a fresh projected subspace accumulator; the
+        # basis itself is updated only after convergence checks.
         loop_count = loop_idx
         fill!(zAq, zero(Complex{T}))
         fill!(zSq, zero(Complex{T}))
@@ -172,11 +172,16 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
             # Apply each contour resolvent `(zB - A)^-1 B` to the current basis.
             # The half-contour weights are doubled for Hermitian symmetry.
             weight = 2 * Wne[idx]
+            basis_block = view(Q_basis, :, 1:active_dim)
+            rhs_block = view(rhs_buffer, :, 1:active_dim)
+            rhs_copy_block = view(rhs_copy, :, 1:active_dim)
+            solutions_block = view(solutions, :, 1:active_dim)
+            qproj_block = view(Q_proj, :, 1:active_dim)
 
             if B_is_identity
-                rhs_buffer .= Q_basis
+                copyto!(rhs_block, basis_block)
             else
-                mul!(rhs_buffer, B_matrix, Q_basis)
+                mul!(rhs_block, B_matrix, basis_block)
             end
 
             if solver_is_direct
@@ -197,9 +202,9 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
                         break
                     end
                 end
-                copyto!(rhs_copy, rhs_buffer)
+                copyto!(rhs_copy_block, rhs_block)
                 try
-                    ldiv!(solutions, factor, rhs_copy)
+                    ldiv!(solutions_block, factor, rhs_copy_block)
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)
                     @warn "Dense direct solve failed for shift $z" exception=err
@@ -207,9 +212,9 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
                     break
                 end
             else
-                copyto!(rhs_copy, rhs_buffer)
+                copyto!(rhs_copy_block, rhs_block)
                 current_shift[] = z
-                success = solve_dense_shifted!(solutions, rhs_copy,
+                success = solve_dense_shifted!(solutions_block, rhs_copy_block,
                                                shifted_mul!, solver_choice,
                                                tol_value, solver_maxiter,
                                                solver_restart)
@@ -220,37 +225,57 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
                 end
             end
 
-            # Accumulate both the filtered subspace and the reduced moments used
-            # for the Rayleigh-Ritz problem after the contour sweep.
-            @. Q_proj += weight * solutions
-
-            mul!(moment, adjoint(Q_basis), solutions)
-            @. zAq += weight * moment
-            @. zSq += weight * z * moment
+            # Accumulate the filtered subspace. It is orthonormalized before
+            # Rayleigh-Ritz so oversized trial spaces do not make the reduced
+            # problem rank deficient.
+            @. qproj_block += weight * solutions_block
         end
 
         solve_failed && break
 
         try
-            # For half-contour integration of Hermitian problems, the full contour
-            # integral yields Hermitian reduced matrices (R(z̄)^H = R(z) for A = A^H).
-            # Extract the Hermitian part via (M + M^H)/2, NOT real/symmetric part,
-            # which would discard imaginary components needed for complex Hermitian A.
-            _feast_hermitian_part!(Aq_herm, zAq)
-            _feast_hermitian_part!(Sq_herm, zSq)
+            rank = _feast_qr_compress!(solutions_tmp, Q_proj, active_dim;
+                                       rank_tol=sqrt(eps(T)))
+            if rank == 0
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
+
+            q_rank = view(solutions_tmp, :, 1:rank)
+            aq_work = view(rhs_buffer, :, 1:rank)
+            bq_work = view(rhs_copy, :, 1:rank)
+            zAq_rank = view(zAq, 1:rank, 1:rank)
+            zSq_rank = view(zSq, 1:rank, 1:rank)
+            Aq_rank = view(Aq_herm, 1:rank, 1:rank)
+            Sq_rank = view(Sq_herm, 1:rank, 1:rank)
+
+            mul!(aq_work, A, q_rank)
+            mul!(zSq_rank, adjoint(q_rank), aq_work)
+            _feast_hermitian_part!(Sq_rank, zSq_rank)
+
+            if B_is_identity
+                fill!(Aq_rank, zero(Complex{T}))
+                for i in 1:rank
+                    Aq_rank[i, i] = one(Complex{T})
+                end
+            else
+                mul!(bq_work, B_matrix, q_rank)
+                mul!(zAq_rank, adjoint(q_rank), bq_work)
+                _feast_hermitian_part!(Aq_rank, zAq_rank)
+            end
 
             # Solve Hermitian generalized eigenproblem: Sq*x = lambda*Aq*x
             # Eigenvalues are real; eigenvectors are complex.
             lambda_red = Vector{T}(undef, 0)
             v_red = Array{Complex{T}}(undef, 0, 0)
             try
-                F = eigen(Hermitian(Sq_herm), Hermitian(Aq_herm))
+                F = eigen(Hermitian(Sq_rank), Hermitian(Aq_rank))
                 lambda_red = Vector{T}(F.values)
                 v_red = Matrix{Complex{T}}(F.vectors)
             catch e
                 if isa(e, PosDefException) || isa(e, LAPACKException)
                     # Fall back to general complex eigenvalue solver
-                    F = eigen(Sq_herm, Aq_herm)
+                    F = eigen(Sq_rank, Aq_rank)
                     lambda_red = Vector{T}(real.(F.values))
                     v_red = Matrix{Complex{T}}(F.vectors)
                 else
@@ -258,15 +283,15 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
                 end
             end
 
-            # Project eigenvectors using filtered subspace Q_proj (complex coefficients)
-            for idx in 1:M0
-                mul!(view(solutions, :, idx), Q_proj, view(v_red, :, idx))
+            # Project eigenvectors using the orthonormal filtered subspace.
+            for idx in 1:rank
+                mul!(view(solutions, :, idx), q_rank, view(v_red, :, idx))
                 lambda_vec[idx] = lambda_red[idx]
             end
 
             M = _feast_reorder_by_interval!(lambda_vec, solutions, perm,
                                              lambda_tmp, solutions_tmp,
-                                             Emin, Emax, M0)
+                                             Emin, Emax, rank)
             if M == 0
                 info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
@@ -308,8 +333,8 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
                 break
             end
 
-            # Use full M0 subspace for next iteration
-            Q_basis[:, 1:M0] .= solutions[:, 1:M0]
+            active_dim = rank
+            Q_basis[:, 1:active_dim] .= solutions[:, 1:active_dim]
         catch err
             info_code = Int(Feast_ERROR_LAPACK)
             @warn "Reduced dense Hermitian eigenproblem failed" exception=err
@@ -1070,6 +1095,7 @@ Hermitian/general dense paths.
     loop_count = 0
     info_code = Int(Feast_SUCCESS)
     M_found = 0
+    active_dim = M0
 
     for loop_idx in 0:maxloop
         loop_count = loop_idx
@@ -1079,11 +1105,16 @@ Hermitian/general dense paths.
         for e in eachindex(Zne)
             z = Zne[e]
             weight = Wne[e]
+            basis_block = view(Q_basis, :, 1:active_dim)
+            rhs_block = view(rhs_buffer, :, 1:active_dim)
+            rhs_copy_block = view(rhs_copy, :, 1:active_dim)
+            shifted_block = view(shifted_solutions, :, 1:active_dim)
+            qproj_block = view(Q_proj, :, 1:active_dim)
 
             if B_is_identity
-                copyto!(rhs_buffer, Q_basis)
+                copyto!(rhs_block, basis_block)
             else
-                mul!(rhs_buffer, B_matrix, Q_basis)
+                mul!(rhs_block, B_matrix, basis_block)
             end
 
             if solver_is_direct
@@ -1095,10 +1126,10 @@ Hermitian/general dense paths.
                 else
                     @. shifted_matrix = z * B_matrix - A
                 end
-                copyto!(rhs_copy, rhs_buffer)
+                copyto!(rhs_copy_block, rhs_block)
                 try
                     factor = lu!(shifted_matrix)
-                    ldiv!(shifted_solutions, factor, rhs_copy)
+                    ldiv!(shifted_block, factor, rhs_copy_block)
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)
                     @warn "Dense complex-symmetric direct solve failed for shift $z" exception=err
@@ -1106,9 +1137,9 @@ Hermitian/general dense paths.
                     break
                 end
             else
-                copyto!(rhs_copy, rhs_buffer)
+                copyto!(rhs_copy_block, rhs_block)
                 current_shift[] = z
-                success = solve_dense_shifted!(shifted_solutions, rhs_copy,
+                success = solve_dense_shifted!(shifted_block, rhs_copy_block,
                                                shifted_mul!, solver_choice,
                                                tol_value, solver_maxiter,
                                                solver_restart)
@@ -1119,38 +1150,51 @@ Hermitian/general dense paths.
                 end
             end
 
-            @. Q_proj += weight * shifted_solutions
+            @. qproj_block += weight * shifted_block
         end
         solve_failed && break
 
         try
-            mul!(AQ, A, Q_proj)
-            if B_is_identity
-                copyto!(BQ, Q_proj)
-            else
-                mul!(BQ, B_matrix, Q_proj)
+            rank = _feast_qr_compress!(solutions_tmp, Q_proj, active_dim;
+                                       rank_tol=sqrt(eps(T)))
+            if rank == 0
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
             end
-            mul!(Ared, transpose(Q_proj), AQ)
-            mul!(Bred, transpose(Q_proj), BQ)
 
-            F = eigen(Ared, Bred)
+            q_rank = view(solutions_tmp, :, 1:rank)
+            aq_work = view(AQ, :, 1:rank)
+            bq_work = view(BQ, :, 1:rank)
+            Ared_rank = view(Ared, 1:rank, 1:rank)
+            Bred_rank = view(Bred, 1:rank, 1:rank)
+
+            mul!(aq_work, A, q_rank)
+            if B_is_identity
+                copyto!(bq_work, q_rank)
+            else
+                mul!(bq_work, B_matrix, q_rank)
+            end
+            mul!(Ared_rank, transpose(q_rank), aq_work)
+            mul!(Bred_rank, transpose(q_rank), bq_work)
+
+            F = eigen(Ared_rank, Bred_rank)
             lambda_red = F.values
             v_red = F.vectors
 
-            for idx in 1:M0
-                mul!(view(shifted_solutions, :, idx), Q_proj, view(v_red, :, idx))
+            for idx in 1:rank
+                mul!(view(shifted_solutions, :, idx), q_rank, view(v_red, :, idx))
                 lambda_vec[idx] = lambda_red[idx]
             end
 
             M = _feast_reorder_by_gcontour!(lambda_vec, shifted_solutions, perm,
                                             lambda_tmp, solutions_tmp,
-                                            Emid, r, fpm, M0)
+                                            Emid, r, fpm, rank)
             if M == 0
                 info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
             end
 
-            for idx in 1:M0
+            for idx in 1:rank
                 vec = view(shifted_solutions, :, idx)
                 nrm = norm(vec)
                 if nrm > zero(T)
@@ -1185,7 +1229,9 @@ Hermitian/general dense paths.
                 break
             end
 
-            copyto!(Q_basis, shifted_solutions)
+            active_dim = rank
+            copyto!(view(Q_basis, :, 1:active_dim),
+                    view(shifted_solutions, :, 1:active_dim))
         catch err
             info_code = Int(Feast_ERROR_LAPACK)
             @warn "Reduced eigenvalue problem failed during dense complex-symmetric FEAST" exception=err

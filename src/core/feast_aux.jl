@@ -92,6 +92,45 @@ function _feast_hermitian_part!(dest::AbstractMatrix{Complex{T}},
 end
 
 """
+    _feast_qr_compress!(basis, src, ncols; rank_tol=sqrt(eps(T)))
+
+Use pivoted QR to write an orthonormal basis for the numerical column space of
+`src[:, 1:ncols]` into `basis`. Returns the detected rank. `rank_tol` is a
+relative threshold against the leading `R` diagonal entry.
+"""
+function _feast_qr_compress!(basis::AbstractMatrix{Tv},
+                             src::AbstractMatrix{Tv},
+                             ncols::Int;
+                             rank_tol::T = sqrt(eps(T))) where {T<:Real,Tv<:Union{T,Complex{T}}}
+    @boundscheck begin
+        0 <= ncols <= size(src, 2) || throw(BoundsError(src, (1, ncols)))
+        size(basis, 1) == size(src, 1) || throw(DimensionMismatch("basis row count must match source"))
+        size(basis, 2) >= ncols || throw(BoundsError(basis, (1, ncols)))
+    end
+    ncols == 0 && return 0
+
+    src_block = view(src, :, 1:ncols)
+    F = qr(src_block, ColumnNorm())
+    rdiag = diag(F.R)
+    isempty(rdiag) && return 0
+
+    scale = abs(rdiag[1])
+    scale == zero(T) && return 0
+    threshold = max(rank_tol, eps(T) * max(size(src_block)...)) * scale
+    rank = 0
+    @inbounds for value in rdiag
+        abs(value) > threshold || break
+        rank += 1
+    end
+
+    if rank > 0
+        qmat = Matrix(F.Q)
+        copyto!(view(basis, :, 1:rank), view(qmat, :, 1:rank))
+    end
+    return rank
+end
+
+"""
     _feast_reorder_by_interval!(lambda, vectors, perm, lambda_tmp,
                                 vector_tmp, Emin, Emax, M0)
 

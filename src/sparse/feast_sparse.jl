@@ -278,7 +278,6 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
     zSq = zeros(Complex{T}, M0, M0)
     Aq_herm = similar(zAq)
     Sq_herm = similar(zSq)
-    moment = Matrix{Complex{T}}(undef, M0, M0)
     # Always allocate a separate rhs_buffer to avoid aliasing Q_basis
     # (aliased views are fragile — any future in-place write to one corrupts the other)
     rhs_buffer = Matrix{Complex{T}}(undef, N, M0)
@@ -301,13 +300,14 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
     loop_count = 0
     info_code = Int(Feast_SUCCESS)
     M_found = 0
+    active_dim = M0
 
     # Allocate buffer for accumulated filtered subspace
     Q_proj = zeros(Complex{T}, N, M0)
 
     for loop_idx in 0:maxloop
-        # Reset contour accumulators before applying the spectral projector to
-        # the current basis.
+        # Reset the projected subspace before applying the spectral projector
+        # to the current basis.
         loop_count = loop_idx
         fill!(zAq, zero(Complex{T}))
         fill!(zSq, zero(Complex{T}))
@@ -320,11 +320,15 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
             # moment matrices for the reduced eigenproblem.
             z = Zne[e]
             weight = 2 * Wne[e]
+            basis_block = view(Q_basis, :, 1:active_dim)
+            rhs_block = view(rhs_buffer, :, 1:active_dim)
+            solutions_block = view(solutions, :, 1:active_dim)
+            qproj_block = view(Q_proj, :, 1:active_dim)
 
             if B === nothing
-                rhs_buffer .= Q_basis
+                copyto!(rhs_block, basis_block)
             else
-                mul!(rhs_buffer, B, Q_basis)
+                mul!(rhs_block, B, basis_block)
             end
 
             if solver_is_direct
@@ -335,7 +339,7 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                         solver_factor = lu(shifted_matrix)
                         factor_cache[e] = solver_factor
                     end
-                    ldiv!(solutions, solver_factor, rhs_buffer)
+                    ldiv!(solutions_block, solver_factor, rhs_block)
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)
                     @warn "Sparse direct solve failed for shift $z" exception=err
@@ -344,11 +348,11 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                 end
             else
                 success = if B === nothing
-                    solve_shifted_iterative_identity!(solutions, rhs_buffer, A, z,
+                    solve_shifted_iterative_identity!(solutions_block, rhs_block, A, z,
                                                       tol_value, solver_maxiter,
                                                       solver_restart)
                 else
-                    solve_shifted_iterative!(solutions, rhs_buffer, A, B,
+                    solve_shifted_iterative!(solutions_block, rhs_block, A, B,
                                              z, tol_value, solver_maxiter,
                                              solver_restart)
                 end
@@ -359,12 +363,10 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                 end
             end
 
-            # Accumulate filtered subspace
-            @. Q_proj += weight * solutions
-
-            mul!(moment, adjoint(Q_basis), solutions)
-            @inbounds zAq .+= weight .* moment
-            @inbounds zSq .+= (weight * z) .* moment
+            # Accumulate the filtered subspace. The reduced problem is formed
+            # after QR compression to avoid rank-deficient moment pencils when
+            # M0 is larger than the target eigenspace.
+            @. qproj_block += weight * solutions_block
         end
 
         if gmres_failed
@@ -372,24 +374,48 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
         end
 
         try
-            # For half-contour integration of Hermitian problems, the full contour
-            # integral yields Hermitian reduced matrices (R(z̄)^H = R(z) for A = A^H).
-            # Extract the Hermitian part via (M + M^H)/2, NOT real/symmetric part.
-            _feast_hermitian_part!(Aq_herm, zAq)
-            _feast_hermitian_part!(Sq_herm, zSq)
+            rank = _feast_qr_compress!(solutions_tmp, Q_proj, active_dim;
+                                       rank_tol=sqrt(eps(T)))
+            if rank == 0
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
+
+            q_rank = view(solutions_tmp, :, 1:rank)
+            aq_work = view(rhs_buffer, :, 1:rank)
+            bq_work = view(solutions, :, 1:rank)
+            zAq_rank = view(zAq, 1:rank, 1:rank)
+            zSq_rank = view(zSq, 1:rank, 1:rank)
+            Aq_rank = view(Aq_herm, 1:rank, 1:rank)
+            Sq_rank = view(Sq_herm, 1:rank, 1:rank)
+
+            mul!(aq_work, A, q_rank)
+            mul!(zSq_rank, adjoint(q_rank), aq_work)
+            _feast_hermitian_part!(Sq_rank, zSq_rank)
+
+            if B === nothing
+                fill!(Aq_rank, zero(Complex{T}))
+                for i in 1:rank
+                    Aq_rank[i, i] = one(Complex{T})
+                end
+            else
+                mul!(bq_work, B, q_rank)
+                mul!(zAq_rank, adjoint(q_rank), bq_work)
+                _feast_hermitian_part!(Aq_rank, zAq_rank)
+            end
 
             # Solve Hermitian generalized eigenproblem: Sq*x = lambda*Aq*x
             # Eigenvalues are real; eigenvectors are complex.
             lambda_red = Vector{T}(undef, 0)
             v_red = Array{Complex{T}}(undef, 0, 0)
             try
-                F = eigen(Hermitian(Sq_herm), Hermitian(Aq_herm))
+                F = eigen(Hermitian(Sq_rank), Hermitian(Aq_rank))
                 lambda_red = Vector{T}(F.values)
                 v_red = Matrix{Complex{T}}(F.vectors)
             catch e
                 if isa(e, PosDefException) || isa(e, LAPACKException)
                     # Fall back to general complex eigenvalue solver
-                    F = eigen(Sq_herm, Aq_herm)
+                    F = eigen(Sq_rank, Aq_rank)
                     lambda_red = Vector{T}(real.(F.values))
                     v_red = Matrix{Complex{T}}(F.vectors)
                 else
@@ -397,15 +423,15 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                 end
             end
 
-            # Project eigenvectors using filtered subspace Q_proj (complex coefficients)
-            for idx in 1:M0
-                mul!(view(solutions, :, idx), Q_proj, view(v_red, :, idx))
+            # Project eigenvectors using the orthonormal filtered subspace.
+            for idx in 1:rank
+                mul!(view(solutions, :, idx), q_rank, view(v_red, :, idx))
                 lambda_vec[idx] = lambda_red[idx]
             end
 
             M = _feast_reorder_by_interval!(lambda_vec, solutions, perm,
                                              lambda_tmp, solutions_tmp,
-                                             Emin, Emax, M0)
+                                             Emin, Emax, rank)
             if M == 0
                 info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
@@ -447,8 +473,9 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
                 break
             end
 
-            # Use full M0 subspace for next iteration
-            copyto!(Q_basis, solutions)
+            active_dim = rank
+            copyto!(view(Q_basis, :, 1:active_dim),
+                    view(solutions, :, 1:active_dim))
         catch err
             info_code = Int(Feast_ERROR_LAPACK)
             @warn "Reduced eigenvalue problem failed during sparse Hermitian FEAST" exception=err

@@ -75,6 +75,80 @@ end
         @test bytes < 1024
     end
 
+    @testset "QR compression preserves projected subspace rank" begin
+        src = ComplexF64[
+            1.0 + 0.0im 2.0 + 0.0im 0.0 + 0.0im 1.0e-15 + 0.0im
+            0.0 + 1.0im 0.0 + 2.0im 1.0 + 0.0im 0.0 + 1.0e-15im
+            0.0 + 0.0im 0.0 + 0.0im 0.0 + 1.0im 0.0 + 0.0im
+            0.0 + 0.0im 0.0 + 0.0im 0.0 + 0.0im 0.0 + 0.0im
+        ]
+        basis = similar(src)
+
+        rank = FeastKit._feast_qr_compress!(basis, src, 4; rank_tol=sqrt(eps(Float64)))
+
+        Q = basis[:, 1:rank]
+        @test rank == 2
+        @test Q' * Q ≈ Matrix{ComplexF64}(I, rank, rank) atol=1.0e-12
+        @test norm(src - Q * (Q' * src)) <= 1.0e-12
+    end
+
+    @testset "Dense Hermitian solver compresses oversized projected subspaces" begin
+        n = 80
+        A = Matrix(Diagonal(collect(1.0:n)))
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        fpm[2] = 8
+        fpm[3] = 7
+        fpm[4] = 4
+
+        result = feast_syev!(A, 10.5, 12.5, 32, copy(fpm))
+
+        @test result.info == 0
+        @test result.M == 2
+        @test sort(result.lambda) ≈ [11.0, 12.0] atol=1.0e-8
+        @test maximum(result.res) < 1.0e-7
+    end
+
+    @testset "Sparse Hermitian solver compresses oversized projected subspaces" begin
+        n = 80
+        A = sparse(Matrix(Diagonal(collect(1.0:n))))
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        fpm[2] = 8
+        fpm[3] = 7
+        fpm[4] = 4
+
+        result = feast_scsrev!(A, 10.5, 12.5, 32, copy(fpm))
+
+        @test result.info == 0
+        @test result.M == 2
+        @test sort(result.lambda) ≈ [11.0, 12.0] atol=1.0e-8
+        @test maximum(result.res) < 1.0e-7
+    end
+
+    @testset "Dense complex-symmetric solver compresses oversized projected subspaces" begin
+        n = 80
+        values = complex.(collect(1.0:n), 0.02 .* collect(1.0:n))
+        A = Matrix(Diagonal(values))
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        fpm[8] = 8
+        fpm[3] = 10
+        fpm[4] = 4
+        center = 11.5 + 0.23im
+        radius = 0.65
+
+        result = feast_geev_complex_sym!(A, center, radius, 64, copy(fpm))
+
+        @test result.info == 0
+        @test result.M == 2
+        @test sort(result.lambda, by=real) ≈ [11.0 + 0.22im, 12.0 + 0.24im] atol=1.0e-8
+        @test maximum(result.res) < 1.0e-10
+    end
+
     @testset "Complex-to-real result conversion avoids column temporaries" begin
         n = 1_000
         m = 100

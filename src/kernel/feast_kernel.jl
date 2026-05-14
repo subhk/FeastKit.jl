@@ -152,23 +152,26 @@
 
             # Extract real part after full contour summation
             # (imaginary parts cancel by conjugate symmetry of the half-contour)
-            Aq[1:M_current, 1:M_current] .= real.(zAq[1:M_current, 1:M_current])
-            Sq[1:M_current, 1:M_current] .= real.(zSq[1:M_current, 1:M_current])
+            Aq_block = view(Aq, 1:M_current, 1:M_current)
+            Sq_block = view(Sq, 1:M_current, 1:M_current)
+            _feast_copy_real!(Aq_block, view(zAq, 1:M_current, 1:M_current))
+            _feast_copy_real!(Sq_block, view(zSq, 1:M_current, 1:M_current))
 
             try
                 # Solve generalized eigenvalue problem: Sq*v = lambda*Aq*v
-                F = eigen(Sq[1:M_current, 1:M_current], Aq[1:M_current, 1:M_current])
-                lambda_red = real.(F.values)
-                v_red = real.(F.vectors)
+                F = eigen(Sq_block, Aq_block)
+                lambda_scratch = view(res, 1:M_current)
+                _feast_copy_real!(view(lambda, 1:M_current),
+                                  view(F.values, 1:M_current))
+                _feast_copy_real!(Aq_block,
+                                  view(F.vectors, 1:M_current, 1:M_current))
 
                 # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q0
                 Q_proj_real = view(state.q_tmp, :, 1:M_current)
                 @inbounds for j in 1:M_current, i in 1:N
                     Q_proj_real[i, j] = real(Q_proj[i, j])
                 end
-                mul!(view(q, :, 1:M_current), Q_proj_real,
-                     view(v_red, :, 1:M_current))
-                lambda[1:M_current] = lambda_red[1:M_current]
+                mul!(view(q, :, 1:M_current), Q_proj_real, Aq_block)
 
                 # Reorder: put eigenvalues inside the interval first
                 M = 0
@@ -187,11 +190,12 @@
                     end
                 end
 
+                copyto!(lambda_scratch, view(lambda, 1:M_current))
                 copyto!(view(state.q_tmp, :, 1:M_current),
                         view(q, :, 1:M_current))
                 for new_idx in 1:M_current
                     old_idx = perm[new_idx]
-                    lambda[new_idx] = lambda_red[old_idx]
+                    lambda[new_idx] = lambda_scratch[old_idx]
                     copyto!(view(q, :, new_idx),
                             view(state.q_tmp, :, old_idx))
                 end
@@ -253,19 +257,11 @@
             # Use full subspace (M0 columns) for next iteration
             copyto!(view(work, :, 1:M0), view(q, :, 1:M0))
 
-            # Get contour for next refinement loop
-            contour = feast_get_custom_contour(T, fpm)
-            if contour === nothing
-                contour = feast_contour(Emin, Emax, fpm)
-            end
-            state.Zne = copy(contour.Zne)
-            state.Wne = copy(contour.Wne)
-            state.ne = length(contour.Zne)
             state.e = 1
             fpm[50] = 1  # Reset integration point counter
 
             copyto!(state.Q0, view(work, :, 1:M0))
-            Ze[] = contour.Zne[1]
+            Ze[] = state.Zne[1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return
         end

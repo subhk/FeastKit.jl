@@ -557,6 +557,8 @@ problems.
     contour === nothing && (contour = feast_gcontour(Emid, r, fpm))
     Zne = contour.Zne
     Wne = contour.Wne
+    factor_cache = Vector{Union{Nothing, SparseArrays.UMFPACK.UmfpackLU{Complex{T}, Int}}}(undef, length(Zne))
+    fill!(factor_cache, nothing)
 
     maxloop = fpm[4]
     eps_tol = feast_tolerance(fpm, T)
@@ -564,6 +566,7 @@ problems.
     loop_count = 0
     info_code = Int(Feast_SUCCESS)
     M_found = 0
+    active_dim = M0
 
     for loop_idx in 0:maxloop
         loop_count = loop_idx
@@ -573,13 +576,21 @@ problems.
         for e in eachindex(Zne)
             z = Zne[e]
             weight = Wne[e]
-            mul!(rhs_buffer, B, Q_basis)
+            basis_block = view(Q_basis, :, 1:active_dim)
+            rhs_block = view(rhs_buffer, :, 1:active_dim)
+            shifted_block = view(shifted_solutions, :, 1:active_dim)
+            qproj_block = view(Q_proj, :, 1:active_dim)
+            mul!(rhs_block, B, basis_block)
 
             if solver_is_direct
-                shifted_matrix = z * B - A
                 try
-                    solver_factor = lu(shifted_matrix)
-                    ldiv!(shifted_solutions, solver_factor, rhs_buffer)
+                    solver_factor = factor_cache[e]
+                    if solver_factor === nothing
+                        shifted_matrix = z * B - A
+                        solver_factor = lu(shifted_matrix)
+                        factor_cache[e] = solver_factor
+                    end
+                    ldiv!(shifted_block, solver_factor, rhs_block)
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)
                     @warn "Sparse complex-symmetric direct solve failed for shift $z" exception=err
@@ -587,8 +598,9 @@ problems.
                     break
                 end
             else
-                copyto!(rhs_iterative, rhs_buffer)
-                success = solve_shifted_iterative!(shifted_solutions, rhs_iterative,
+                rhs_iterative_block = view(rhs_iterative, :, 1:active_dim)
+                copyto!(rhs_iterative_block, rhs_block)
+                success = solve_shifted_iterative!(shifted_block, rhs_iterative_block,
                                                    A, B, z, tol_value,
                                                    solver_maxiter, solver_restart)
                 if !success
@@ -598,7 +610,7 @@ problems.
                 end
             end
 
-            @. Q_proj += weight * shifted_solutions
+            @. qproj_block += weight * shifted_block
         end
         solve_failed && break
 
@@ -606,29 +618,42 @@ problems.
             # Complex-symmetric problems use the bilinear transpose form.
             # Using adjoint here would turn this path back into the general
             # non-Hermitian projection and lose the structure we validated.
-            mul!(AQ, A, Q_proj)
-            mul!(BQ, B, Q_proj)
-            mul!(Ared, transpose(Q_proj), AQ)
-            mul!(Bred, transpose(Q_proj), BQ)
+            rank = _feast_qr_compress!(solutions_tmp, Q_proj, active_dim;
+                                       rank_tol=sqrt(eps(T)))
+            if rank == 0
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
 
-            F = eigen(Ared, Bred)
+            q_rank = view(solutions_tmp, :, 1:rank)
+            aq_work = view(AQ, :, 1:rank)
+            bq_work = view(BQ, :, 1:rank)
+            Ared_rank = view(Ared, 1:rank, 1:rank)
+            Bred_rank = view(Bred, 1:rank, 1:rank)
+
+            mul!(aq_work, A, q_rank)
+            mul!(bq_work, B, q_rank)
+            mul!(Ared_rank, transpose(q_rank), aq_work)
+            mul!(Bred_rank, transpose(q_rank), bq_work)
+
+            F = eigen(Ared_rank, Bred_rank)
             lambda_red = F.values
             v_red = F.vectors
 
-            for idx in 1:M0
-                mul!(view(shifted_solutions, :, idx), Q_proj, view(v_red, :, idx))
+            for idx in 1:rank
+                mul!(view(shifted_solutions, :, idx), q_rank, view(v_red, :, idx))
                 lambda_vec[idx] = lambda_red[idx]
             end
 
             M = _feast_reorder_by_gcontour!(lambda_vec, shifted_solutions, perm,
                                             lambda_tmp, solutions_tmp,
-                                            Emid, r, fpm, M0)
+                                            Emid, r, fpm, rank)
             if M == 0
                 info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
             end
 
-            for idx in 1:M0
+            for idx in 1:rank
                 vec = view(shifted_solutions, :, idx)
                 nrm = norm(vec)
                 if nrm > zero(T)
@@ -662,7 +687,9 @@ problems.
                 break
             end
 
-            copyto!(Q_basis, shifted_solutions)
+            active_dim = rank
+            copyto!(view(Q_basis, :, 1:active_dim),
+                    view(shifted_solutions, :, 1:active_dim))
         catch err
             info_code = Int(Feast_ERROR_LAPACK)
             @warn "Reduced eigenvalue problem failed during sparse complex-symmetric FEAST" exception=err

@@ -1088,6 +1088,8 @@ Hermitian/general dense paths.
     contour === nothing && (contour = feast_gcontour(Emid, r, fpm))
     Zne = contour.Zne
     Wne = contour.Wne
+    factor_cache = Vector{Union{Nothing, LinearAlgebra.LU{Complex{T}, Matrix{Complex{T}}, Vector{Int}}}}(undef, length(Zne))
+    fill!(factor_cache, nothing)
 
     maxloop = fpm[4]
     eps_tol = feast_tolerance(fpm, T)
@@ -1118,17 +1120,18 @@ Hermitian/general dense paths.
             end
 
             if solver_is_direct
-                if B_is_identity
-                    @. shifted_matrix = -A
-                    for i in 1:N
-                        shifted_matrix[i, i] += z
-                    end
-                else
-                    @. shifted_matrix = z * B_matrix - A
-                end
-                copyto!(rhs_copy_block, rhs_block)
                 try
-                    factor = lu!(shifted_matrix)
+                    factor = factor_cache[e]
+                    if factor === nothing
+                        if B_is_identity
+                            _feast_dense_shifted_identity_minus!(shifted_matrix, z, A)
+                        else
+                            @. shifted_matrix = z * B_matrix - A
+                        end
+                        factor = lu(shifted_matrix)
+                        factor_cache[e] = factor
+                    end
+                    copyto!(rhs_copy_block, rhs_block)
                     ldiv!(shifted_block, factor, rhs_copy_block)
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)

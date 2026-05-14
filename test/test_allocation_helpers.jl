@@ -128,6 +128,24 @@ end
         @test maximum(result.res) < 1.0e-7
     end
 
+    @testset "Banded Hermitian solver compresses oversized projected subspaces" begin
+        n = 80
+        A = reshape(ComplexF64.(collect(1.0:n)), 1, n)
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        fpm[2] = 8
+        fpm[3] = 7
+        fpm[4] = 4
+
+        result = feast_hbev!(copy(A), 0, 10.5, 12.5, 32, copy(fpm))
+
+        @test result.info == 0
+        @test result.M == 2
+        @test sort(result.lambda) ≈ [11.0, 12.0] atol=1.0e-8
+        @test maximum(result.res) < 1.0e-7
+    end
+
     @testset "Dense complex-symmetric solver compresses oversized projected subspaces" begin
         n = 80
         values = complex.(collect(1.0:n), 0.02 .* collect(1.0:n))
@@ -142,6 +160,48 @@ end
         radius = 0.65
 
         result = feast_geev_complex_sym!(A, center, radius, 64, copy(fpm))
+
+        @test result.info == 0
+        @test result.M == 2
+        @test sort(result.lambda, by=real) ≈ [11.0 + 0.22im, 12.0 + 0.24im] atol=1.0e-8
+        @test maximum(result.res) < 1.0e-10
+    end
+
+    @testset "Sparse complex-symmetric solver compresses oversized projected subspaces" begin
+        n = 80
+        values = complex.(collect(1.0:n), 0.02 .* collect(1.0:n))
+        A = sparse(Matrix(Diagonal(values)))
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        fpm[8] = 8
+        fpm[3] = 10
+        fpm[4] = 4
+        center = 11.5 + 0.23im
+        radius = 0.65
+
+        result = feast_scsrev_complex!(A, center, radius, 32, copy(fpm))
+
+        @test result.info == 0
+        @test result.M == 2
+        @test sort(result.lambda, by=real) ≈ [11.0 + 0.22im, 12.0 + 0.24im] atol=1.0e-8
+        @test maximum(result.res) < 1.0e-10
+    end
+
+    @testset "Banded complex-symmetric solver compresses oversized projected subspaces" begin
+        n = 80
+        values = complex.(collect(1.0:n), 0.02 .* collect(1.0:n))
+        A = reshape(values, 1, n)
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        fpm[8] = 8
+        fpm[3] = 10
+        fpm[4] = 4
+        center = 11.5 + 0.23im
+        radius = 0.65
+
+        result = feast_sbev_complex!(copy(A), 0, center, radius, 48, copy(fpm))
 
         @test result.info == 0
         @test result.M == 2
@@ -366,6 +426,60 @@ end
                                                            M0, copy(fpm_three))
         @test sparse_three_loop_bytes <= round(Int, 1.45 * sparse_one_loop_bytes)
 
+        banded_n = 200
+        banded_M0 = 30
+        banded_A = zeros(ComplexF64, 3, banded_n)
+        banded_A[1, :] .= collect(range(1.0, 4.0; length=banded_n))
+        for j in 1:(banded_n - 1)
+            banded_A[2, j] = 0.005 + 0.001im
+        end
+        for j in 1:(banded_n - 2)
+            banded_A[3, j] = 0.002 + 0.0005im
+        end
+
+        feast_hbev!(banded_A, 2, 1.2, 3.8, banded_M0, copy(fpm_one))
+        feast_hbev!(banded_A, 2, 1.2, 3.8, banded_M0, copy(fpm_three))
+        banded_one_loop_bytes = @allocated feast_hbev!(banded_A, 2, 1.2, 3.8,
+                                                        banded_M0,
+                                                        copy(fpm_one))
+        banded_three_loop_bytes = @allocated feast_hbev!(banded_A, 2, 1.2, 3.8,
+                                                          banded_M0,
+                                                          copy(fpm_three))
+        @test banded_three_loop_bytes <= round(Int, 1.45 * banded_one_loop_bytes)
+
+        real_banded_n = 100
+        real_banded_M0 = 24
+        real_banded_k = 2
+        real_banded_A = zeros(Float64, real_banded_k + 1, real_banded_n)
+        real_banded_A[real_banded_k + 1, :] .=
+            collect(range(1.0, 4.0; length=real_banded_n))
+        for j in 1:(real_banded_n - 1)
+            real_banded_A[real_banded_k, j + 1] = 0.005
+        end
+        for j in 1:(real_banded_n - 2)
+            real_banded_A[real_banded_k - 1, j + 2] = 0.002
+        end
+        real_banded_B = zeros(Float64, 1, real_banded_n)
+        real_banded_B[1, :] .= 1.0
+        real_banded_fpm_five = copy(fpm_one)
+        real_banded_fpm_five[4] = 5
+
+        feast_sbgv!(real_banded_A, real_banded_B, real_banded_k, 0, 1.2,
+                    3.8, real_banded_M0, copy(fpm_one))
+        feast_sbgv!(real_banded_A, real_banded_B, real_banded_k, 0, 1.2,
+                    3.8, real_banded_M0, copy(real_banded_fpm_five))
+        real_banded_one_loop_bytes =
+            @allocated feast_sbgv!(real_banded_A, real_banded_B,
+                                   real_banded_k, 0, 1.2, 3.8,
+                                   real_banded_M0, copy(fpm_one))
+        real_banded_five_loop_bytes =
+            @allocated feast_sbgv!(real_banded_A, real_banded_B,
+                                   real_banded_k, 0, 1.2, 3.8,
+                                   real_banded_M0,
+                                   copy(real_banded_fpm_five))
+        @test real_banded_five_loop_bytes <=
+              round(Int, 1.44 * real_banded_one_loop_bytes)
+
         general_values = complex.(collect(range(1.0, 4.0; length=n)),
                                   0.01 .* collect(1:n))
         dense_general_A = Matrix(Diagonal(general_values))
@@ -380,6 +494,8 @@ end
         general_fpm_one[4] = 1
         general_fpm_three = copy(general_fpm_one)
         general_fpm_three[4] = 3
+        general_fpm_five = copy(general_fpm_one)
+        general_fpm_five[4] = 5
 
         feast_geev!(dense_general_A, general_center, general_radius, M0,
                     copy(general_fpm_one))
@@ -414,6 +530,132 @@ end
                                                                    copy(general_fpm_three))
         @test sparse_general_three_loop_bytes <=
               round(Int, 1.45 * sparse_general_one_loop_bytes)
+
+        banded_general_n = 100
+        banded_general_M0 = 24
+        banded_general_k = 2
+        banded_general_A = zeros(ComplexF64, 2 * banded_general_k + 1,
+                                 banded_general_n)
+        banded_general_A[banded_general_k + 1, :] .=
+            complex.(collect(range(1.0, 4.0; length=banded_general_n)),
+                     0.01 .* collect(1:banded_general_n))
+        for j in 1:(banded_general_n - 1)
+            banded_general_A[banded_general_k, j + 1] = 0.004 - 0.001im
+            banded_general_A[banded_general_k + 2, j] = 0.006 + 0.002im
+        end
+        for j in 1:(banded_general_n - 2)
+            banded_general_A[banded_general_k - 1, j + 2] = 0.001 + 0.0005im
+            banded_general_A[banded_general_k + 3, j] = 0.002 - 0.0005im
+        end
+
+        feast_gbev!(banded_general_A, banded_general_k, general_center,
+                    general_radius, banded_general_M0, copy(general_fpm_one))
+        feast_gbev!(banded_general_A, banded_general_k, general_center,
+                    general_radius, banded_general_M0, copy(general_fpm_five))
+        banded_general_one_loop_bytes =
+            @allocated feast_gbev!(banded_general_A, banded_general_k,
+                                   general_center, general_radius,
+                                   banded_general_M0, copy(general_fpm_one))
+        banded_general_five_loop_bytes =
+            @allocated feast_gbev!(banded_general_A, banded_general_k,
+                                   general_center, general_radius,
+                                   banded_general_M0, copy(general_fpm_five))
+        @test banded_general_five_loop_bytes <=
+              round(Int, 1.65 * banded_general_one_loop_bytes)
+
+        complex_sym_n = 100
+        complex_sym_M0 = 24
+        complex_sym_values = complex.(collect(range(1.0, 4.0; length=complex_sym_n)),
+                                      0.02 .* collect(1:complex_sym_n))
+        dense_complex_sym_A = Matrix(Diagonal(complex_sym_values))
+        sparse_complex_sym_A = sparse(dense_complex_sym_A)
+        complex_sym_center = 2.5 + 0.8im
+        complex_sym_radius = 2.0
+        complex_sym_fpm_one = zeros(Int, 64)
+        feastinit!(complex_sym_fpm_one)
+        complex_sym_fpm_one[1] = 0
+        complex_sym_fpm_one[8] = 8
+        complex_sym_fpm_one[3] = 16
+        complex_sym_fpm_one[4] = 1
+        complex_sym_fpm_three = copy(complex_sym_fpm_one)
+        complex_sym_fpm_three[4] = 3
+
+        feast_geev_complex_sym!(dense_complex_sym_A, complex_sym_center,
+                                complex_sym_radius, complex_sym_M0,
+                                copy(complex_sym_fpm_one))
+        feast_geev_complex_sym!(dense_complex_sym_A, complex_sym_center,
+                                complex_sym_radius, complex_sym_M0,
+                                copy(complex_sym_fpm_three))
+        dense_complex_sym_one_loop_bytes =
+            @allocated feast_geev_complex_sym!(dense_complex_sym_A,
+                                               complex_sym_center,
+                                               complex_sym_radius,
+                                               complex_sym_M0,
+                                               copy(complex_sym_fpm_one))
+        dense_complex_sym_three_loop_bytes =
+            @allocated feast_geev_complex_sym!(dense_complex_sym_A,
+                                               complex_sym_center,
+                                               complex_sym_radius,
+                                               complex_sym_M0,
+                                               copy(complex_sym_fpm_three))
+        @test dense_complex_sym_three_loop_bytes <=
+              round(Int, 1.35 * dense_complex_sym_one_loop_bytes)
+
+        feast_scsrev_complex!(sparse_complex_sym_A, complex_sym_center,
+                              complex_sym_radius, complex_sym_M0,
+                              copy(complex_sym_fpm_one))
+        feast_scsrev_complex!(sparse_complex_sym_A, complex_sym_center,
+                              complex_sym_radius, complex_sym_M0,
+                              copy(complex_sym_fpm_three))
+        sparse_complex_sym_one_loop_bytes =
+            @allocated feast_scsrev_complex!(sparse_complex_sym_A,
+                                             complex_sym_center,
+                                             complex_sym_radius,
+                                             complex_sym_M0,
+                                             copy(complex_sym_fpm_one))
+        sparse_complex_sym_three_loop_bytes =
+            @allocated feast_scsrev_complex!(sparse_complex_sym_A,
+                                             complex_sym_center,
+                                             complex_sym_radius,
+                                             complex_sym_M0,
+                                             copy(complex_sym_fpm_three))
+        @test sparse_complex_sym_three_loop_bytes <=
+              round(Int, 1.45 * sparse_complex_sym_one_loop_bytes)
+
+        banded_complex_sym_n = 200
+        banded_complex_sym_M0 = 30
+        banded_complex_sym_values =
+            complex.(collect(range(1.0, 4.0; length=banded_complex_sym_n)),
+                     0.02 .* collect(1:banded_complex_sym_n))
+        banded_complex_sym_A = zeros(ComplexF64, 3, banded_complex_sym_n)
+        banded_complex_sym_A[1, :] .= banded_complex_sym_values
+        for j in 1:(banded_complex_sym_n - 1)
+            banded_complex_sym_A[2, j] = 0.005 + 0.001im
+        end
+        for j in 1:(banded_complex_sym_n - 2)
+            banded_complex_sym_A[3, j] = 0.002 + 0.0005im
+        end
+
+        feast_sbev_complex!(banded_complex_sym_A, 2, complex_sym_center,
+                            complex_sym_radius, banded_complex_sym_M0,
+                            copy(complex_sym_fpm_one))
+        feast_sbev_complex!(banded_complex_sym_A, 2, complex_sym_center,
+                            complex_sym_radius, banded_complex_sym_M0,
+                            copy(complex_sym_fpm_three))
+        banded_complex_sym_one_loop_bytes =
+            @allocated feast_sbev_complex!(banded_complex_sym_A, 2,
+                                           complex_sym_center,
+                                           complex_sym_radius,
+                                           banded_complex_sym_M0,
+                                           copy(complex_sym_fpm_one))
+        banded_complex_sym_three_loop_bytes =
+            @allocated feast_sbev_complex!(banded_complex_sym_A, 2,
+                                           complex_sym_center,
+                                           complex_sym_radius,
+                                           banded_complex_sym_M0,
+                                           copy(complex_sym_fpm_three))
+        @test banded_complex_sym_three_loop_bytes <=
+              round(Int, 1.45 * banded_complex_sym_one_loop_bytes)
     end
 
     @testset "Threaded moment helpers avoid avoidable temporaries" begin

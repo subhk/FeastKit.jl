@@ -49,9 +49,18 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
     kl = max(kla, klb)
     ku = kl
     ldab = 2 * kl + ku + 1
-    banded_factors = Matrix{Complex{T}}(undef, ldab, N)
-    banded_ipiv = Vector{LinearAlgebra.BlasInt}(undef, 0)
+    banded_factor_cache = Matrix{Complex{T}}[]
+    banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, 0)
+    banded_factorized = falses(0)
+    if solver_is_direct
+        contour = feast_get_custom_contour(T, fpm)
+        contour === nothing && (contour = feast_contour(Emin, Emax, fpm))
+        banded_factor_cache = [Matrix{Complex{T}}(undef, ldab, N) for _ in eachindex(contour.Zne)]
+        banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, length(contour.Zne))
+        banded_factorized = falses(length(contour.Zne))
+    end
     factorized = false
+    current_factor_idx = 0
     rhs_buffer = Matrix{Complex{T}}(undef, N, M0)
     tmpAx = zeros(Complex{T}, N)
     tmpBx = zeros(Complex{T}, N)
@@ -78,11 +87,22 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
             factorized = false
             z = Ze[]
             if solver_is_direct
-                fill_shifted_banded!(banded_factors, A, B, kla, klb, kl, z)
+                factor_idx = fpm[50]
+                if !(1 <= factor_idx <= length(banded_factor_cache))
+                    info[] = Int(Feast_ERROR_INTERNAL)
+                    break
+                end
+                shifted_factor = banded_factor_cache[factor_idx]
                 try
-                    # gbtrf! returns (AB, ipiv), not (AB, ipiv, info)
-                    _, banded_ipiv_tmp = LinearAlgebra.LAPACK.gbtrf!(kl, ku, N, banded_factors)
-                    banded_ipiv = banded_ipiv_tmp
+                    if !banded_factorized[factor_idx]
+                        fill_shifted_banded!(shifted_factor, A, B, kla, klb, kl, z)
+                        # gbtrf! returns (AB, ipiv), not (AB, ipiv, info)
+                        _, banded_ipiv = LinearAlgebra.LAPACK.gbtrf!(kl, ku, N,
+                                                                     shifted_factor)
+                        banded_ipiv_cache[factor_idx] = banded_ipiv
+                        banded_factorized[factor_idx] = true
+                    end
+                    current_factor_idx = factor_idx
                     factorized = true
                 catch e
                     if isa(e, LinearAlgebra.SingularException) || isa(e, LinearAlgebra.LAPACKException)
@@ -110,7 +130,10 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
             if solver_is_direct
                 try
                     # gbtrs! requires m parameter and returns the solution matrix (not info code)
-                    LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, N, banded_factors, banded_ipiv, view(workspace.workc, :, 1:M0))
+                    LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, N,
+                                                banded_factor_cache[current_factor_idx],
+                                                banded_ipiv_cache[current_factor_idx],
+                                                view(workspace.workc, :, 1:M0))
                 catch e
                     if isa(e, LinearAlgebra.SingularException) || isa(e, LinearAlgebra.LAPACKException)
                         info[] = Int(Feast_ERROR_LAPACK)
@@ -552,7 +575,6 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
     zSq = zeros(Complex{T}, M0, M0)
     Aq_herm = similar(zAq)
     Sq_herm = similar(zSq)
-    moment = Matrix{Complex{T}}(undef, M0, M0)
     lambda_vec = zeros(T, M0)
     lambda_tmp = similar(lambda_vec)
     perm = Vector{Int}(undef, M0)
@@ -564,8 +586,6 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
     kl = max(ka, B_is_identity ? 0 : kb)
     ku = kl
     ldab = 2 * kl + ku + 1
-    shifted_banded = Matrix{Complex{T}}(undef, ldab, N)
-    banded_ipiv = Vector{LinearAlgebra.BlasInt}(undef, 0)
     current_shift = Ref(zero(Complex{T}))
     tmpAx = zeros(Complex{T}, N)
     tmpBx = zeros(Complex{T}, N)
@@ -585,6 +605,14 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
     contour === nothing && (contour = feast_contour(Emin, Emax, fpm))
     Zne = contour.Zne
     Wne = contour.Wne
+    banded_factor_cache = Matrix{Complex{T}}[]
+    banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, 0)
+    banded_factorized = falses(0)
+    if solver_is_direct
+        banded_factor_cache = [Matrix{Complex{T}}(undef, ldab, N) for _ in eachindex(Zne)]
+        banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, length(Zne))
+        banded_factorized = falses(length(Zne))
+    end
 
     maxloop = fpm[4]
     eps_tol = feast_tolerance(fpm, T)
@@ -592,6 +620,7 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
     info_code = Int(Feast_SUCCESS)
     loop_count = 0
     M_found = 0
+    active_dim = M0
     Q_proj = zeros(Complex{T}, N, M0)
 
     @views for loop_idx in 0:maxloop
@@ -603,24 +632,35 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
         solve_failed = false
         for (idx, z) in enumerate(Zne)
             weight = 2 * Wne[idx]
+            basis_block = view(Q_basis, :, 1:active_dim)
+            rhs_block = view(rhs_buffer, :, 1:active_dim)
+            solutions_block = view(solutions, :, 1:active_dim)
+            qproj_block = view(Q_proj, :, 1:active_dim)
 
             if B_is_identity
-                copyto!(rhs_buffer, Q_basis)
+                copyto!(rhs_block, basis_block)
             else
-                for col in 1:M0
-                    banded_hermitian_matvec!(view(rhs_buffer, :, col), B, kb,
-                                             view(Q_basis, :, col))
+                for col in 1:active_dim
+                    banded_hermitian_matvec!(view(rhs_block, :, col), B, kb,
+                                             view(basis_block, :, col))
                 end
             end
 
-            copyto!(solutions, rhs_buffer)
+            copyto!(solutions_block, rhs_block)
             if solver_is_direct
-                fill_shifted_hermitian_banded!(shifted_banded, A, B, ka, kb, kl, z)
                 try
-                    _, banded_ipiv_tmp = LinearAlgebra.LAPACK.gbtrf!(kl, ku, N, shifted_banded)
-                    banded_ipiv = banded_ipiv_tmp
-                    LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, N, shifted_banded,
-                                                banded_ipiv, solutions)
+                    shifted_factor = banded_factor_cache[idx]
+                    if !banded_factorized[idx]
+                        fill_shifted_hermitian_banded!(shifted_factor, A, B, ka,
+                                                       kb, kl, z)
+                        _, banded_ipiv = LinearAlgebra.LAPACK.gbtrf!(kl, ku, N,
+                                                                     shifted_factor)
+                        banded_ipiv_cache[idx] = banded_ipiv
+                        banded_factorized[idx] = true
+                    end
+                    LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, N, shifted_factor,
+                                                banded_ipiv_cache[idx],
+                                                solutions_block)
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)
                     @warn "Hermitian banded direct solve failed for shift $z" exception=err
@@ -629,7 +669,7 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
                 end
             else
                 current_shift[] = z
-                success = _solve_banded_shifted!(solutions, rhs_buffer,
+                success = _solve_banded_shifted!(solutions_block, rhs_block,
                                                  shifted_mul!, solver_choice,
                                                  tol_value, solver_maxiter,
                                                  solver_restart)
@@ -640,27 +680,57 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
                 end
             end
 
-            @. Q_proj += weight * solutions
-            mul!(moment, adjoint(Q_basis), solutions)
-            @. zAq += weight * moment
-            @. zSq += weight * z * moment
+            @. qproj_block += weight * solutions_block
         end
 
         solve_failed && break
 
         try
-            _feast_hermitian_part!(Aq_herm, zAq)
-            _feast_hermitian_part!(Sq_herm, zSq)
+            rank = _feast_qr_compress!(solutions_tmp, Q_proj, active_dim;
+                                       rank_tol=sqrt(eps(T)))
+            if rank == 0
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
+
+            q_rank = view(solutions_tmp, :, 1:rank)
+            aq_work = view(rhs_buffer, :, 1:rank)
+            bq_work = view(solutions, :, 1:rank)
+            zAq_rank = view(zAq, 1:rank, 1:rank)
+            zSq_rank = view(zSq, 1:rank, 1:rank)
+            Aq_rank = view(Aq_herm, 1:rank, 1:rank)
+            Sq_rank = view(Sq_herm, 1:rank, 1:rank)
+
+            for col in 1:rank
+                banded_hermitian_matvec!(view(aq_work, :, col), A, ka,
+                                         view(q_rank, :, col))
+            end
+            mul!(zSq_rank, adjoint(q_rank), aq_work)
+            _feast_hermitian_part!(Sq_rank, zSq_rank)
+
+            if B_is_identity
+                fill!(Aq_rank, zero(Complex{T}))
+                for i in 1:rank
+                    Aq_rank[i, i] = one(Complex{T})
+                end
+            else
+                for col in 1:rank
+                    banded_hermitian_matvec!(view(bq_work, :, col), B, kb,
+                                             view(q_rank, :, col))
+                end
+                mul!(zAq_rank, adjoint(q_rank), bq_work)
+                _feast_hermitian_part!(Aq_rank, zAq_rank)
+            end
 
             lambda_red = Vector{T}(undef, 0)
             v_red = Array{Complex{T}}(undef, 0, 0)
             try
-                F = eigen(Hermitian(Sq_herm), Hermitian(Aq_herm))
+                F = eigen(Hermitian(Sq_rank), Hermitian(Aq_rank))
                 lambda_red = Vector{T}(F.values)
                 v_red = Matrix{Complex{T}}(F.vectors)
             catch e
                 if isa(e, PosDefException) || isa(e, LAPACKException)
-                    F = eigen(Sq_herm, Aq_herm)
+                    F = eigen(Sq_rank, Aq_rank)
                     lambda_red = Vector{T}(real.(F.values))
                     v_red = Matrix{Complex{T}}(F.vectors)
                 else
@@ -668,14 +738,14 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
                 end
             end
 
-            for idx in 1:M0
-                mul!(view(solutions, :, idx), Q_proj, view(v_red, :, idx))
+            for idx in 1:rank
+                mul!(view(solutions, :, idx), q_rank, view(v_red, :, idx))
                 lambda_vec[idx] = lambda_red[idx]
             end
 
             M = _feast_reorder_by_interval!(lambda_vec, solutions, perm,
                                              lambda_tmp, solutions_tmp,
-                                             Emin, Emax, M0)
+                                             Emin, Emax, rank)
             if M == 0
                 info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
@@ -713,7 +783,8 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
                 break
             end
 
-            Q_basis[:, 1:M0] .= solutions[:, 1:M0]
+            active_dim = rank
+            Q_basis[:, 1:active_dim] .= solutions[:, 1:active_dim]
         catch err
             info_code = Int(Feast_ERROR_LAPACK)
             @warn "Reduced Hermitian banded eigenproblem failed" exception=err
@@ -787,8 +858,6 @@ required for complex-symmetric pencils.
     kl = max(ka, B_is_identity ? 0 : kb)
     ku = kl
     ldab = 2 * kl + ku + 1
-    shifted_banded = Matrix{Complex{T}}(undef, ldab, N)
-    banded_ipiv = Vector{LinearAlgebra.BlasInt}(undef, 0)
     current_shift = Ref(zero(Complex{T}))
     tmpAx = zeros(Complex{T}, N)
     tmpBx = zeros(Complex{T}, N)
@@ -808,6 +877,14 @@ required for complex-symmetric pencils.
     contour === nothing && (contour = feast_gcontour(Emid, r, fpm))
     Zne = contour.Zne
     Wne = contour.Wne
+    banded_factor_cache = Matrix{Complex{T}}[]
+    banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, 0)
+    banded_factorized = falses(0)
+    if solver_is_direct
+        banded_factor_cache = [Matrix{Complex{T}}(undef, ldab, N) for _ in eachindex(Zne)]
+        banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, length(Zne))
+        banded_factorized = falses(length(Zne))
+    end
 
     maxloop = fpm[4]
     eps_tol = feast_tolerance(fpm, T)
@@ -815,6 +892,7 @@ required for complex-symmetric pencils.
     loop_count = 0
     info_code = Int(Feast_SUCCESS)
     M_found = 0
+    active_dim = M0
 
     for loop_idx in 0:maxloop
         loop_count = loop_idx
@@ -824,24 +902,34 @@ required for complex-symmetric pencils.
         for e in eachindex(Zne)
             z = Zne[e]
             weight = Wne[e]
+            basis_block = view(Q_basis, :, 1:active_dim)
+            rhs_block = view(rhs_buffer, :, 1:active_dim)
+            shifted_block = view(shifted_solutions, :, 1:active_dim)
+            qproj_block = view(Q_proj, :, 1:active_dim)
 
             if B_is_identity
-                copyto!(rhs_buffer, Q_basis)
+                copyto!(rhs_block, basis_block)
             else
-                for col in 1:M0
-                    banded_complex_symmetric_matvec!(view(rhs_buffer, :, col), B, kb,
-                                                     view(Q_basis, :, col))
+                for col in 1:active_dim
+                    banded_complex_symmetric_matvec!(view(rhs_block, :, col), B, kb,
+                                                     view(basis_block, :, col))
                 end
             end
 
-            copyto!(shifted_solutions, rhs_buffer)
+            copyto!(shifted_block, rhs_block)
             if solver_is_direct
-                fill_shifted_complex_symmetric_banded!(shifted_banded, A, B, ka, kb, kl, z)
                 try
-                    _, banded_ipiv_tmp = LinearAlgebra.LAPACK.gbtrf!(kl, ku, N, shifted_banded)
-                    banded_ipiv = banded_ipiv_tmp
-                    LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, N, shifted_banded,
-                                                banded_ipiv, shifted_solutions)
+                    shifted_factor = banded_factor_cache[e]
+                    if !banded_factorized[e]
+                        fill_shifted_complex_symmetric_banded!(shifted_factor, A, B,
+                                                               ka, kb, kl, z)
+                        _, banded_ipiv = LinearAlgebra.LAPACK.gbtrf!(kl, ku, N,
+                                                                     shifted_factor)
+                        banded_ipiv_cache[e] = banded_ipiv
+                        banded_factorized[e] = true
+                    end
+                    LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, N, shifted_factor,
+                                                banded_ipiv_cache[e], shifted_block)
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)
                     @warn "Complex-symmetric banded direct solve failed for shift $z" exception=err
@@ -850,7 +938,7 @@ required for complex-symmetric pencils.
                 end
             else
                 current_shift[] = z
-                success = _solve_banded_shifted!(shifted_solutions, rhs_buffer,
+                success = _solve_banded_shifted!(shifted_block, rhs_block,
                                                  shifted_mul!, solver_choice,
                                                  tol_value, solver_maxiter,
                                                  solver_restart)
@@ -861,42 +949,55 @@ required for complex-symmetric pencils.
                 end
             end
 
-            @. Q_proj += weight * shifted_solutions
+            @. qproj_block += weight * shifted_block
         end
         solve_failed && break
 
         try
-            for col in 1:M0
-                banded_complex_symmetric_matvec!(view(AQ, :, col), A, ka,
-                                                 view(Q_proj, :, col))
+            rank = _feast_qr_compress!(solutions_tmp, Q_proj, active_dim;
+                                       rank_tol=sqrt(eps(T)))
+            if rank == 0
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
+
+            q_rank = view(solutions_tmp, :, 1:rank)
+            aq_work = view(AQ, :, 1:rank)
+            bq_work = view(BQ, :, 1:rank)
+            Ared_rank = view(Ared, 1:rank, 1:rank)
+            Bred_rank = view(Bred, 1:rank, 1:rank)
+
+            for col in 1:rank
+                banded_complex_symmetric_matvec!(view(aq_work, :, col), A, ka,
+                                                 view(q_rank, :, col))
                 if B_is_identity
-                    copyto!(view(BQ, :, col), view(Q_proj, :, col))
+                    copyto!(view(bq_work, :, col), view(q_rank, :, col))
                 else
-                    banded_complex_symmetric_matvec!(view(BQ, :, col), B, kb,
-                                                     view(Q_proj, :, col))
+                    banded_complex_symmetric_matvec!(view(bq_work, :, col), B, kb,
+                                                     view(q_rank, :, col))
                 end
             end
-            mul!(Ared, transpose(Q_proj), AQ)
-            mul!(Bred, transpose(Q_proj), BQ)
+            mul!(Ared_rank, transpose(q_rank), aq_work)
+            mul!(Bred_rank, transpose(q_rank), bq_work)
 
-            F = eigen(Ared, Bred)
+            F = eigen(Ared_rank, Bred_rank)
             lambda_red = F.values
             v_red = F.vectors
 
-            for idx in 1:M0
-                mul!(view(shifted_solutions, :, idx), Q_proj, view(v_red, :, idx))
+            for idx in 1:rank
+                mul!(view(shifted_solutions, :, idx), q_rank, view(v_red, :, idx))
                 lambda_vec[idx] = lambda_red[idx]
             end
 
             M = _feast_reorder_by_gcontour!(lambda_vec, shifted_solutions, perm,
                                             lambda_tmp, solutions_tmp,
-                                            Emid, r, fpm, M0)
+                                            Emid, r, fpm, rank)
             if M == 0
                 info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
             end
 
-            for idx in 1:M0
+            for idx in 1:rank
                 vec = view(shifted_solutions, :, idx)
                 nrm = norm(vec)
                 if nrm > zero(T)
@@ -931,7 +1032,9 @@ required for complex-symmetric pencils.
                 break
             end
 
-            copyto!(Q_basis, shifted_solutions)
+            active_dim = rank
+            copyto!(view(Q_basis, :, 1:active_dim),
+                    view(shifted_solutions, :, 1:active_dim))
         catch err
             info_code = Int(Feast_ERROR_LAPACK)
             @warn "Reduced eigenvalue problem failed during banded complex-symmetric FEAST" exception=err
@@ -1005,9 +1108,18 @@ to the dense GMRES path used by the existing dense general solver.
     kl = max(ka, B_is_identity ? 0 : kb)
     ku = kl
     ldab = 2 * kl + ku + 1
-    banded_factors = Matrix{Complex{T}}(undef, ldab, N)
-    banded_ipiv = Vector{LinearAlgebra.BlasInt}(undef, 0)
+    contour = feast_get_custom_contour(T, fpm)
+    contour === nothing && (contour = feast_gcontour(Emid, r, fpm))
+    banded_factor_cache = Matrix{Complex{T}}[]
+    banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, 0)
+    banded_factorized = falses(0)
+    if solver_is_direct
+        banded_factor_cache = [Matrix{Complex{T}}(undef, ldab, N) for _ in eachindex(contour.Zne)]
+        banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, length(contour.Zne))
+        banded_factorized = falses(length(contour.Zne))
+    end
     factorized = false
+    current_factor_idx = 0
     current_shift = Ref(zero(Complex{T}))
     tmpAx = zeros(Complex{T}, N)
     tmpBx = zeros(Complex{T}, N)
@@ -1043,10 +1155,22 @@ to the dense GMRES path used by the existing dense general solver.
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             factorized = false
             if solver_is_direct
-                fill_shifted_general_banded!(banded_factors, A, B, ka, kb, kl, Ze[])
+                factor_idx = fpm[50]
+                if !(1 <= factor_idx <= length(banded_factor_cache))
+                    info[] = Int(Feast_ERROR_INTERNAL)
+                    break
+                end
+                shifted_factor = banded_factor_cache[factor_idx]
                 try
-                    _, banded_ipiv_tmp = LinearAlgebra.LAPACK.gbtrf!(kl, ku, N, banded_factors)
-                    banded_ipiv = banded_ipiv_tmp
+                    if !banded_factorized[factor_idx]
+                        fill_shifted_general_banded!(shifted_factor, A, B, ka, kb,
+                                                     kl, Ze[])
+                        _, banded_ipiv = LinearAlgebra.LAPACK.gbtrf!(kl, ku, N,
+                                                                     shifted_factor)
+                        banded_ipiv_cache[factor_idx] = banded_ipiv
+                        banded_factorized[factor_idx] = true
+                    end
+                    current_factor_idx = factor_idx
                     factorized = true
                 catch e
                     if isa(e, LinearAlgebra.SingularException) || isa(e, LinearAlgebra.LAPACKException)
@@ -1079,8 +1203,10 @@ to the dense GMRES path used by the existing dense general solver.
             if solver_is_direct
                 try
                     copyto!(workc_block, rhs_block)
-                    LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, N, banded_factors,
-                                                banded_ipiv, workc_block)
+                    shifted_factor = banded_factor_cache[current_factor_idx]
+                    LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, N, shifted_factor,
+                                                banded_ipiv_cache[current_factor_idx],
+                                                workc_block)
                 catch e
                     if isa(e, LinearAlgebra.SingularException) || isa(e, LinearAlgebra.LAPACKException)
                         info[] = Int(Feast_ERROR_LAPACK)

@@ -124,6 +124,11 @@ function _ensure_complex_matrix(A::AbstractMatrix)
     return eltype(materialized) <: Complex ? materialized : Complex.(materialized)
 end
 
+function _materialize_matrix_eltype(A::AbstractMatrix, ::Type{T}) where T
+    materialized = _materialize_matrix(A)
+    return eltype(materialized) === T ? materialized : T.(materialized)
+end
+
 # Main Feast interface functions
 function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                interval::Tuple{T,T}; M0::Int = 10,
@@ -268,9 +273,9 @@ function feast_general(A::AbstractMatrix, B::AbstractMatrix,
     size(A, 1) == size(A, 2) || throw(ArgumentError("A must be square"))
     size(B) == size(A) || throw(ArgumentError("B must match the size of A"))
 
-    A_complex = _ensure_complex_matrix(A)
-    B_complex = _ensure_complex_matrix(B)
-    N = size(A_complex, 1)
+    A_materialized = _materialize_matrix(A)
+    B_materialized = _materialize_matrix(B)
+    N = size(A_materialized, 1)
     M0 = min(M0, N)
 
     params = _ensure_feast_parameters(fpm)
@@ -279,14 +284,14 @@ function feast_general(A::AbstractMatrix, B::AbstractMatrix,
     backend_choice = _select_parallel_backend(requested_backend, comm;
                                               allow_fallback=allow_backend_fallback)
 
-    real_type = promote_type(_real_component_type(eltype(A_complex)),
-                             _real_component_type(eltype(B_complex)),
+    real_type = promote_type(_real_component_type(eltype(A_materialized)),
+                             _real_component_type(eltype(B_materialized)),
                              _real_component_type(typeof(center)),
                              T)
     complex_type = Complex{real_type}
 
-    A_exec = complex_type.(A_complex)
-    B_exec = complex_type.(B_complex)
+    A_exec = _materialize_matrix_eltype(A_materialized, complex_type)
+    B_exec = _materialize_matrix_eltype(B_materialized, complex_type)
 
     center_exec = complex_type(center)
     radius_exec = convert(real_type, radius)
@@ -315,17 +320,43 @@ function feast_general(A::AbstractMatrix, center::Complex{T}, radius::T;
                        comm = nothing) where T<:Real
     # Feast interface for standard general eigenvalue problems (B = I)
 
-    N = size(A, 1)
-    if isa(A, SparseMatrixCSC)
-        B = spdiagm(0 => ones(eltype(A), N))
-    else
-        B = Matrix{eltype(A)}(I, N, N)
-    end
+    size(A, 1) == size(A, 2) || throw(ArgumentError("A must be square"))
+
+    A_materialized = _materialize_matrix(A)
+    N = size(A_materialized, 1)
     M0 = min(M0, N)
-    return feast_general(A, B, center, radius; M0=M0, fpm=fpm,
-                         backend=backend, parallel=parallel,
-                         strict_backend=strict_backend,
-                         use_threads=use_threads, comm=comm)
+
+    params = _ensure_feast_parameters(fpm)
+    requested_backend = _normalize_backend(parallel, backend)
+    allow_backend_fallback = _allow_backend_fallback(parallel, backend, strict_backend)
+    backend_choice = _select_parallel_backend(requested_backend, comm;
+                                              allow_fallback=allow_backend_fallback)
+
+    real_type = promote_type(_real_component_type(eltype(A_materialized)),
+                             _real_component_type(typeof(center)),
+                             T)
+    complex_type = Complex{real_type}
+    A_exec = _materialize_matrix_eltype(A_materialized, complex_type)
+
+    center_exec = complex_type(center)
+    radius_exec = convert(real_type, radius)
+    radius_exec > zero(real_type) ||
+        throw(ArgumentError("Radius must be positive, got $radius"))
+
+    if backend_choice == :serial
+        if A_exec isa Matrix
+            return feast_geev!(A_exec, center_exec, radius_exec, M0, params)
+        elseif A_exec isa SparseMatrixCSC
+            return feast_gcsrev!(A_exec, center_exec, radius_exec, M0, params)
+        end
+    end
+
+    B_exec = A_exec isa SparseMatrixCSC ?
+             spdiagm(0 => fill(one(complex_type), N)) :
+             Matrix{complex_type}(I, N, N)
+    return _execute_feast_general(A_exec, B_exec, center_exec, radius_exec,
+                                  backend_choice, M0, params, comm, use_threads,
+                                  allow_backend_fallback)
 end
 
 function feast_general(A::AbstractMatrix, center::Complex{Tc}, radius::Tr; kwargs...) where {Tc<:Real, Tr<:Real}

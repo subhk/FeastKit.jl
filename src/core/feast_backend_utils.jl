@@ -161,9 +161,8 @@ function feast_serial(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{T,T}
 
     if elem_type <: Real
         if isa(A, Matrix) && isa(B, Matrix)
-            return feast_sygv!(Matrix{elem_type}(A), Matrix{elem_type}(B),
-                                convert(elem_type, Emin), convert(elem_type, Emax),
-                                M0, fpm)
+            return feast_sygv!(A, B, convert(elem_type, Emin),
+                                convert(elem_type, Emax), M0, fpm)
         elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
             if _is_identity_matrix(B)
                 return feast_scsrev!(A, Emin, Emax, M0, fpm)
@@ -175,7 +174,7 @@ function feast_serial(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{T,T}
         end
     elseif elem_type <: Complex
         if isa(A, Matrix) && isa(B, Matrix)
-            return feast_hegv!(Matrix{Complex{T}}(A), Matrix{Complex{T}}(B), Emin, Emax, M0, fpm)
+            return feast_hegv!(A, B, Emin, Emax, M0, fpm)
         elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
             if _is_identity_matrix(B)
                 return feast_hcsrev!(A, Emin, Emax, M0, fpm)
@@ -193,7 +192,7 @@ end
 function feast_general_serial(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
                               center::Complex{T}, radius::T, M0::Int, fpm::Vector{Int}) where T<:Real
     if isa(A, Matrix) && isa(B, Matrix)
-        return feast_gegv!(copy(A), copy(B), center, radius, M0, fpm)
+        return feast_gegv!(A, B, center, radius, M0, fpm)
     elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
         return feast_gcsrgv!(A, B, center, radius, M0, fpm)
     else

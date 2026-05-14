@@ -145,6 +145,8 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
     contour === nothing && (contour = feast_contour(Emin, Emax, fpm))
     Zne = contour.Zne
     Wne = contour.Wne
+    factor_cache = Vector{Union{Nothing, LinearAlgebra.LU{Complex{T}, Matrix{Complex{T}}, Vector{Int}}}}(undef, length(Zne))
+    fill!(factor_cache, nothing)
 
     maxloop = fpm[4]
     eps_tol = feast_tolerance(fpm, T)
@@ -178,14 +180,25 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
             end
 
             if solver_is_direct
-                if B_is_identity
-                    _feast_dense_shifted_identity_minus!(shifted_matrix, z, A)
-                else
-                    @. shifted_matrix = z * B_matrix - A
+                factor = factor_cache[idx]
+                if factor === nothing
+                    if B_is_identity
+                        _feast_dense_shifted_identity_minus!(shifted_matrix, z, A)
+                    else
+                        @. shifted_matrix = z * B_matrix - A
+                    end
+                    try
+                        factor = lu(shifted_matrix)
+                        factor_cache[idx] = factor
+                    catch err
+                        info_code = Int(Feast_ERROR_LAPACK)
+                        @warn "Dense direct solve failed for shift $z" exception=err
+                        solve_failed = true
+                        break
+                    end
                 end
                 copyto!(rhs_copy, rhs_buffer)
                 try
-                    factor = lu(shifted_matrix)
                     ldiv!(solutions, factor, rhs_copy)
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)
@@ -418,6 +431,7 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
     temp_matrix = Matrix{Complex{T}}(undef, N, N)
     rhs_buffer = Matrix{Complex{T}}(undef, N, M0)
     rhs_copy = Matrix{Complex{T}}(undef, N, M0)
+    factor_cache = Dict{Complex{T}, LinearAlgebra.LU{Complex{T}, Matrix{Complex{T}}, Vector{Int}}}()
 
     # Persistent RCI state (must be reused across calls in the loop)
     grci_state = FeastGRCIState{T}()
@@ -445,15 +459,19 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             # Factorize Ze*B - A
             z = Ze[]
-            if B_is_identity
-                _feast_dense_shifted_identity_minus!(temp_matrix, z, A)
-            else
-                @. temp_matrix = z * B - A
-            end
-
             if use_direct
                 try
-                    LU_factorization[] = lu!(temp_matrix)
+                    factor = get(factor_cache, z, nothing)
+                    if factor === nothing
+                        if B_is_identity
+                            _feast_dense_shifted_identity_minus!(temp_matrix, z, A)
+                        else
+                            @. temp_matrix = z * B - A
+                        end
+                        factor = lu(temp_matrix)
+                        factor_cache[z] = factor
+                    end
+                    LU_factorization[] = factor
                 catch e
                     info[] = Int(Feast_ERROR_LAPACK)
                     break

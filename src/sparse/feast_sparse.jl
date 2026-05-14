@@ -292,6 +292,8 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
     contour === nothing && (contour = feast_contour(Emin, Emax, fpm))
     Zne = contour.Zne
     Wne = contour.Wne
+    factor_cache = Vector{Union{Nothing, SparseArrays.UMFPACK.UmfpackLU{Complex{T}, Int}}}(undef, length(Zne))
+    fill!(factor_cache, nothing)
 
     maxloop = fpm[4]
     eps_tol = feast_tolerance(fpm, T)
@@ -326,9 +328,13 @@ function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
             end
 
             if solver_is_direct
-                shifted_matrix = B === nothing ? _feast_sparse_shifted_identity_minus(A, z) : z * B - A
+                solver_factor = factor_cache[e]
                 try
-                    solver_factor = lu(shifted_matrix)
+                    if solver_factor === nothing
+                        shifted_matrix = B === nothing ? _feast_sparse_shifted_identity_minus(A, z) : z * B - A
+                        solver_factor = lu(shifted_matrix)
+                        factor_cache[e] = solver_factor
+                    end
                     ldiv!(solutions, solver_factor, rhs_buffer)
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)
@@ -859,6 +865,7 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     
     # Sparse linear solver workspace
     sparse_solver = nothing
+    factor_cache = Dict{Complex{T}, SparseArrays.UMFPACK.UmfpackLU{Complex{T}, Int}}()
 
     # Persistent RCI state (must be reused across calls in the loop)
     grci_state = FeastGRCIState{T}()
@@ -874,11 +881,14 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
             # Factorize Ze*B - A for sparse matrices
             z = Ze[]
             if solver_is_direct
-                sparse_matrix = z * B - A
-                
                 # LU factorization for sparse matrix
                 try
-                    sparse_solver = lu(sparse_matrix)
+                    sparse_solver = get(factor_cache, z, nothing)
+                    if sparse_solver === nothing
+                        sparse_matrix = z * B - A
+                        sparse_solver = lu(sparse_matrix)
+                        factor_cache[z] = sparse_solver
+                    end
                 catch e
                     info[] = Int(Feast_ERROR_LAPACK)
                     break

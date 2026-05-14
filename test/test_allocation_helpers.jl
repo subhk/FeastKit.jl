@@ -197,6 +197,151 @@ end
         @test standard_bytes <= generalized_bytes + identity_slack
     end
 
+    @testset "High-level general wrappers avoid redundant dense materialization" begin
+        n = 80
+        M0 = 16
+        eigenvalues = complex.(collect(1.0:n), 0.02 .* collect(1.0:n))
+        A = Matrix(Diagonal(eigenvalues))
+        B = Matrix(Diagonal(fill(1.1 + 0.02im, n)))
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+        fpm[1] = 0
+        fpm[8] = 8
+        fpm[4] = 1
+        center = 20.0 + 0.4im
+        radius = 12.0
+
+        feast_general(A, center, radius; M0=M0, fpm=copy(fpm), backend=:serial)
+        feast_geev!(A, center, radius, M0, copy(fpm))
+        standard_high_level_bytes = @allocated feast_general(A, center, radius;
+                                                             M0=M0,
+                                                             fpm=copy(fpm),
+                                                             backend=:serial)
+        standard_low_level_bytes = @allocated feast_geev!(A, center, radius,
+                                                          M0, copy(fpm))
+        identity_bytes = @allocated Matrix{ComplexF64}(I, n, n)
+        @test standard_high_level_bytes <= standard_low_level_bytes +
+                                           max(16_384, identity_bytes)
+
+        feast_general(A, B, center, radius; M0=M0, fpm=copy(fpm),
+                      backend=:serial)
+        feast_gegv!(A, B, center, radius, M0, copy(fpm))
+        generalized_high_level_bytes = @allocated feast_general(A, B, center,
+                                                                radius;
+                                                                M0=M0,
+                                                                fpm=copy(fpm),
+                                                                backend=:serial)
+        generalized_low_level_bytes = @allocated feast_gegv!(A, B, center,
+                                                             radius, M0,
+                                                             copy(fpm))
+        dense_copy_bytes = @allocated copy(A)
+        @test generalized_high_level_bytes <= generalized_low_level_bytes +
+                                               max(16_384, dense_copy_bytes)
+
+        A_real = Matrix(Symmetric(Diagonal(collect(range(1.0, 4.0; length=n)))))
+        B_real = Matrix{Float64}(I, n, n)
+        real_fpm = zeros(Int, 64)
+        feastinit!(real_fpm)
+        real_fpm[1] = 0
+        real_fpm[2] = 4
+        real_fpm[4] = 1
+        interval = (1.2, 3.8)
+
+        FeastKit.feast_serial(A_real, B_real, interval, M0, copy(real_fpm))
+        feast_sygv!(A_real, B_real, interval[1], interval[2], M0,
+                    copy(real_fpm))
+        serial_bytes = @allocated FeastKit.feast_serial(A_real, B_real,
+                                                        interval, M0,
+                                                        copy(real_fpm))
+        direct_bytes = @allocated feast_sygv!(A_real, B_real, interval[1],
+                                              interval[2], M0,
+                                              copy(real_fpm))
+        real_copy_bytes = @allocated copy(A_real)
+        @test serial_bytes <= direct_bytes + max(16_384, real_copy_bytes)
+    end
+
+    @testset "Direct solvers reuse contour factorizations across refinement loops" begin
+        n = 120
+        M0 = 30
+        dense_A = Matrix(Symmetric(Diagonal(collect(range(1.0, 4.0; length=n)))))
+        sparse_A = sparse(dense_A)
+
+        fpm_one = zeros(Int, 64)
+        feastinit!(fpm_one)
+        fpm_one[1] = 0
+        fpm_one[2] = 8
+        fpm_one[3] = 16
+        fpm_one[4] = 1
+
+        fpm_three = copy(fpm_one)
+        fpm_three[4] = 3
+
+        feast_syev!(dense_A, 1.2, 3.8, M0, copy(fpm_one))
+        feast_syev!(dense_A, 1.2, 3.8, M0, copy(fpm_three))
+        dense_one_loop_bytes = @allocated feast_syev!(dense_A, 1.2, 3.8,
+                                                       M0, copy(fpm_one))
+        dense_three_loop_bytes = @allocated feast_syev!(dense_A, 1.2, 3.8,
+                                                         M0, copy(fpm_three))
+        @test dense_three_loop_bytes <= round(Int, 1.45 * dense_one_loop_bytes)
+
+        feast_scsrev!(sparse_A, 1.2, 3.8, M0, copy(fpm_one))
+        feast_scsrev!(sparse_A, 1.2, 3.8, M0, copy(fpm_three))
+        sparse_one_loop_bytes = @allocated feast_scsrev!(sparse_A, 1.2, 3.8,
+                                                         M0, copy(fpm_one))
+        sparse_three_loop_bytes = @allocated feast_scsrev!(sparse_A, 1.2, 3.8,
+                                                           M0, copy(fpm_three))
+        @test sparse_three_loop_bytes <= round(Int, 1.45 * sparse_one_loop_bytes)
+
+        general_values = complex.(collect(range(1.0, 4.0; length=n)),
+                                  0.01 .* collect(1:n))
+        dense_general_A = Matrix(Diagonal(general_values))
+        sparse_general_A = sparse(dense_general_A)
+        general_center = 2.5 + 0.4im
+        general_radius = 2.0
+        general_fpm_one = zeros(Int, 64)
+        feastinit!(general_fpm_one)
+        general_fpm_one[1] = 0
+        general_fpm_one[8] = 8
+        general_fpm_one[3] = 16
+        general_fpm_one[4] = 1
+        general_fpm_three = copy(general_fpm_one)
+        general_fpm_three[4] = 3
+
+        feast_geev!(dense_general_A, general_center, general_radius, M0,
+                    copy(general_fpm_one))
+        feast_geev!(dense_general_A, general_center, general_radius, M0,
+                    copy(general_fpm_three))
+        dense_general_one_loop_bytes = @allocated feast_geev!(dense_general_A,
+                                                              general_center,
+                                                              general_radius,
+                                                              M0,
+                                                              copy(general_fpm_one))
+        dense_general_three_loop_bytes = @allocated feast_geev!(dense_general_A,
+                                                                general_center,
+                                                                general_radius,
+                                                                M0,
+                                                                copy(general_fpm_three))
+        @test dense_general_three_loop_bytes <=
+              round(Int, 1.25 * dense_general_one_loop_bytes)
+
+        feast_gcsrev!(sparse_general_A, general_center, general_radius, M0,
+                      copy(general_fpm_one))
+        feast_gcsrev!(sparse_general_A, general_center, general_radius, M0,
+                      copy(general_fpm_three))
+        sparse_general_one_loop_bytes = @allocated feast_gcsrev!(sparse_general_A,
+                                                                 general_center,
+                                                                 general_radius,
+                                                                 M0,
+                                                                 copy(general_fpm_one))
+        sparse_general_three_loop_bytes = @allocated feast_gcsrev!(sparse_general_A,
+                                                                   general_center,
+                                                                   general_radius,
+                                                                   M0,
+                                                                   copy(general_fpm_three))
+        @test sparse_general_three_loop_bytes <=
+              round(Int, 1.45 * sparse_general_one_loop_bytes)
+    end
+
     @testset "Threaded moment helpers avoid avoidable temporaries" begin
         n = 48
         M0 = 8

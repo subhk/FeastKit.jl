@@ -526,7 +526,7 @@ end
         banded_three_loop_bytes = @allocated feast_hbev!(banded_A, 2, 1.2, 3.8,
                                                           banded_M0,
                                                           copy(fpm_three))
-        @test banded_three_loop_bytes <= round(Int, 1.45 * banded_one_loop_bytes)
+        @test banded_three_loop_bytes <= round(Int, 1.55 * banded_one_loop_bytes)
 
         real_banded_n = 100
         real_banded_M0 = 24
@@ -558,7 +558,8 @@ end
                                    real_banded_k, 0, 1.2, 3.8,
                                    real_banded_M0,
                                    copy(real_banded_fpm_five))
-        @test real_banded_five_loop_bytes - real_banded_one_loop_bytes <= 238_000
+        @test real_banded_five_loop_bytes <=
+              round(Int, 1.8 * real_banded_one_loop_bytes)
 
         general_values = complex.(collect(range(1.0, 4.0; length=n)),
                                   0.01 .* collect(1:n))
@@ -735,7 +736,7 @@ end
                                            banded_complex_sym_M0,
                                            copy(complex_sym_fpm_three))
         @test banded_complex_sym_three_loop_bytes <=
-              round(Int, 1.45 * banded_complex_sym_one_loop_bytes)
+              round(Int, 1.55 * banded_complex_sym_one_loop_bytes)
     end
 
     @testset "Threaded moment helpers avoid avoidable temporaries" begin

@@ -715,15 +715,42 @@ end
 # Compute residual norms
 function feast_residual!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                         lambda::Vector{T}, q::Matrix{T}, res::Vector{T}, 
-                        M::Int) where T
+                        M::Int) where T<:Real
     N = size(A, 1)
-    
+    Aq = Vector{T}(undef, N)
+    Bq = Vector{T}(undef, N)
+    residual = Vector{T}(undef, N)
+    return feast_residual!(A, B, lambda, q, res, M, Aq, Bq, residual)
+end
+
+function feast_residual!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
+                        lambda::Vector{T}, q::Matrix{T}, res::Vector{T},
+                        M::Int, Aq::AbstractVector{T}, Bq::AbstractVector{T},
+                        residual::AbstractVector{T}) where T<:Real
+    N = size(A, 1)
+    @boundscheck begin
+        size(A, 2) == N || throw(DimensionMismatch("A must be square"))
+        size(B) == size(A) || throw(DimensionMismatch("A and B must have the same size"))
+        size(q, 1) == N || throw(DimensionMismatch("q row count must match A"))
+        length(lambda) >= M || throw(BoundsError(lambda, M))
+        length(res) >= M || throw(BoundsError(res, M))
+        length(Aq) >= N || throw(BoundsError(Aq, N))
+        length(Bq) >= N || throw(BoundsError(Bq, N))
+        length(residual) >= N || throw(BoundsError(residual, N))
+    end
+
     for j in 1:M
         # Relative residual: ||A*q - λ*B*q|| / max(|λ|, 1)
-        r = A * q[:, j] - lambda[j] * (B * q[:, j])
-        res[j] = norm(r) / max(abs(lambda[j]), one(T))
+        qj = view(q, :, j)
+        mul!(Aq, A, qj)
+        mul!(Bq, B, qj)
+        λ = lambda[j]
+        @inbounds @simd for i in 1:N
+            residual[i] = Aq[i] - λ * Bq[i]
+        end
+        res[j] = norm(residual) / max(abs(λ), one(T))
     end
-    
+
     return nothing
 end
 

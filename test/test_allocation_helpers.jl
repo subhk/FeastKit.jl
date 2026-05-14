@@ -52,6 +52,16 @@ function _repeat_feast_sort_general!(lambda, q, res, lambda_src, q_src,
     return lambda, q, res
 end
 
+function _repeat_feast_residual_scratch!(A, B, lambda, q, res, Aq, Bq,
+                                         residual, nrepeat)
+    for _ in 1:nrepeat
+        fill!(res, zero(eltype(res)))
+        FeastKit.feast_residual!(A, B, lambda, q, res, length(lambda),
+                                 Aq, Bq, residual)
+    end
+    return res
+end
+
 @testset "Allocation helper regressions" begin
     @testset "In-place interval reorder" begin
         # Values inside the interval should be compacted to the front while
@@ -148,6 +158,42 @@ end
         bytes = @allocated _repeat_feast_sort_general!(lambda, q, res,
                                                        lambda_src, q_src,
                                                        res_src, 1_000)
+        @test bytes < 1024
+    end
+
+    @testset "Scratch-buffer residual helper" begin
+        A = Matrix(Symmetric([
+            4.0 0.2 0.0
+            0.2 5.0 0.3
+            0.0 0.3 6.0
+        ]))
+        B = Matrix(Diagonal([1.0, 1.2, 1.5]))
+        q = [
+            0.8 0.1
+            0.3 0.7
+            0.5 0.6
+        ]
+        lambda = [4.2, 5.8]
+        res = zeros(length(lambda))
+        Aq = similar(res, size(A, 1))
+        Bq = similar(res, size(A, 1))
+        residual = similar(res, size(A, 1))
+
+        expected = [
+            norm(A * q[:, j] - lambda[j] * (B * q[:, j])) /
+            max(abs(lambda[j]), 1.0)
+            for j in 1:length(lambda)
+        ]
+
+        FeastKit.feast_residual!(A, B, lambda, q, res, length(lambda),
+                                 Aq, Bq, residual)
+        @test res ≈ expected
+
+        _repeat_feast_residual_scratch!(A, B, lambda, q, res, Aq, Bq,
+                                        residual, 1)
+        bytes = @allocated _repeat_feast_residual_scratch!(A, B, lambda, q,
+                                                           res, Aq, Bq,
+                                                           residual, 1_000)
         @test bytes < 1024
     end
 

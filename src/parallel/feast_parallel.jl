@@ -97,6 +97,9 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
     lambda_tmp = similar(workspace.lambda)
     perm = Vector{Int}(undef, M0)
     q_tmp = similar(workspace.q)
+    residual_Aq = Vector{T}(undef, N)
+    residual_Bq = Vector{T}(undef, N)
+    residual = Vector{T}(undef, N)
 
     # Main Feast refinement loop
     for loop in 1:max_loops
@@ -174,7 +177,8 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
             end
 
             # Compute residuals
-            feast_residual!(A, B, workspace.lambda, workspace.q, workspace.res, M)
+            feast_residual!(A, B, workspace.lambda, workspace.q, workspace.res,
+                            M, residual_Aq, residual_Bq, residual)
             epsout = maximum(workspace.res[1:M])
 
             # Check convergence
@@ -472,6 +476,9 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     lambda_tmp = similar(workspace.lambda)
     perm = Vector{Int}(undef, M0)
     q_tmp = similar(workspace.q)
+    residual_Aq = Vector{T}(undef, N)
+    residual_Bq = Vector{T}(undef, N)
+    residual = Vector{T}(undef, N)
 
     # Main Feast refinement loop
     for loop in 1:max_loops
@@ -536,7 +543,8 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             end
 
             # Check convergence
-            feast_residual!(A, B, workspace.lambda, workspace.q, workspace.res, M)
+            feast_residual!(A, B, workspace.lambda, workspace.q, workspace.res,
+                            M, residual_Aq, residual_Bq, residual)
             epsout = maximum(workspace.res[1:M])
 
             if epsout <= eps_tolerance

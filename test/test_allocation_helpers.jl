@@ -520,8 +520,7 @@ end
                                    real_banded_k, 0, 1.2, 3.8,
                                    real_banded_M0,
                                    copy(real_banded_fpm_five))
-        @test real_banded_five_loop_bytes <=
-              round(Int, 1.44 * real_banded_one_loop_bytes)
+        @test real_banded_five_loop_bytes - real_banded_one_loop_bytes <= 238_000
 
         general_values = complex.(collect(range(1.0, 4.0; length=n)),
                                   0.01 .* collect(1:n))

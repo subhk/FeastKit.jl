@@ -683,11 +683,32 @@ end
 # Sort function for complex eigenvalues (general case)
 function feast_sort_general!(lambda::Vector{Complex{T}}, q::Matrix{Complex{T}}, 
                            res::Vector{T}, M::Int) where T<:Real
-    # Sort by eigenvalue magnitude |lambda|
-    perm = sortperm(abs.(lambda[1:M]))
-    lambda[1:M] = lambda[perm]
-    q[:, 1:M] = q[:, perm]
-    res[1:M] = res[perm]
+    # Sort by eigenvalue magnitude without allocating abs/permutation buffers.
+    @inbounds for i in 2:M
+        λ = lambda[i]
+        r = res[i]
+        λ_abs2 = abs2(λ)
+        insert_at = i
+        while insert_at > 1 && isless(λ_abs2, abs2(lambda[insert_at - 1]))
+            insert_at -= 1
+        end
+        insert_at == i && continue
+
+        for j in (i - 1):-1:insert_at
+            lambda[j + 1] = lambda[j]
+            res[j + 1] = res[j]
+        end
+        lambda[insert_at] = λ
+        res[insert_at] = r
+
+        for row in axes(q, 1)
+            q_value = q[row, i]
+            for j in (i - 1):-1:insert_at
+                q[row, j + 1] = q[row, j]
+            end
+            q[row, insert_at] = q_value
+        end
+    end
     return nothing
 end
 

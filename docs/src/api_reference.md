@@ -404,6 +404,11 @@ eigenvectors = result.q[:, 1:result.M]
 success = (result.info == 0)
 ```
 
+```@docs
+FeastKit.FeastResult
+FeastKit.FeastGeneralResult
+```
+
 ### FeastContour
 
 Integration contour structure.

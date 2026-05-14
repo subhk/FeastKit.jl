@@ -41,6 +41,17 @@ function _repeat_feast_sort!(lambda, q, res, lambda_src, q_src, res_src, nrepeat
     return lambda, q, res
 end
 
+function _repeat_feast_sort_general!(lambda, q, res, lambda_src, q_src,
+                                     res_src, nrepeat)
+    for _ in 1:nrepeat
+        copyto!(lambda, lambda_src)
+        copyto!(q, q_src)
+        copyto!(res, res_src)
+        FeastKit.feast_sort_general!(lambda, q, res, length(lambda))
+    end
+    return lambda, q, res
+end
+
 @testset "Allocation helper regressions" begin
     @testset "In-place interval reorder" begin
         # Values inside the interval should be compacted to the front while
@@ -110,6 +121,33 @@ end
         _repeat_feast_sort!(lambda, q, res, lambda_src, q_src, res_src, 1)
         bytes = @allocated _repeat_feast_sort!(lambda, q, res, lambda_src,
                                                q_src, res_src, 1_000)
+        @test bytes < 1024
+    end
+
+    @testset "In-place general eigenpair sort" begin
+        lambda_src = ComplexF64[4.0 + 0.0im, 1.0 + 1.0im,
+                                0.5 + 0.0im, 2.0 + 0.0im]
+        q_src = ComplexF64[
+            11 12 13 14
+            21 22 23 24
+            31 32 33 34
+        ]
+        res_src = [0.4, 0.2, 0.1, 0.3]
+        lambda = copy(lambda_src)
+        q = copy(q_src)
+        res = copy(res_src)
+
+        FeastKit.feast_sort_general!(lambda, q, res, length(lambda))
+
+        @test lambda == lambda_src[[3, 2, 4, 1]]
+        @test q == q_src[:, [3, 2, 4, 1]]
+        @test res == [0.1, 0.2, 0.3, 0.4]
+
+        _repeat_feast_sort_general!(lambda, q, res, lambda_src, q_src,
+                                    res_src, 1)
+        bytes = @allocated _repeat_feast_sort_general!(lambda, q, res,
+                                                       lambda_src, q_src,
+                                                       res_src, 1_000)
         @test bytes < 1024
     end
 

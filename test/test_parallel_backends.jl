@@ -4,6 +4,8 @@ using Distributed
 using LinearAlgebra
 using SparseArrays
 
+# Sparse tridiagonal fixture with known eigenvalues. Keeping the fixture small
+# lets distributed and MPI runs finish quickly under CI resource limits.
 function _parallel_backend_problem(n)
     A = sparse(diagm(0 => 2.0 * ones(n), 1 => -ones(n - 1), -1 => -ones(n - 1)))
     B = sparse(Matrix{Float64}(I, n, n))
@@ -23,6 +25,8 @@ end
         interval = (0.1, 3.9)
         A, B, fpm = _parallel_backend_problem(n)
 
+        # Compare both high-level backend selection and FEAST-prefixed parallel
+        # aliases against the same serial reference.
         serial = feast(A, B, interval; M0=n, fpm=copy(fpm), backend=:serial)
         distributed = feast(A, B, interval; M0=n, fpm=copy(fpm),
                             backend=:distributed, strict_backend=true)
@@ -47,6 +51,8 @@ end
 
 @testset "MPI backend" begin
     if get(ENV, "FEASTKIT_TEST_MPI", "false") == "true"
+        # This block is intended for mpiexec-driven jobs. It verifies direct API,
+        # high-level backend routing, and precision-prefixed aliases together.
         @eval using MPI
         MPI.Init()
         comm = MPI.COMM_WORLD
@@ -96,6 +102,8 @@ end
         fpm_h_iter[3] = 8
         expected_h = [0.5, 1.0, 1.5]
 
+        # Sparse complex Hermitian coverage includes direct and iterative alias
+        # paths because both should share the same MPI contour distribution.
         herm_mpi = mpi_feast_hcsrgv!(copy(A_h), copy(B_h), complex_interval[1], complex_interval[2],
                                      n_complex, copy(fpm_h); comm=comm)
         herm_highlevel = feast(copy(A_h), copy(B_h), complex_interval; M0=n_complex,
@@ -133,6 +141,8 @@ end
         sort_complex(vals) = sort(collect(vals), by=x -> (round(real(x), digits=10),
                                                           round(imag(x), digits=10)))
 
+        # General non-Hermitian MPI tests sort by rounded real/imaginary parts
+        # so equivalent eigenvalue ordering from different solvers is accepted.
         general_mpi = mpi_feast_gcsrgv!(copy(A_g), copy(B_g), center, radius,
                                         n_complex, copy(fpm_g); comm=comm)
         general_highlevel = feast_general(copy(A_g), copy(B_g), center, radius;
@@ -159,6 +169,8 @@ end
 
         A_hd = Matrix(A_h)
         B_hd = Matrix(B_h)
+        # Dense MPI wrappers reuse the same expected spectra as the sparse cases,
+        # which catches storage-specific routing differences without new data.
         dense_herm_mpi = mpi_feast_hegv!(copy(A_hd), copy(B_hd), complex_interval[1], complex_interval[2],
                                          n_complex, copy(fpm_h); comm=comm)
         dense_herm_highlevel = feast(copy(A_hd), copy(B_hd), complex_interval;

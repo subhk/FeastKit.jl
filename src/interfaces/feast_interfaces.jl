@@ -4,6 +4,8 @@
 const FEAST_PARAMETERS_LENGTH = 64
 
 @inline function _ensure_feast_parameters(fpm::Union{Vector{Int},FeastParameters,Nothing})
+    # High-level APIs accept nothing, a raw fpm vector, or the wrapper type. The
+    # solver kernels always receive the concrete Vector{Int} expected by FEAST.
     if fpm === nothing
         params = zeros(Int, FEAST_PARAMETERS_LENGTH)
         feastinit!(params)
@@ -24,6 +26,8 @@ end
 
 function _normalize_backend(parallel::Union{Bool,Symbol,Nothing},
                             backend::Union{Symbol,Nothing})
+    # `parallel` is the legacy keyword and `backend` is the explicit replacement.
+    # Accept both only when they describe the same execution mode.
     if backend !== nothing
         requested = backend
         if parallel !== nothing
@@ -54,6 +58,8 @@ function _allow_backend_fallback(parallel::Union{Bool,Symbol,Nothing},
 end
 
 function _materialize_matrix(A::AbstractMatrix)
+    # Kernels dispatch on Matrix and SparseMatrixCSC. Lazy wrappers such as
+    # Symmetric/Hermitian are converted while preserving sparse storage.
     if A isa Matrix || A isa SparseMatrixCSC
         return A
     elseif A isa Symmetric
@@ -68,6 +74,8 @@ function _materialize_matrix(A::AbstractMatrix)
 end
 
 @inline function _execute_feast(A, B, interval, backend, M0, fpm, comm, use_threads, allow_backend_fallback)
+    # Centralize backend execution so all high-level Hermitian/symmetric methods
+    # share the same fallback semantics.
     if backend != :serial
         try
             return feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads;
@@ -85,6 +93,8 @@ function _feast_run_serial(A, B, interval, M0, fpm)
 end
 
 @inline function _execute_feast_general(A, B, center, radius, backend, M0, fpm, comm, use_threads, allow_backend_fallback)
+    # General non-Hermitian problems currently have MPI and serial paths only;
+    # thread/distributed requests intentionally fall back through one branch.
     if backend == :mpi && _mpi_backend_ready(comm)
         if ((A isa SparseMatrixCSC && B isa SparseMatrixCSC) ||
             (A isa Matrix && B isa Matrix)) &&
@@ -154,6 +164,8 @@ function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     backend_choice = _select_parallel_backend(requested_backend, comm;
                                               allow_fallback=allow_backend_fallback)
 
+    # Materialization happens after validation so user-facing errors still refer
+    # to the original matrix shape and symmetry expectations.
     A_exec = _materialize_matrix(A)
     B_exec = _materialize_matrix(B)
 

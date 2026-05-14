@@ -1,3 +1,9 @@
+# FEAST reverse-communication kernels.
+#
+# These functions implement the solver-neutral state machines. Callers provide
+# storage-specific work for each ijob request: factorize a shifted system, solve
+# it, multiply by A/B, and then re-enter the kernel with the same state object.
+
 @views function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                             work::Matrix{T}, workc::Matrix{Complex{T}},
                             Aq::Matrix{T}, Sq::Matrix{T}, fpm::Vector{Int},
@@ -32,6 +38,9 @@
             contour = feast_contour(Emin, Emax, fpm)
         end
 
+        # Cache the contour and per-call work arrays in explicit state. Older
+        # implementations relied on global dictionaries keyed by objectid, which
+        # made nested and threaded RCI calls fragile.
         state.Zne = copy(contour.Zne)
         state.Wne = copy(contour.Wne)
         state.ne = length(contour.Zne)
@@ -46,6 +55,8 @@
 
         loop[] = 0
 
+        # The RCI contract expects callers to pass reusable buffers; reset all
+        # observable outputs on init so repeated solves start from a clean slate.
         fill!(Aq, zero(T))
         fill!(Sq, zero(T))
         fill!(lambda, zero(T))
@@ -86,7 +97,8 @@
     end
 
     if ijob[] == Int(Feast_RCI_FACTORIZE)
-        # After factorization, request linear solve
+        # After the caller factorizes Ze*B - A, feed the current trial subspace
+        # into work and request the shifted solve.
         ijob[] = Int(Feast_RCI_SOLVE)
         Q0 = state.Q0
         copyto!(view(work, :, 1:size(Q0, 2)), Q0)
@@ -117,7 +129,8 @@
         zAq = state.zAq
         zSq = state.zSq
 
-        # Reset accumulators at start of new contour loop
+        # Reset accumulators at start of each contour sweep. Every point adds a
+        # weighted resolvent contribution to the spectral projector.
         if e == 1
             fill!(Q_proj, zero(Complex{T}))
             fill!(zAq, zero(Complex{T}))

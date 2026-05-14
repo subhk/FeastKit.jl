@@ -4,6 +4,9 @@
 # `Float64`, `ComplexF32`, `ComplexF64`). These aliases expose the familiar
 # FEAST naming convention while forwarding to the tested generic solvers.
 
+# Real single/double precision aliases for symmetric dense, sparse, banded, and
+# polynomial problems. The prefix only constrains argument types; the underlying
+# solver is still the generic Julia implementation.
 for (prefix, RT) in ((:s, Float32), (:d, Float64))
     @eval begin
         $(Symbol(prefix, "feast_syev!"))(A::Matrix{$RT},
@@ -113,6 +116,8 @@ for (prefix, RT) in ((:s, Float32), (:d, Float64))
     end
 end
 
+# Iterative real aliases keep the FEAST `si`/`di` naming for polynomial entry
+# points that already dispatch through the generic iterative-capable kernels.
 for (prefix, RT) in ((:si, Float32), (:di, Float64))
     @eval begin
         $(Symbol(prefix, "feast_sypev!"))(A::Vector{Matrix{$RT}}, d::Int,
@@ -153,6 +158,8 @@ for (prefix, RT) in ((:si, Float32), (:di, Float64))
     end
 end
 
+# Complex single/double aliases cover Hermitian, symmetric, general, sparse,
+# banded, and polynomial routines with the classic `c`/`z` FEAST prefixes.
 for (prefix, RT) in ((:c, Float32), (:z, Float64))
     @eval begin
         $(Symbol(prefix, "feast_heev!"))(A::Matrix{Complex{$RT}},
@@ -415,6 +422,8 @@ for (prefix, RT) in ((:c, Float32), (:z, Float64))
     end
 end
 
+# Iterative complex aliases are limited to polynomial routines here; direct and
+# GMRES behavior for matrix problems is selected by the explicit solver keyword.
 for (prefix, RT) in ((:ci, Float32), (:zi, Float64))
     @eval begin
         $(Symbol(prefix, "feast_gepev!"))(A::Vector{Matrix{Complex{$RT}}}, d::Int,
@@ -483,6 +492,8 @@ function _pfeast_mpi_unavailable(name::Symbol)
     throw(ArgumentError("$(name) with comm= requires MPI support to be loaded. Use the threaded/distributed path without comm=, or load FeastKit with MPI available."))
 end
 
+# Parallel real aliases route to threaded/distributed solvers by default and
+# switch to MPI only when the caller passes a communicator.
 for (prefix, RT) in ((:ps, Float32), (:pd, Float64))
     @eval begin
         function $(Symbol(prefix, "feast_sygv!"))(A::Matrix{$RT}, B::Matrix{$RT},
@@ -549,6 +560,8 @@ for (prefix, RT) in ((:ps, Float32), (:pd, Float64))
     end
 end
 
+# Parallel complex aliases expose MPI-capable wrappers when comm is supplied.
+# Without MPI they intentionally fall back to the serial complex solvers.
 for (prefix, RT) in ((:pc, Float32), (:pz, Float64))
     @eval begin
         function $(Symbol(prefix, "feast_hegv!"))(A::Matrix{Complex{$RT}},
@@ -757,6 +770,8 @@ for (prefix, RT) in ((:pc, Float32), (:pz, Float64))
     end
 end
 
+# Parallel iterative complex aliases force GMRES on the serial path and request
+# the corresponding iterative MPI kernels when a communicator is provided.
 for (prefix, RT) in ((:pci, Float32), (:pzi, Float64))
     @eval begin
         function $(Symbol(prefix, "feast_hegv!"))(A::Matrix{Complex{$RT}},

@@ -1,6 +1,9 @@
 #!/usr/bin/env julia
 
 # Julia translations of the FEAST Fortran reference examples.
+#
+# Each function mirrors one original reference driver and prints a compact
+# summary so the examples can be run as a single smoke test.
 
 using LinearAlgebra
 using SparseArrays
@@ -14,6 +17,8 @@ using .FeastExampleUtils
 const TRI_ZEDGE = ComplexF64[(0.10 + 0.410im), (4.2 + 0.41im), (4.2 - 8.3im)]
 const TRI_NEDGE = [6, 6, 18]
 
+# Dense reference cases cover real generalized, complex Hermitian, general
+# complex-contour, and polynomial eigenvalue entry points.
 function dense_real_sygv()
     A = read_mm_dense_real("system1")
     B = read_mm_dense_real("system1B")
@@ -90,6 +95,8 @@ function dense_complex_syevx()
     print_summary("F90dense_zfeast_syevx (general solver)", result)
 end
 
+# Sparse reference cases exercise the same mathematical problems through CSC
+# storage and sparse-specific FEAST wrapper names.
 function sparse_real_scsrgv()
     A = read_mm_sparse_real("system1")
     B = read_mm_sparse_real("system1B")
@@ -182,6 +189,8 @@ function sparse_complex_scsrevx()
     print_summary("F90sparse_zfeast_scsrevx", result)
 end
 
+# Banded cases validate the compact storage conversion helpers before calling
+# the banded solver wrappers.
 function banded_real_sbgv()
     A_band, kl_a, ku_a = read_banded_real("system1")
     B_band, kl_b, ku_b = read_banded_real("system1B")
@@ -256,6 +265,8 @@ function banded_complex_sbevx()
 end
 
 function main()
+    # Run in storage-family order to make failures easy to relate to the wrapper
+    # layer they exercise.
     dense_real_sygv()
     dense_complex_heev()
     dense_real_gegv()

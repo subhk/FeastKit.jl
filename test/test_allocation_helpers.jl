@@ -3,6 +3,8 @@ using FeastKit
 using LinearAlgebra
 using SparseArrays
 
+# Repetition helpers isolate allocation measurements from setup allocations and
+# keep the test bodies focused on the helper under scrutiny.
 function _repeat_reorder!(lambda, vectors, lambda_src, vectors_src,
                           perm, lambda_tmp, vector_tmp, Emin, Emax, nrepeat)
     for _ in 1:nrepeat
@@ -29,8 +31,20 @@ function _repeat_dense_shifted_identity!(dest, z, A, nrepeat)
     return dest
 end
 
+function _repeat_feast_sort!(lambda, q, res, lambda_src, q_src, res_src, nrepeat)
+    for _ in 1:nrepeat
+        copyto!(lambda, lambda_src)
+        copyto!(q, q_src)
+        copyto!(res, res_src)
+        FeastKit.feast_sort!(lambda, q, res, length(lambda))
+    end
+    return lambda, q, res
+end
+
 @testset "Allocation helper regressions" begin
     @testset "In-place interval reorder" begin
+        # Values inside the interval should be compacted to the front while
+        # preserving the matching eigenvector columns.
         lambda_src = [4.0, 2.0, 1.0, 3.0]
         vectors_src = ComplexF64[
             11 12 13 14
@@ -75,7 +89,34 @@ end
         @test bytes < 1024
     end
 
+    @testset "In-place real eigenpair sort" begin
+        lambda_src = [4.0, 2.0, 1.0, 3.0]
+        q_src = [
+            11.0 12.0 13.0 14.0
+            21.0 22.0 23.0 24.0
+            31.0 32.0 33.0 34.0
+        ]
+        res_src = [0.4, 0.2, 0.1, 0.3]
+        lambda = copy(lambda_src)
+        q = copy(q_src)
+        res = copy(res_src)
+
+        FeastKit.feast_sort!(lambda, q, res, length(lambda))
+
+        @test lambda == [1.0, 2.0, 3.0, 4.0]
+        @test q == q_src[:, [3, 2, 4, 1]]
+        @test res == [0.1, 0.2, 0.3, 0.4]
+
+        _repeat_feast_sort!(lambda, q, res, lambda_src, q_src, res_src, 1)
+        bytes = @allocated _repeat_feast_sort!(lambda, q, res, lambda_src,
+                                               q_src, res_src, 1_000)
+        @test bytes < 1024
+    end
+
     @testset "QR compression preserves projected subspace rank" begin
+        # Rank-deficient projected spaces arise when M0 is larger than the target
+        # eigenspace. Compression must keep the represented subspace, not just
+        # orthonormalize arbitrary columns.
         src = ComplexF64[
             1.0 + 0.0im 2.0 + 0.0im 0.0 + 0.0im 1.0e-15 + 0.0im
             0.0 + 1.0im 0.0 + 2.0im 1.0 + 0.0im 0.0 + 1.0e-15im
@@ -210,6 +251,8 @@ end
     end
 
     @testset "Complex-to-real result conversion avoids column temporaries" begin
+        # This regression guards the summary/result conversion code path against
+        # accidentally allocating one vector per eigenpair.
         n = 1_000
         m = 100
         result = FeastResult{Float64, ComplexF64}(collect(1.0:m),

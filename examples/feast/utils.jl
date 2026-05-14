@@ -1,3 +1,5 @@
+# Utilities shared by the FEAST reference examples. The fixture files use the
+# compact MatrixMarket-like format from the original Fortran examples.
 module FeastExampleUtils
 
 using LinearAlgebra
@@ -6,6 +8,8 @@ using FeastKit
 
 const DATA_DIR = joinpath(@__DIR__, "..", "FEAST", "example", "FEAST")
 
+# Keep paths centralized so example functions can name FEAST systems rather than
+# hard-code fixture directories.
 feast_data_path(parts...) = joinpath(DATA_DIR, parts...)
 
 function read_mm_dense_real(name::AbstractString)
@@ -105,6 +109,8 @@ function read_banded_real(name::AbstractString)
             vals[k] = parse(Float64, parts[3])
         end
     end
+    # Convert coordinate entries into LAPACK general band storage where row
+    # `k_upper + 1` is the diagonal.
     k_lower = maximum(max(0, rows[i] - cols[i]) for i in eachindex(rows))
     k_upper = maximum(max(0, cols[i] - rows[i]) for i in eachindex(rows))
     band = zeros(Float64, k_lower + k_upper + 1, n)
@@ -136,6 +142,8 @@ function read_banded_complex(name::AbstractString)
             vals[k] = complex(re, im)
         end
     end
+    # Preserve both lower and upper bandwidth so examples can pass the correct
+    # FEAST band dimensions to symmetric and general wrappers.
     k_lower = maximum(max(0, rows[i] - cols[i]) for i in eachindex(rows))
     k_upper = maximum(max(0, cols[i] - rows[i]) for i in eachindex(rows))
     band = zeros(ComplexF64, k_lower + k_upper + 1, n)
@@ -166,6 +174,8 @@ function to_complex_sparse(A::SparseMatrixCSC{Float64, Int})
 end
 
 function build_polygonal_contour(zedge::Vector{ComplexF64}, nedge::Vector{Int})
+    # FEAST custom-contour examples specify polygon edges plus the number of
+    # quadrature nodes per edge; weights are then computed by FeastKit.
     nodes = ComplexF64[]
     ne = length(zedge)
     @assert ne == length(nedge)
@@ -184,6 +194,8 @@ function build_polygonal_contour(zedge::Vector{ComplexF64}, nedge::Vector{Int})
 end
 
 function print_summary(label::AbstractString, result; max_values::Int=5)
+    # Keep output close to the original reference programs while limiting long
+    # eigenvalue lists for quick example runs.
     println(label)
     println("  info = ", result.info, ", loops = ", result.loop, ", epsout = ", result.epsout)
     println("  eigenpairs found = ", result.M)

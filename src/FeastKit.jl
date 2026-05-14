@@ -1,5 +1,9 @@
+# FeastKit is organized as a small public facade over solver kernels that mirror
+# FEAST's dense, sparse, banded, RCI, matrix-free, and parallel entry points.
 module FeastKit
 
+# Public exports are grouped by user-facing layer so new wrappers can be added
+# next to the storage/backend family they belong to.
 export feastinit, feastinit!, feastinit_driver, feastdefault!
 export feast_srci!, feast_srcix!, feast_hrci!, feast_hrcix!, feast_grci!, feast_grcix!
 export ifeast_srci!, ifeast_hrci!, ifeast_grci!
@@ -122,6 +126,8 @@ using SparseArrays
 using Distributed
 using FastGaussQuadrature
 
+# Krylov is optional at runtime. Direct FEAST paths work without it, while
+# iterative variants check this flag before asking for GMRES-based solves.
 const FEAST_KRYLOV_AVAILABLE = Ref(false)
 try
     using Krylov: gmres
@@ -132,7 +138,8 @@ catch e
     FEAST_KRYLOV_AVAILABLE[] = false
 end
 
-# Load MPI at compile time (it's in [deps]) but defer initialization check to __init__
+# Load MPI symbols at compile time when available, but defer all MPI runtime
+# decisions to __init__ so normal package loading never starts MPI implicitly.
 const MPI_AVAILABLE = Ref(false)
 const _MPI_LOADED = try
     using MPI
@@ -141,6 +148,9 @@ catch
     false
 end
 
+# Include order follows the dependency graph: data types and parameter helpers
+# first, kernel state machines next, storage-specific solvers after that, and
+# high-level interfaces last once all implementation entry points are defined.
 include("core/feast_types.jl")
 include("core/feast_parameters.jl")
 include("core/feast_tools.jl")
@@ -157,8 +167,8 @@ include("interfaces/feast_interfaces.jl")
 include("interfaces/feast_matfree.jl")
 include("deprecations.jl")
 
-# Include MPI files at compile time (they define types/methods that need to exist);
-# actual MPI usage is gated by MPI_AVAILABLE[] at runtime.
+# MPI files define methods that should be visible when MPI is installed. Actual
+# MPI execution stays gated by MPI_AVAILABLE[] and explicit user opt-in.
 if _MPI_LOADED
     include("parallel/feast_mpi.jl")
     include("parallel/feast_mpi_interface.jl")
@@ -177,8 +187,8 @@ function __init__()
         return
     end
 
-    # Only attempt MPI usage if explicitly enabled via environment variable
-    # This prevents hanging when MPI is not properly configured
+    # Only attempt MPI usage if explicitly enabled via environment variable.
+    # Some MPI installations can hang during discovery, so the opt-in is strict.
     if get(ENV, "FEASTKIT_ENABLE_MPI", "false") != "true"
         @debug "MPI not explicitly enabled (set FEASTKIT_ENABLE_MPI=true to enable), MPI features disabled"
         MPI_AVAILABLE[] = false

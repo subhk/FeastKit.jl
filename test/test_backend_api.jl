@@ -4,6 +4,8 @@ using Distributed
 using LinearAlgebra
 using SparseArrays
 
+# Shared small SPD problem used to compare backend selection paths without
+# making the tests depend on large FEAST iteration counts.
 function _backend_test_problem(n)
     A = diagm(0 => 2.0 * ones(n), 1 => -ones(n - 1), -1 => -ones(n - 1))
     B = Matrix{Float64}(I, n, n)
@@ -24,6 +26,8 @@ end
     interval = (0.1, 3.9)
     A, B, fpm = _backend_test_problem(n)
 
+    # The legacy `parallel` keyword and the explicit `backend` keyword should
+    # agree when they describe serial execution.
     serial = feast(A, B, interval; M0=n, fpm=copy(fpm), backend=:serial)
     legacy_serial = feast(A, B, interval; M0=n, fpm=copy(fpm), parallel=:serial)
 
@@ -37,6 +41,8 @@ end
     @test_throws ArgumentError feast(A, B, interval; M0=n, fpm=copy(fpm),
                                      backend=:bogus)
 
+    # Auto may choose a faster backend, but the numerical result must match the
+    # serial baseline for this deterministic problem.
     auto = feast(A, B, interval; M0=n, fpm=copy(fpm), backend=:auto)
     @test auto.info == serial.info
     @test auto.M == serial.M
@@ -60,6 +66,7 @@ end
     end
 
     if Threads.nthreads() > 1
+        # Threaded sparse execution is the supported shared-memory parallel path.
         sparse_serial = feast(sparse(A), sparse(B), interval; M0=n,
                               fpm=copy(fpm), backend=:serial)
         sparse_threaded = feast(sparse(A), sparse(B), interval; M0=n,

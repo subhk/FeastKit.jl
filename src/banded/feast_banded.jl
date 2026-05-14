@@ -1,5 +1,9 @@
 # Feast banded matrix routines
 # Translated from dzfeast_banded.f90
+#
+# Banded arrays use LAPACK-style column storage. Symmetric/Hermitian matrices
+# store the diagonal at row k + 1 and upper bands above it; general shifted
+# systems are expanded into gbtrf!/gbtrs! storage before factorization.
 
 
 function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
@@ -24,6 +28,8 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
     size(A, 1) >= kla + 1 || throw(ArgumentError("A matrix storage insufficient for kla"))
     size(B, 1) >= klb + 1 || throw(ArgumentError("B matrix storage insufficient for klb"))
 
+    # Direct solves cache one factorization per contour point. Iterative solves
+    # reuse the same shifted matvec closure and update only the current shift.
     solver_choice = solver == :iterative ? :gmres : solver
     solver_choice = solver_choice in (:direct, :gmres) ? solver_choice : :invalid
     solver_choice == :invalid &&
@@ -66,6 +72,8 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
     tmpBx = zeros(Complex{T}, N)
     current_shift = Ref(zero(Complex{T}))
 
+    # GMRES sees a dense-looking linear operator, but each multiply touches only
+    # the stored band entries of A and B.
     function shifted_mul!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
         symmetric_banded_matvec!(tmpBx, B, klb, x)
         symmetric_banded_matvec!(tmpAx, A, kla, x)
@@ -192,6 +200,8 @@ function feast_sbgvx!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
     end
 end
 
+# Return A[i,j] from upper-stored symmetric banded storage without materializing
+# the dense matrix.
 @inline function symmetric_banded_get(A::Matrix{T}, k::Int, i::Int, j::Int) where T
     abs(i - j) > k && return zero(T)
     if i <= j
@@ -230,6 +240,8 @@ function symmetric_banded_matvec!(y::AbstractVector{S}, A::Matrix{T}, k::Int, x:
     fill!(y, zero(S))
     N = length(x)
 
+    # Walk columns and mirror off-diagonal contributions so symmetric storage is
+    # applied as a full matrix-vector product.
     for j in 1:N
         xj = x[j]
         imin = max(1, j - k)
@@ -246,6 +258,8 @@ function symmetric_banded_matvec!(y::AbstractVector{S}, A::Matrix{T}, k::Int, x:
     return y
 end
 
+# General banded storage keeps signed offsets, so lower and upper entries are
+# read directly instead of mirrored.
 @inline function general_banded_get(A::Matrix{T}, k::Int, i::Int, j::Int) where T
     abs(i - j) > k && return zero(T)
     row = k + 1 + i - j
@@ -304,6 +318,8 @@ function _solve_banded_shifted!(dest::AbstractMatrix{Complex{T}},
                                 apply_shift!::F,
                                 solver::Symbol, tol::T,
                                 maxiter::Int, restart::Int) where {T<:Real,F}
+    # Share dense shifted-solve logic so direct/iterative stopping behavior stays
+    # consistent between dense and banded FEAST paths.
     return solve_dense_shifted!(dest, rhs, apply_shift!, solver, tol, maxiter, restart)
 end
 
@@ -401,7 +417,8 @@ function feast_hbgvx!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}}, ka::Int, kb:
     end
 end
 
-# Helper functions for banded matrix operations
+# Helper functions for tests, examples, and compatibility wrappers that need to
+# convert between compact FEAST/LAPACK storage and ordinary Julia matrices.
 
 function banded_to_full(A_banded::Matrix{T}, k::Int, N::Int) where T
     # Convert banded matrix to full format
@@ -465,6 +482,9 @@ function banded_to_full_complex_symmetric(A_banded::Matrix{Complex{T}}, k::Int, 
     return A_full
 end
 
+# Hermitian lookup conjugates the mirrored entry; complex-symmetric lookup below
+# mirrors without conjugation. Keeping both helpers explicit prevents accidental
+# structure changes in the complex paths.
 @inline function hermitian_banded_get(A::Matrix{Complex{T}}, k::Int, i::Int, j::Int) where T<:Real
     abs(i - j) > k && return zero(Complex{T})
     if i <= j
@@ -569,6 +589,8 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
     B_is_identity = B === nothing
     Q_basis = zeros(Complex{T}, N, M0)
     _feast_seeded_subspace_complex!(Q_basis)
+    # These workspaces are kept outside the refinement loop to avoid allocating
+    # during contour solves, Rayleigh-Ritz projection, and residual checks.
     solutions = similar(Q_basis)
     rhs_buffer = similar(Q_basis)
     zAq = zeros(Complex{T}, M0, M0)

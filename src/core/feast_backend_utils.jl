@@ -50,6 +50,8 @@ function determine_parallel_backend(parallel::Symbol, comm=nothing)
 end
 
 function _select_parallel_backend(requested::Symbol, comm=nothing; allow_fallback::Bool=false)
+    # Strict requests fail early with actionable setup guidance. Auto/fallback
+    # requests can still degrade to a backend that is actually available.
     if !allow_fallback && requested == :mpi && !_mpi_backend_ready(comm)
         throw(ArgumentError("Requested backend :mpi is not available. Initialize MPI and pass comm=MPI.COMM_WORLD, or use backend=:auto to allow fallback."))
     elseif !allow_fallback && requested == :distributed && nworkers() <= 1
@@ -67,6 +69,8 @@ end
 
 function _backend_fallback(reason::AbstractString, strict_backend::Bool,
                            A, B, interval, M0, fpm)
+    # Shared fallback path keeps warning text and serial execution behavior
+    # consistent across unsupported backend/storage combinations.
     if strict_backend
         throw(ArgumentError(reason))
     end
@@ -103,6 +107,8 @@ function feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads;
         end
 
         if A isa SparseMatrixCSC && B isa SparseMatrixCSC
+            # Parallel sparse solvers mutate their inputs during factorization,
+            # so copy user matrices before handing them to backend-specific code.
             return pfeast_scsrgv!(copy(A), copy(B), interval[1], interval[2], M0, fpm;
                                   use_threads=(backend == :threads))
         elseif A isa Matrix && B isa Matrix
@@ -140,6 +146,8 @@ function _is_identity_matrix(B::SparseMatrixCSC)
     colptr = B.colptr
     one_val = one(eltype(B))
     @inbounds for col in 1:n
+        # A sparse identity has exactly one stored entry in each column and that
+        # entry must sit on the diagonal with value one.
         start = colptr[col]
         stop = colptr[col + 1] - 1
         stop == start || return false

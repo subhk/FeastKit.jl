@@ -24,7 +24,9 @@ Base.length(p::FeastParameters) = length(p.fpm)
 Base.size(p::FeastParameters) = size(p.fpm)
 Base.convert(::Type{Vector{Int}}, p::FeastParameters) = p.fpm
 
-# Feast workspace structure for real symmetric problems
+# Reusable FEAST workspace for real symmetric problems. The RCI kernels mutate
+# these fields in place so storage-specific solvers can avoid inner-loop
+# allocations.
 mutable struct FeastWorkspaceReal{T<:Real}
     N::Int
     M0::Int
@@ -48,7 +50,9 @@ mutable struct FeastWorkspaceReal{T<:Real}
     end
 end
 
-# Feast workspace structure for complex Hermitian problems
+# Reusable FEAST workspace for complex Hermitian problems. Real work buffers are
+# retained for compatibility with FEAST's RCI signatures; complex buffers hold
+# contour solves and reduced moment matrices.
 mutable struct FeastWorkspaceComplex{T<:Real}
     N::Int
     M0::Int
@@ -72,7 +76,12 @@ mutable struct FeastWorkspaceComplex{T<:Real}
     end
 end
 
-# Feast result structure for Hermitian/symmetric problems (real eigenvalues)
+"""
+    FeastResult
+
+Result container for Hermitian or symmetric FEAST solves, where eigenvalues are
+real and eigenvectors may be real or complex depending on the input storage.
+"""
 struct FeastResult{T<:Real, VT}
     lambda::Vector{T}
     q::Matrix{VT}
@@ -83,7 +92,11 @@ struct FeastResult{T<:Real, VT}
     loop::Int
 end
 
-# Feast result structure for general (non-Hermitian) problems (complex eigenvalues)
+"""
+    FeastGeneralResult
+
+Result container for non-Hermitian FEAST solves over a complex search contour.
+"""
 struct FeastGeneralResult{T<:Real}
     lambda::Vector{Complex{T}}
     q::Matrix{Complex{T}}
@@ -189,7 +202,12 @@ mutable struct FeastPolyRCIState{T<:Real}
     FeastPolyRCIState{T}() where T<:Real = new{T}(false)
 end
 
-# Integration contour structure
+"""
+    FeastContour(nodes, weights)
+
+Integration contour data passed to custom-contour variants. Nodes and weights
+must have matching lengths and are copied into RCI state before iteration.
+"""
 struct FeastContour{T<:Real}
     Zne::Vector{Complex{T}}
     Wne::Vector{Complex{T}}

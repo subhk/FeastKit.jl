@@ -5,6 +5,8 @@ using FeastKit
 using LinearAlgebra, SparseArrays
 using Random
 
+# Minimal callable wrapper used to verify that matrix-free operators can store
+# arbitrary user data and still participate in LinearAlgebra.mul!.
 struct DenseTestMul{M}
     A::M
 end
@@ -21,7 +23,8 @@ end
 @testset "Matrix-Free Feast Tests" begin
     
     @testset "MatrixFreeOperator Types" begin
-        # Test MatrixVecFunction
+        # Exercise both callback styles: one with an operator payload and one
+        # with a closure-only LinearOperator.
         n = 10
         A_mul!(y, op, x) = mul!(y, op.data, x)
         A_data = randn(n, n)
@@ -63,7 +66,8 @@ end
         B_op = LinearOperator{Float64}(B_mul!, (n, n), 
                                       issymmetric=true, ishermitian=true, isposdef=true)
         
-        # Custom linear solver for testing
+        # Custom linear solver for testing the RCI contract: FEAST provides a
+        # complex contour shift and expects Y = (zB - A)^-1 X.
         function test_solver(Y::AbstractMatrix, z::Number, X::AbstractMatrix)
             shifted = z * I - A
             for j in 1:size(X, 2)
@@ -192,6 +196,8 @@ end
     end
 
     @testset "Default Matrix-Free GMRES Solver" begin
+        # No custom solver is supplied here; this verifies that the built-in
+        # GMRES wrapper can operate from matrix-vector callbacks alone.
         n = 5
         A = diagm(0 => collect(1.0:n))
         A_mul!(y, x) = mul!(y, A, x)

@@ -62,6 +62,25 @@ function _repeat_feast_residual_scratch!(A, B, lambda, q, res, Aq, Bq,
     return res
 end
 
+function _repeat_feast_poly_solve_step!(ijob, dmax, N, Ze, work, workc, Aq, Bq,
+                                        fpm, epsout, loop, Emid, r, M0, lambda,
+                                        q, mode, res, info, Zne, Wne, state,
+                                        work_src, workc_src, nrepeat)
+    for _ in 1:nrepeat
+        copyto!(work, work_src)
+        copyto!(workc, workc_src)
+        fill!(Aq, zero(eltype(Aq)))
+        fill!(Bq, zero(eltype(Bq)))
+        fpm[50] = 1
+        fpm[51] = length(Zne)
+        ijob[] = Int(FeastKit.Feast_RCI_SOLVE)
+        FeastKit._feast_poly_grci!(ijob, dmax, N, Ze, work, workc, Aq, Bq,
+                                   fpm, epsout, loop, Emid, r, M0, lambda, q,
+                                   mode, res, info, Zne, Wne; state=state)
+    end
+    return Aq, Bq
+end
+
 @testset "Allocation helper regressions" begin
     @testset "In-place interval reorder" begin
         # Values inside the interval should be compacted to the front while
@@ -194,6 +213,61 @@ end
         bytes = @allocated _repeat_feast_residual_scratch!(A, B, lambda, q,
                                                            res, Aq, Bq,
                                                            residual, 1_000)
+        @test bytes < 1024
+    end
+
+    @testset "Polynomial RCI moment accumulation reuses scratch" begin
+        N = 3
+        M0 = 2
+        dmax = 2
+        work_src = ComplexF64[
+            1.0 + 0.2im  0.3 - 0.1im
+            0.4 - 0.3im  1.1 + 0.5im
+            0.7 + 0.4im  0.2 + 0.9im
+        ]
+        workc_src = ComplexF64[
+            0.8 - 0.2im  0.6 + 0.3im
+            0.1 + 0.7im  1.2 - 0.4im
+            0.5 - 0.6im  0.4 + 0.2im
+        ]
+        work = copy(work_src)
+        workc = copy(workc_src)
+        Aq = zeros(ComplexF64, M0, M0)
+        Bq = similar(Aq)
+        fpm = zeros(Int, 64)
+        lambda = zeros(ComplexF64, M0)
+        q = zeros(ComplexF64, N, M0)
+        res = zeros(Float64, M0)
+        ijob = Ref(-1)
+        Ze = Ref(0.0 + 0.0im)
+        epsout = Ref(0.0)
+        loop = Ref(0)
+        mode = Ref(0)
+        info = Ref(0)
+        Emid = 0.0 + 0.0im
+        r = 1.0
+        Zne = ComplexF64[0.5 + 0.0im, -0.5 + 0.0im]
+        Wne = ComplexF64[0.25 + 0.0im, 0.25 + 0.0im]
+        state = FeastKit.FeastPolyRCIState{Float64}()
+
+        FeastKit._feast_poly_grci!(ijob, dmax, N, Ze, work, workc, Aq, Bq,
+                                   fpm, epsout, loop, Emid, r, M0, lambda, q,
+                                   mode, res, info, Zne, Wne; state=state)
+        @test ijob[] == Int(FeastKit.Feast_RCI_FACTORIZE)
+
+        _repeat_feast_poly_solve_step!(ijob, dmax, N, Ze, work, workc, Aq, Bq,
+                                       fpm, epsout, loop, Emid, r, M0, lambda,
+                                       q, mode, res, info, Zne, Wne, state,
+                                       work_src, workc_src, 1)
+
+        expected = Wne[1] * (work_src' * workc_src)
+        @test Aq ≈ expected
+        @test Bq ≈ Zne[1] * expected
+
+        bytes = @allocated _repeat_feast_poly_solve_step!(
+            ijob, dmax, N, Ze, work, workc, Aq, Bq, fpm, epsout, loop, Emid,
+            r, M0, lambda, q, mode, res, info, Zne, Wne, state, work_src,
+            workc_src, 1_000)
         @test bytes < 1024
     end
 

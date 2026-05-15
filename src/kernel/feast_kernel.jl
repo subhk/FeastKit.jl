@@ -965,6 +965,28 @@ end
 # Polynomial RCI interfaces
 ############################
 
+@inline function _feast_poly_contour_vector(::Type{T},
+                                           nodes::Vector{Complex{T}}) where T<:Real
+    return nodes
+end
+
+function _feast_poly_contour_vector(::Type{T},
+                                    nodes::AbstractVector{<:Complex}) where T<:Real
+    return Complex{T}.(nodes)
+end
+
+function _ensure_poly_rci_state!(state::FeastPolyRCIState{T}, N::Int,
+                                 M0::Int) where T<:Real
+    if size(state.moment) != (M0, M0)
+        state.moment = Matrix{Complex{T}}(undef, M0, M0)
+    end
+    if length(state.residual) != N
+        state.residual = Vector{Complex{T}}(undef, N)
+    end
+    state.initialized = true
+    return state
+end
+
 function feast_grcipevx!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
                          work::Matrix{Complex{T}}, workc::Matrix{Complex{T}},
                          Aq::Matrix{Complex{T}}, Bq::Matrix{Complex{T}},
@@ -973,12 +995,13 @@ function feast_grcipevx!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
                          lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
                          mode::Ref{Int}, res::Vector{T}, info::Ref{Int},
                          Zne::AbstractVector{Complex{TZ}},
-                         Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
-    contour_nodes = Complex{T}.(Zne)
-    contour_weights = Complex{T}.(Wne)
+                         Wne::AbstractVector{Complex{TW}};
+                         state::FeastPolyRCIState{T}=FeastPolyRCIState{T}()) where {T<:Real, TZ<:Real, TW<:Real}
+    contour_nodes = _feast_poly_contour_vector(T, Zne)
+    contour_weights = _feast_poly_contour_vector(T, Wne)
     _feast_poly_grci!(ijob, dmax, N, Ze, work, workc, Aq, Bq, fpm, epsout, loop,
                       Emid, r, M0, lambda, q, mode, res, info,
-                      contour_nodes, contour_weights)
+                      contour_nodes, contour_weights; state=state)
 end
 
 function feast_grcipev!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
@@ -987,11 +1010,12 @@ function feast_grcipev!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
                         fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
                         Emid::Complex{T}, r::T, M0::Int,
                         lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
-                        mode::Ref{Int}, res::Vector{T}, info::Ref{Int}) where T<:Real
+                        mode::Ref{Int}, res::Vector{T}, info::Ref{Int};
+                        state::FeastPolyRCIState{T}=FeastPolyRCIState{T}()) where T<:Real
     contour = feast_gcontour(Emid, r, fpm)
     feast_grcipevx!(ijob, dmax, N, Ze, work, workc, Aq, Bq, fpm, epsout, loop,
                     Emid, r, M0, lambda, q, mode, res, info,
-                    contour.Zne, contour.Wne)
+                    contour.Zne, contour.Wne; state=state)
 end
 
 function feast_srcipevx!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
@@ -1002,12 +1026,13 @@ function feast_srcipevx!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
                          lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
                          mode::Ref{Int}, res::Vector{T}, info::Ref{Int},
                          Zne::AbstractVector{Complex{TZ}},
-                         Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
-    contour_nodes = Complex{T}.(Zne)
-    contour_weights = Complex{T}.(Wne)
+                         Wne::AbstractVector{Complex{TW}};
+                         state::FeastPolyRCIState{T}=FeastPolyRCIState{T}()) where {T<:Real, TZ<:Real, TW<:Real}
+    contour_nodes = _feast_poly_contour_vector(T, Zne)
+    contour_weights = _feast_poly_contour_vector(T, Wne)
     _feast_poly_grci!(ijob, dmax, N, Ze, work, workc, Aq, Bq, fpm, epsout, loop,
                       Emid, T(r), M0, lambda, q, mode, res, info,
-                      contour_nodes, contour_weights)
+                      contour_nodes, contour_weights; state=state)
 end
 
 function feast_srcipev!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
@@ -1016,21 +1041,28 @@ function feast_srcipev!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
                         fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
                         Emid::Complex{T}, r::Real, M0::Int,
                         lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
-                        mode::Ref{Int}, res::Vector{T}, info::Ref{Int}) where T<:Real
+                        mode::Ref{Int}, res::Vector{T}, info::Ref{Int};
+                        state::FeastPolyRCIState{T}=FeastPolyRCIState{T}()) where T<:Real
     contour = feast_gcontour(Emid, T(r), fpm)
     feast_srcipevx!(ijob, dmax, N, Ze, work, workc, Aq, Bq, fpm, epsout, loop,
                     Emid, r, M0, lambda, q, mode, res, info,
-                    contour.Zne, contour.Wne)
+                    contour.Zne, contour.Wne; state=state)
 end
 
-function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
-                           work::Matrix{Complex{T}}, workc::Matrix{Complex{T}},
-                           Aq::Matrix{Complex{T}}, Bq::Matrix{Complex{T}},
-                           fpm::Vector{Int}, epsout::Ref{T}, loop::Ref{Int},
-                           Emid::Complex{T}, r::T, M0::Int,
-                           lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
-                           mode::Ref{Int}, res::Vector{T}, info::Ref{Int},
-                           Zne::Vector{Complex{T}}, Wne::Vector{Complex{T}}) where T<:Real
+@views function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int,
+                                  Ze::Ref{Complex{T}},
+                                  work::Matrix{Complex{T}},
+                                  workc::Matrix{Complex{T}},
+                                  Aq::Matrix{Complex{T}},
+                                  Bq::Matrix{Complex{T}},
+                                  fpm::Vector{Int}, epsout::Ref{T},
+                                  loop::Ref{Int}, Emid::Complex{T}, r::T,
+                                  M0::Int, lambda::Vector{Complex{T}},
+                                  q::Matrix{Complex{T}}, mode::Ref{Int},
+                                  res::Vector{T}, info::Ref{Int},
+                                  Zne::Vector{Complex{T}},
+                                  Wne::Vector{Complex{T}};
+                                  state::FeastPolyRCIState{T}=FeastPolyRCIState{T}()) where T<:Real
 
     # Use fpm slots 50-64 for internal state storage
     # fpm[50] = current integration point e
@@ -1068,6 +1100,8 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
         fpm[51] = length(Zne)
         fpm[52] = 0
         fpm[53] = 1
+
+        _ensure_poly_rci_state!(state, N, M0)
 
         fill!(Aq, zero(Complex{T}))
         fill!(Bq, zero(Complex{T}))
@@ -1110,9 +1144,21 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
         e = fpm[50]  # Get current integration point from fpm
         ne = fpm[51]  # Get total integration points from fpm
 
-        temp = work[:, 1:M0]' * workc[:, 1:M0]
-        Aq .+= Wne[e] * temp
-        Bq .+= Wne[e] * Zne[e] * temp
+        if !state.initialized
+            _ensure_poly_rci_state!(state, N, M0)
+        end
+
+        moment = state.moment
+        mul!(moment, adjoint(view(work, :, 1:M0)), view(workc, :, 1:M0))
+        weight = Wne[e]
+        zweight = weight * Zne[e]
+        @inbounds for col in 1:M0
+            for row in 1:M0
+                moment_val = moment[row, col]
+                Aq[row, col] += weight * moment_val
+                Bq[row, col] += zweight * moment_val
+            end
+        end
 
         fpm[50] = e + 1  # Store incremented counter in fpm
         if e < ne
@@ -1123,19 +1169,28 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
 
         fpm[50] = 1  # Reset for next refinement loop
         try
-            F = eigen(Aq[1:M0, 1:M0], Bq[1:M0, 1:M0])
+            F = eigen(view(Aq, 1:M0, 1:M0), view(Bq, 1:M0, 1:M0))
             lambda_red = F.values
             v_red = F.vectors
 
             M = 0
+            work_basis = view(work, :, 1:M0)
             for i in 1:M0
                 if feast_inside_gcontour(lambda_red[i], Emid, r; fpm=fpm)
                     M += 1
                     lambda[M] = lambda_red[i]
-                    q[:, M] .= work[:, 1:M0] * v_red[:, i]
-                    q_norm = norm(q[:, M])
+                    q_col = view(q, :, M)
+                    mul!(q_col, work_basis, view(v_red, :, i))
+                    q_norm_sq = zero(T)
+                    @inbounds for row in 1:N
+                        q_norm_sq += abs2(q[row, M])
+                    end
+                    q_norm = sqrt(q_norm_sq)
                     if q_norm > 0
-                        q[:, M] ./= q_norm
+                        inv_norm = inv(q_norm)
+                        @inbounds for row in 1:N
+                            q[row, M] *= inv_norm
+                        end
                     end
                 end
             end
@@ -1144,6 +1199,7 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
                 info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                 ijob[] = Int(Feast_RCI_DONE)
                 fpm[53] = 0  # Clear initialization flag
+                state.initialized = false
                 return
             end
 
@@ -1155,6 +1211,7 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
             info[] = Int(Feast_ERROR_LAPACK)
             ijob[] = Int(Feast_RCI_DONE)
             fpm[53] = 0  # Clear initialization flag
+            state.initialized = false
             return
         end
     end
@@ -1162,8 +1219,14 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
     if ijob[] == Int(Feast_RCI_MULT_A)
         M = fpm[52]  # Get M from fpm
         max_res = zero(T)
+        if !state.initialized
+            _ensure_poly_rci_state!(state, N, M0)
+        end
+        residual = state.residual
         for j in 1:M
-            residual = view(workc, :, j) .- lambda[j] .* view(q, :, j)
+            @inbounds for row in 1:N
+                residual[row] = workc[row, j] - lambda[j] * q[row, j]
+            end
             # Relative residual: normalize by max(|λ|, 1)
             res[j] = norm(residual) / max(abs(lambda[j]), one(T))
             max_res = max(max_res, res[j])
@@ -1178,12 +1241,13 @@ function _feast_poly_grci!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}
             mode[] = M
             ijob[] = Int(Feast_RCI_DONE)
             fpm[53] = 0  # Clear initialization flag
+            state.initialized = false
             return
         else
             loop[] += 1
             fill!(Aq, zero(Complex{T}))
             fill!(Bq, zero(Complex{T}))
-            work[:, 1:M] .= q[:, 1:M]
+            copyto!(view(work, :, 1:M), view(q, :, 1:M))
             fpm[50] = 1  # Reset integration point counter
             Ze[] = Zne[1]
             ijob[] = Int(Feast_RCI_FACTORIZE)

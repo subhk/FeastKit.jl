@@ -198,8 +198,12 @@ Explicit state object for the polynomial RCI kernel `_feast_poly_grci!`.
 """
 mutable struct FeastPolyRCIState{T<:Real}
     initialized::Bool
+    moment::Matrix{Complex{T}}
+    residual::Vector{Complex{T}}
 
-    FeastPolyRCIState{T}() where T<:Real = new{T}(false)
+    function FeastPolyRCIState{T}() where T<:Real
+        new{T}(false, Matrix{Complex{T}}(undef, 0, 0), Complex{T}[])
+    end
 end
 
 """

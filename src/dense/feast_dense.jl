@@ -661,10 +661,12 @@ function _feast_polynomial_rci!(coeffs::Vector{Matrix{Complex{T}}}, d::Int,
     factorization = nothing
     poly_matrix = similar(coeffs[1])
     scratch_vec = zeros(Complex{T}, N)
+    rci_state = FeastPolyRCIState{T}()
 
     while true
         feast_grcipevx!(ijob, d, N, Ze, work, workc, Aq, Bq, fpm, epsout, loop,
-                        Emid, r, M0, lambda, q, mode, res, info, Zne, Wne)
+                        Emid, r, M0, lambda, q, mode, res, info, Zne, Wne;
+                        state=rci_state)
 
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             _evaluate_polynomial_matrix!(poly_matrix, coeffs, Ze[])
@@ -680,7 +682,8 @@ function _feast_polynomial_rci!(coeffs::Vector{Matrix{Complex{T}}}, d::Int,
                 break
             end
             try
-                workc[:, 1:M0] .= factorization \ work[:, 1:M0]
+                copyto!(workc, work)
+                ldiv!(factorization, workc)
             catch e
                 info[] = Int(Feast_ERROR_LAPACK)
                 break

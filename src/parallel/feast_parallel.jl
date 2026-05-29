@@ -190,6 +190,7 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
 
     # Factorize each shifted system once and reuse across refinement loops.
     factors = _pfeast_factorize_contour(A, B, Zne, use_threads)
+    B_is_identity = (B == I)   # standard problem: skip per-loop identity matmuls
     verbose && println("pfeast_sygv!: $(length(Zne)) contour points, threads=$(Threads.nthreads())")
 
     for loop in 1:max_loops
@@ -200,7 +201,7 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
         # Q_proj = sum 2*Wne * (z*B - A)^{-1} (B*Q), with BQ = B*Q formed once.
         qblk = view(Q, :, 1:active_dim)
         bq = view(BQ_loop, :, 1:active_dim)
-        mul!(bq, B, qblk)
+        B_is_identity ? copyto!(bq, qblk) : mul!(bq, B, qblk)
         _pfeast_accumulate_qproj!(view(Q_proj, :, 1:active_dim), factors, bq,
                                   Wne, use_threads)
 
@@ -222,8 +223,15 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
             # Reduced Hermitian-definite pencil: Sq = Qᴴ A Q, Aq = Qᴴ B Q.
             mul!(AQ_r, A, q_rank)
             mul!(Sq_r, adjoint(q_rank), AQ_r)
-            mul!(BQ_r, B, q_rank)
-            mul!(Aq_r, adjoint(q_rank), BQ_r)
+            if B_is_identity
+                fill!(Aq_r, zero(Complex{T}))
+                @inbounds for i in 1:rank
+                    Aq_r[i, i] = one(Complex{T})
+                end
+            else
+                mul!(BQ_r, B, q_rank)
+                mul!(Aq_r, adjoint(q_rank), BQ_r)
+            end
 
             # Solve Sq*v = lambda*Aq*v. Eigenvalues real (Hermitian-definite);
             # the fallback covers a non-positive-definite reduced B.
@@ -645,6 +653,7 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
 
     # Factorize each shifted system once; reuse across refinement loops.
     factors = _pfeast_factorize_contour_sparse(A, B, Zne, use_threads)
+    B_is_identity = (B == I)   # standard problem: skip per-loop identity matmuls
     verbose && println("pfeast_scsrgv!: $(length(Zne)) contour points, threads=$(Threads.nthreads())")
 
     for loop in 1:max_loops
@@ -653,7 +662,7 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
 
         qblk = view(Q, :, 1:active_dim)
         bq = view(BQ_loop, :, 1:active_dim)
-        mul!(bq, B, qblk)
+        B_is_identity ? copyto!(bq, qblk) : mul!(bq, B, qblk)
         _pfeast_accumulate_qproj_sparse!(view(Q_proj, :, 1:active_dim), factors,
                                          bq, Wne, use_threads)
 
@@ -673,8 +682,15 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
 
             mul!(AQ_r, A, q_rank)
             mul!(Sq_r, adjoint(q_rank), AQ_r)
-            mul!(BQ_r, B, q_rank)
-            mul!(Aq_r, adjoint(q_rank), BQ_r)
+            if B_is_identity
+                fill!(Aq_r, zero(Complex{T}))
+                @inbounds for i in 1:rank
+                    Aq_r[i, i] = one(Complex{T})
+                end
+            else
+                mul!(BQ_r, B, q_rank)
+                mul!(Aq_r, adjoint(q_rank), BQ_r)
+            end
 
             local lambda_red, v_red
             try

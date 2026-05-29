@@ -106,6 +106,7 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     # Each rank factorizes ONLY its local contour shifts, once, and reuses them
     # across refinement loops. This is the work MPI parallelizes across ranks.
     local_factors = [lu(z * B - A) for z in mpi_state.local_Zne]
+    B_is_identity = (B == I)   # standard problem: skip the per-loop identity matmuls
 
     # Scratch reused across loops. The reduced Rayleigh-Ritz problem mirrors the
     # serial dense Hermitian path (complex QR rank-compression + Hermitian RR),
@@ -145,7 +146,7 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         # not root-only) — that scales better here than idling ranks on root.
         qblk = view(Q, :, 1:active_dim)
         bq = view(BQ_loop, :, 1:active_dim)
-        mul!(bq, B, qblk)
+        B_is_identity ? copyto!(bq, qblk) : mul!(bq, B, qblk)
         qpl = view(Q_proj_local, :, 1:active_dim)
         fill!(qpl, zero(Complex{T}))
         for (e, Fe) in enumerate(local_factors)
@@ -171,8 +172,16 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
 
             mul!(AQ_r, A, q_rank)
             mul!(Sq_r, adjoint(q_rank), AQ_r)
-            mul!(BQ_r, B, q_rank)
-            mul!(Aq_r, adjoint(q_rank), BQ_r)
+            if B_is_identity
+                # Qo orthonormal ⇒ Qᴴ B Q = I; skip the dense identity matmul.
+                fill!(Aq_r, zero(Complex{T}))
+                @inbounds for i in 1:rank_r
+                    Aq_r[i, i] = one(Complex{T})
+                end
+            else
+                mul!(BQ_r, B, q_rank)
+                mul!(Aq_r, adjoint(q_rank), BQ_r)
+            end
 
             local lambda_red, v_red
             try
@@ -355,6 +364,7 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
 
     # Each rank factorizes only its local contour shifts, once, reused across loops.
     local_factors = [lu(z * B - A) for z in mpi_state.local_Zne]
+    B_is_identity = (B == I)   # standard problem: skip the per-loop identity matmuls
 
     Q_proj_local = Matrix{Complex{T}}(undef, N, M0)
     BQ_loop = Matrix{Complex{T}}(undef, N, M0)
@@ -388,7 +398,7 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
         # Distributed contour solves: each rank applies only its local resolvents.
         qblk = view(Q, :, 1:active_dim)
         bq = view(BQ_loop, :, 1:active_dim)
-        mul!(bq, B, qblk)
+        B_is_identity ? copyto!(bq, qblk) : mul!(bq, B, qblk)
         qpl = view(Q_proj_local, :, 1:active_dim)
         fill!(qpl, zero(Complex{T}))
         for (e, Fe) in enumerate(local_factors)
@@ -422,8 +432,15 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                     Aq_r = view(Aq, 1:rank_r, 1:rank_r)
                     mul!(AQ_r, A, q_rank)
                     mul!(Sq_r, adjoint(q_rank), AQ_r)
-                    mul!(BQ_r, B, q_rank)
-                    mul!(Aq_r, adjoint(q_rank), BQ_r)
+                    if B_is_identity
+                        fill!(Aq_r, zero(Complex{T}))
+                        @inbounds for i in 1:rank_r
+                            Aq_r[i, i] = one(Complex{T})
+                        end
+                    else
+                        mul!(BQ_r, B, q_rank)
+                        mul!(Aq_r, adjoint(q_rank), BQ_r)
+                    end
                     local lambda_red, v_red
                     try
                         Fr = eigen(Hermitian(Sq_r), Hermitian(Aq_r))
@@ -911,6 +928,7 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
     # across all refinement loops. Iterative solves have nothing to cache.
     local_factors = solver_choice == :direct ?
         [lu(z * B - A) for z in mpi_state.local_Zne] : nothing
+    B_is_identity = (B == I)   # standard problem: skip per-loop identity matmuls
     BQ_loop = similar(Q_basis)
     Q_proj_local_buf = similar(Q_basis)
 
@@ -936,7 +954,7 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
         # subspace (complex) is needed. The reduced pencil is rebuilt from an
         # ORTHONORMAL basis below — what the old rank-deficient moment path lacked.
         if solver_choice == :direct
-            mul!(BQ_loop, B, Q_basis)
+            B_is_identity ? copyto!(BQ_loop, Q_basis) : mul!(BQ_loop, B, Q_basis)
             fill!(Q_proj_local_buf, zero(Complex{T}))
             for (e, Fe) in enumerate(local_factors)
                 Y = Fe \ BQ_loop
@@ -967,8 +985,16 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
             Qo = Matrix(qr!(copyto!(AQc, Q_proj)).Q)
             mul!(AQc, A, Qo)
             mul!(Sq_herm, adjoint(Qo), AQc)
-            mul!(BQc, B, Qo)
-            mul!(Aq_herm, adjoint(Qo), BQc)
+            if B_is_identity
+                # Qo orthonormal ⇒ Qᴴ B Q = I; skip the dense identity matmul.
+                fill!(Aq_herm, zero(Complex{T}))
+                @inbounds for i in 1:size(Aq_herm, 1)
+                    Aq_herm[i, i] = one(Complex{T})
+                end
+            else
+                mul!(BQc, B, Qo)
+                mul!(Aq_herm, adjoint(Qo), BQc)
+            end
             F = try
                 eigen(Hermitian(Sq_herm), Hermitian(Aq_herm))
             catch err
@@ -1081,6 +1107,7 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
     # across all refinement loops. Iterative solves have nothing to cache.
     local_factors = solver_choice == :direct ?
         [lu(z * B - A) for z in mpi_state.local_Zne] : nothing
+    B_is_identity = (B == I)   # standard problem: skip per-loop identity matmuls
     BQ_loop = similar(Q_basis)
     Q_proj_local_buf = similar(Q_basis)
 
@@ -1105,7 +1132,7 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
         if solver_choice == :direct
             # Cached factorizations: apply each local resolvent to B*Q. General
             # FEAST uses the full contour, so the weight is Wne[e] (no factor 2).
-            mul!(BQ_loop, B, Q_basis)
+            B_is_identity ? copyto!(BQ_loop, Q_basis) : mul!(BQ_loop, B, Q_basis)
             fill!(Q_proj_local_buf, zero(Complex{T}))
             for (e, Fe) in enumerate(local_factors)
                 Y = Fe \ BQ_loop
@@ -1135,8 +1162,16 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
             Qo = Matrix(qr!(copyto!(AQ, Q_proj)).Q)
             mul!(AQ, A, Qo)
             mul!(Ared, adjoint(Qo), AQ)
-            mul!(BQ, B, Qo)
-            mul!(Bred, adjoint(Qo), BQ)
+            if B_is_identity
+                # Qo orthonormal ⇒ Qᴴ B Q = I; skip the dense identity matmul.
+                fill!(Bred, zero(Complex{T}))
+                @inbounds for i in 1:size(Bred, 1)
+                    Bred[i, i] = one(Complex{T})
+                end
+            else
+                mul!(BQ, B, Qo)
+                mul!(Bred, adjoint(Qo), BQ)
+            end
             F = eigen(Ared, Bred)
             lambda_vec .= F.values
             for idx in 1:M0

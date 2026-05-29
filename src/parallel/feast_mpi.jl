@@ -12,36 +12,36 @@ mutable struct MPIFeastState{T<:Real}
     rank::Int
     size::Int
     root::Int
-    
+
     # Feast parameters
     N::Int
     M0::Int
     ne::Int
-    
+
     # Local contour points assigned to this rank
     local_points::Vector{Int}
     local_Zne::Vector{Complex{T}}
     local_Wne::Vector{Complex{T}}
-    
+
     # Convergence state
     converged::Bool
     loop::Int
     epsout::T
     info::Int
-    
+
     function MPIFeastState{T}(comm::MPI.Comm, N::Int, M0::Int, ne::Int, root::Int=0) where T<:Real
         rank = MPI.Comm_rank(comm)
         size = MPI.Comm_size(comm)
-        
+
         # Distribute contour points among MPI ranks
         points_per_rank = div(ne, size)
         remainder = ne % size
-        
+
         # Calculate local points for this rank
         start_idx = rank * points_per_rank + min(rank, remainder) + 1
         local_count = points_per_rank + (rank < remainder ? 1 : 0)
         local_points = collect(start_idx:(start_idx + local_count - 1))
-        
+
         new(
             comm, rank, size, root,
             N, M0, ne,
@@ -59,7 +59,7 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                          comm::MPI.Comm = MPI.COMM_WORLD,
                          root::Int = 0) where T<:Real
     # MPI parallel Feast for real symmetric generalized eigenvalue problems
-    
+
     # Initialize MPI if not already done
     if !MPI.Initialized()
         MPI.Init()
@@ -71,135 +71,173 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
 
     # Input validation (on all ranks)
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
-    
+
     # Generate integration contour (on root, then broadcast)
     contour = nothing
     if rank == root
         contour = feast_contour(Emin, Emax, fpm)
     end
-    
+
     # Broadcast contour to all ranks
     ne = MPI.bcast(rank == root ? length(contour.Zne) : 0, root, comm)
     Zne_global = MPI.bcast(rank == root ? contour.Zne : Vector{Complex{T}}(undef, ne), root, comm)
     Wne_global = MPI.bcast(rank == root ? contour.Wne : Vector{Complex{T}}(undef, ne), root, comm)
-    
+
     # Create MPI state
     mpi_state = MPIFeastState{T}(comm, N, M0, ne, root)
-    
+
     # Distribute contour points
     for (i, global_idx) in enumerate(mpi_state.local_points)
         mpi_state.local_Zne[i] = Zne_global[global_idx]
         mpi_state.local_Wne[i] = Wne_global[global_idx]
     end
-    
-    # Initialize workspace (all ranks need full workspace)
-    workspace = FeastWorkspaceReal{T}(N, M0)
-    _feast_seeded_subspace!(workspace.work)
-    
-    # Broadcast initial subspace from root
-    MPI.Bcast!(workspace.work, root, comm)
-    
-    # Initialize Feast parameters
+
     feastdefault!(fpm)
     eps_tolerance = feast_tolerance(fpm, T)
     max_loops = fpm[4]
-    
-    # Main Feast refinement loop
+
+    # Trial subspace: deterministic complex seed (identical on every rank),
+    # broadcast from root so all ranks start bit-for-bit identical.
+    Q = Matrix{Complex{T}}(undef, N, M0)
+    _feast_seeded_subspace_complex!(Q)
+    MPI.Bcast!(Q, root, comm)
+    active_dim = M0
+
+    # Each rank factorizes ONLY its local contour shifts, once, and reuses them
+    # across refinement loops. This is the work MPI parallelizes across ranks.
+    local_factors = [lu(z * B - A) for z in mpi_state.local_Zne]
+
+    # Scratch reused across loops. The reduced Rayleigh-Ritz problem mirrors the
+    # serial dense Hermitian path (complex QR rank-compression + Hermitian RR),
+    # which the old moment-based MPI path lacked — that is why it returned wrong
+    # eigenpairs for M0 larger than the number of eigenvalues in the interval.
+    Q_proj_local = Matrix{Complex{T}}(undef, N, M0)
+    BQ_loop = Matrix{Complex{T}}(undef, N, M0)
+    q_basis = Matrix{Complex{T}}(undef, N, M0)
+    AQ = Matrix{Complex{T}}(undef, N, M0)
+    BQm = Matrix{Complex{T}}(undef, N, M0)
+    Sq = Matrix{Complex{T}}(undef, M0, M0)
+    Aq = Matrix{Complex{T}}(undef, M0, M0)
+    qcol = Vector{Complex{T}}(undef, N)
+    lambda = zeros(T, M0)
+    q = zeros(T, N, M0)
+    res = zeros(T, M0)
+    lambda_tmp = similar(lambda)
+    perm = Vector{Int}(undef, M0)
+    q_tmp = similar(q)
+    residual_Aq = Vector{T}(undef, N)
+    residual_Bq = Vector{T}(undef, N)
+    residual = Vector{T}(undef, N)
+
+    epsout = T(Inf)
+    info_code = Int(Feast_SUCCESS)
+    loop_done = 0
+    M_found = 0
+
     for loop in 1:max_loops
+        loop_done = loop
         mpi_state.loop = loop
 
-        # Compute local moment contributions (now returns Q_proj too)
-        local_Aq, local_Sq, local_Q_proj = mpi_compute_local_moments(A, B, workspace.work,
-                                                      mpi_state.local_Zne,
-                                                      mpi_state.local_Wne, M0)
+        # Each rank applies its local contour resolvents to the trial subspace,
+        # then the partial filtered subspaces are summed across ranks.
+        qblk = view(Q, :, 1:active_dim)
+        bq = view(BQ_loop, :, 1:active_dim)
+        mul!(bq, B, qblk)
+        qpl = view(Q_proj_local, :, 1:active_dim)
+        fill!(qpl, zero(Complex{T}))
+        for (e, Fe) in enumerate(local_factors)
+            Y = Fe \ bq
+            w = 2 * mpi_state.local_Wne[e]
+            @. qpl += w * Y
+        end
+        global_Q_proj = MPI.Allreduce(Q_proj_local[:, 1:active_dim], MPI.SUM, comm)
 
-        # Reduce (sum) moment matrices AND Q_proj across all ranks
-        global_Aq = MPI.Allreduce(local_Aq, MPI.SUM, comm)
-        global_Sq = MPI.Allreduce(local_Sq, MPI.SUM, comm)
-        global_Q_proj = MPI.Allreduce(local_Q_proj, MPI.SUM, comm)
-
-        # Solve reduced eigenvalue problem (on all ranks for consistency)
-        # IMPORTANT: Solve Sq*v = lambda*Aq*v (consistent with FEAST algorithm)
-        # Aq = sum(w * Q' * Y), Sq = sum(w * z * Q' * Y)
         try
-            # Use Symmetric wrapper - moments should be symmetric for Hermitian problems
-            F = try
-                eigen(Symmetric(global_Sq), Symmetric(global_Aq))
-            catch e
-                eigen(global_Sq, global_Aq)
-            end
-            lambda_red = real.(F.values)
-            v_red = real.(F.vectors)
-
-            # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q
-            # This is the core FEAST algorithm - use spectral projector output
-            for idx in 1:M0
-                workspace.q[:, idx] = global_Q_proj * view(v_red, :, idx)
-                workspace.lambda[idx] = lambda_red[idx]
-            end
-
-            # Reorder: put eigenvalues inside the interval first
-            inside_mask = [feast_inside_contour(workspace.lambda[i], Emin, Emax) for i in 1:M0]
-            inside_indices = findall(inside_mask)
-            outside_indices = findall(.!inside_mask)
-            perm = vcat(inside_indices, outside_indices)
-
-            workspace.lambda[1:M0] = workspace.lambda[perm]
-            workspace.q[:, 1:M0] = workspace.q[:, perm]
-
-            M = length(inside_indices)
-
-            if M == 0
-                mpi_state.info = Int(Feast_ERROR_NO_CONVERGENCE)
+            # Orthonormalize / rank-compress the global filtered subspace. All
+            # ranks hold the same global_Q_proj, so they compute identical
+            # reduced problems and stay consistent without further communication.
+            rank_r = _feast_qr_compress!(q_basis, global_Q_proj, active_dim;
+                                         rank_tol=sqrt(eps(T)))
+            if rank_r == 0
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
             end
 
-            # Normalize eigenvectors
-            for j in 1:M
-                q_norm = norm(view(workspace.q, :, j))
-                if q_norm > 0
-                    workspace.q[:, j] ./= q_norm
-                end
+            q_rank = view(q_basis, :, 1:rank_r)
+            AQ_r = view(AQ, :, 1:rank_r)
+            BQ_r = view(BQm, :, 1:rank_r)
+            Sq_r = view(Sq, 1:rank_r, 1:rank_r)
+            Aq_r = view(Aq, 1:rank_r, 1:rank_r)
+
+            mul!(AQ_r, A, q_rank)
+            mul!(Sq_r, adjoint(q_rank), AQ_r)
+            mul!(BQ_r, B, q_rank)
+            mul!(Aq_r, adjoint(q_rank), BQ_r)
+
+            local lambda_red, v_red
+            try
+                Fr = eigen(Hermitian(Sq_r), Hermitian(Aq_r))
+                lambda_red = Fr.values
+                v_red = Fr.vectors
+            catch err
+                (isa(err, PosDefException) || isa(err, LinearAlgebra.LAPACKException)) || rethrow(err)
+                Fr = eigen(Sq_r, Aq_r)
+                lambda_red = real.(Fr.values)
+                v_red = Fr.vectors
             end
 
-            # Compute residuals only for eigenvalues inside interval
-            mpi_compute_residuals!(A, B, workspace.lambda, workspace.q,
-                                 workspace.res, M, comm)
+            for idx in 1:rank_r
+                mul!(qcol, q_rank, view(v_red, :, idx))
+                @inbounds for i in 1:N
+                    q[i, idx] = real(qcol[i])
+                end
+                lambda[idx] = lambda_red[idx]
+            end
 
-            mpi_state.epsout = maximum(workspace.res[1:M])
+            M = _feast_reorder_by_interval!(lambda, q, perm, lambda_tmp, q_tmp,
+                                            Emin, Emax, rank_r)
+            if M == 0
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
 
-            # Check convergence
-            if mpi_state.epsout <= eps_tolerance
+            for j in 1:M
+                nrm = norm(view(q, :, j))
+                nrm > 0 && (view(q, :, j) ./= nrm)
+            end
+
+            # All ranks have identical q/lambda, so the residual is computed
+            # locally (A, B are replicated) — consistent across ranks.
+            feast_residual!(A, B, lambda, q, res, M,
+                            residual_Aq, residual_Bq, residual)
+            epsout = maximum(view(res, 1:M))
+            mpi_state.epsout = epsout
+            M_found = M
+
+            if epsout <= eps_tolerance
                 mpi_state.converged = true
                 mpi_state.info = Int(Feast_SUCCESS)
-                break
+                feast_sort!(lambda, q, res, M)
+                return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
+                                         Int(Feast_SUCCESS), epsout, loop)
             end
 
-            # Prepare for next iteration - use full M0 subspace
-            workspace.work[:, 1:M0] = workspace.q[:, 1:M0]
-
-        catch e
-            mpi_state.info = Int(Feast_ERROR_LAPACK)
+            active_dim = rank_r
+            copyto!(view(Q, :, 1:active_dim), view(q, :, 1:active_dim))
+        catch err
+            info_code = Int(Feast_ERROR_LAPACK)
             break
         end
     end
-    
-    # Final result processing
-    if !mpi_state.converged && mpi_state.info == 0
-        mpi_state.info = Int(Feast_ERROR_NO_CONVERGENCE)
+
+    if info_code == Int(Feast_SUCCESS)
+        info_code = Int(Feast_ERROR_NO_CONVERGENCE)
     end
-    
-    # Count final eigenvalues
-    M = count(i -> feast_inside_contour(workspace.lambda[i], Emin, Emax), 1:M0)
-    
-    # Sort results
-    if M > 0
-        feast_sort!(workspace.lambda, workspace.q, workspace.res, M)
-    end
-    
-    return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M, 
-                           workspace.res[1:M], mpi_state.info, 
-                           mpi_state.epsout, mpi_state.loop)
+    mpi_state.info = info_code
+    M = M_found
+    M > 1 && feast_sort!(lambda, q, res, M)
+    return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
+                             info_code, epsout, loop_done)
 end
 
 # Compute local moment contributions on each MPI rank (returns moments and Q_proj)
@@ -267,7 +305,7 @@ function mpi_compute_residuals!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     start_idx = rank * eigs_per_rank + min(rank, remainder) + 1
     local_count = eigs_per_rank + (rank < remainder ? 1 : 0)
     end_idx = start_idx + local_count - 1
-    
+
     # `res` is the full M0 workspace vector. MPI reductions require send and
     # receive buffers with matching lengths, even though only the first M
     # entries are active for the current iteration.
@@ -298,34 +336,34 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
 
     # Input validation
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
-    
+
     # Generate and distribute contour
     contour = nothing
     if rank == root
         contour = feast_contour(Emin, Emax, fpm)
     end
-    
+
     ne = MPI.bcast(rank == root ? length(contour.Zne) : 0, root, comm)
     Zne_global = MPI.bcast(rank == root ? contour.Zne : Vector{Complex{T}}(undef, ne), root, comm)
     Wne_global = MPI.bcast(rank == root ? contour.Wne : Vector{Complex{T}}(undef, ne), root, comm)
-    
+
     # Create MPI state and distribute points
     mpi_state = MPIFeastState{T}(comm, N, M0, ne, root)
     for (i, global_idx) in enumerate(mpi_state.local_points)
         mpi_state.local_Zne[i] = Zne_global[global_idx]
         mpi_state.local_Wne[i] = Wne_global[global_idx]
     end
-    
+
     # Initialize workspace
     workspace = FeastWorkspaceReal{T}(N, M0)
     _feast_seeded_subspace!(workspace.work)
     MPI.Bcast!(workspace.work, root, comm)
-    
+
     # Feast parameters
     feastdefault!(fpm)
     eps_tolerance = feast_tolerance(fpm, T)
     max_loops = fpm[4]
-    
+
     # Main refinement loop
     for loop in 1:max_loops
         mpi_state.loop = loop
@@ -409,11 +447,11 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     end
 
     M = count(i -> feast_inside_contour(workspace.lambda[i], Emin, Emax), 1:M0)
-    
+
     if M > 0
         feast_sort!(workspace.lambda, workspace.q, workspace.res, M)
     end
-    
+
     return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M,
                            workspace.res[1:M], mpi_state.info,
                            mpi_state.epsout, mpi_state.loop)
@@ -480,7 +518,7 @@ function mpi_compute_sparse_residuals!(A::SparseMatrixCSC{T,Int}, B::SparseMatri
     start_idx = rank * eigs_per_rank + min(rank, remainder) + 1
     local_count = eigs_per_rank + (rank < remainder ? 1 : 0)
     end_idx = start_idx + local_count - 1
-    
+
     # `res` is the full M0 workspace vector. MPI reductions require send and
     # receive buffers with matching lengths, even though only the first M
     # entries are active for the current iteration.
@@ -1080,14 +1118,14 @@ function mpi_feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                    comm::MPI.Comm = MPI.COMM_WORLD,
                    root::Int = 0) where T<:Real
     # Unified MPI interface that detects matrix type
-    
+
     Emin, Emax = interval
-    
+
     if fpm === nothing
         fpm = zeros(Int, 64)
         feastinit!(fpm)
     end
-    
+
     # Detect matrix type and call appropriate MPI solver
     if isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
         return mpi_feast_scsrgv!(A, B, Emin, Emax, M0, fpm, comm=comm, root=root)
@@ -1102,21 +1140,21 @@ function mpi_feast(A::AbstractMatrix{T}, interval::Tuple{T,T};
                    comm::MPI.Comm = MPI.COMM_WORLD,
                    root::Int = 0) where T<:Real
     # MPI interface for standard eigenvalue problems
-    
+
     N = size(A, 1)
-    
+
     if fpm === nothing
         fpm = zeros(Int, 64)
         feastinit!(fpm)
     end
-    
+
     # Create identity matrix of appropriate type
     if isa(A, SparseMatrixCSC)
         B = sparse(I, N, N)
     else
         B = Matrix{T}(I, N, N)
     end
-    
+
     return mpi_feast(A, B, interval, M0=M0, fpm=fpm, comm=comm, root=root)
 end
 
@@ -1288,17 +1326,17 @@ function mpi_feast_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tup
         println("MPI processes: $nprocs")
         println("Subspace size: $M0")
     end
-    
+
     # MPI timing
     MPI.Barrier(comm)
     start_time = MPI.Wtime()
-    
+
     result = mpi_feast(A, B, interval, M0=M0, comm=comm)
-    
+
     MPI.Barrier(comm)
     end_time = MPI.Wtime()
     elapsed_time = end_time - start_time
-    
+
     if rank == 0
         println("\nMPI FeastKit Results:")
         println("Time: $(round(elapsed_time, digits=3)) seconds")
@@ -1306,7 +1344,7 @@ function mpi_feast_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tup
         println("Convergence loops: $(result.loop)")
         println("Final residual: $(result.epsout)")
         println("Exit status: $(result.info)")
-        
+
         if result.M > 0
             println("\nEigenvalues:")
             for i in 1:min(result.M, 5)  # Show first 5
@@ -1317,7 +1355,7 @@ function mpi_feast_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tup
             end
         end
     end
-    
+
     return result
 end
 

@@ -55,155 +55,239 @@ function _pfeast_store_real_moments!(Aq::AbstractMatrix{T},
 end
 
 # Parallel FeastKit for real symmetric problems
+const _PFeastLU{T} = LinearAlgebra.LU{Complex{T}, Matrix{Complex{T}}, Vector{Int}}
+
+# Factorize every shifted system (z*B - A) once. The points are independent, so
+# the factorizations are optionally threaded; BLAS is pinned to one thread inside
+# the region to avoid nthreads × BLAS oversubscription. These factorizations are
+# reused across all refinement loops (mirrors the serial dense factor cache),
+# which is the dominant cost — recomputing them per loop made the old threaded
+# path slower than serial.
+function _pfeast_factorize_contour(A::Matrix{T}, B::Matrix{T},
+                                   Zne::Vector{Complex{T}},
+                                   use_threads::Bool) where T<:Real
+    ne = length(Zne)
+    factors = Vector{_PFeastLU{T}}(undef, ne)
+    if use_threads && Threads.nthreads() > 1 && ne > 1
+        blas_threads = BLAS.get_num_threads()
+        BLAS.set_num_threads(1)
+        try
+            Threads.@threads for e in 1:ne
+                factors[e] = lu(Zne[e] .* B .- A)
+            end
+        finally
+            BLAS.set_num_threads(blas_threads)
+        end
+    else
+        for e in 1:ne
+            factors[e] = lu(Zne[e] .* B .- A)
+        end
+    end
+    return factors
+end
+
+# Accumulate the filtered subspace Q_proj = sum 2*Wne[e] * (z*B - A)^{-1} (B*Q)
+# using the cached factorizations and a single precomputed BQ = B*Q. Contour
+# points are independent → threaded; each per-point triangular solve is cheap
+# relative to the one-time factorization above.
+function _pfeast_accumulate_qproj!(Q_proj::AbstractMatrix{Complex{T}},
+                                   factors::Vector{_PFeastLU{T}},
+                                   BQ::AbstractMatrix{Complex{T}},
+                                   Wne::Vector{Complex{T}},
+                                   use_threads::Bool) where T<:Real
+    ne = length(factors)
+    N, M = size(BQ)
+    if use_threads && Threads.nthreads() > 1 && ne > 1
+        contribs = Vector{Matrix{Complex{T}}}(undef, ne)
+        blas_threads = BLAS.get_num_threads()
+        BLAS.set_num_threads(1)
+        try
+            # `local` is essential: without it `Yt` would share function scope
+            # with the serial branch's buffer and every thread would clobber a
+            # single shared array (a data race).
+            Threads.@threads for e in 1:ne
+                local Yt = Matrix{Complex{T}}(undef, N, M)
+                copyto!(Yt, BQ)
+                ldiv!(factors[e], Yt)
+                @. Yt *= 2 * Wne[e]
+                contribs[e] = Yt
+            end
+        finally
+            BLAS.set_num_threads(blas_threads)
+        end
+        for c in contribs
+            Q_proj .+= c
+        end
+    else
+        Yserial = Matrix{Complex{T}}(undef, N, M)
+        for e in 1:ne
+            copyto!(Yserial, BQ)
+            ldiv!(factors[e], Yserial)
+            @. Q_proj += (2 * Wne[e]) * Yserial
+        end
+    end
+    return Q_proj
+end
+
 function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                       use_threads::Bool = true, verbose::Bool = false) where T<:Real
-    # Parallel FeastKit for dense real symmetric generalized eigenvalue problem
-
+    # Parallel dense real-symmetric generalized FEAST. The contour-point solves
+    # (the expensive, embarrassingly parallel part) are threaded; the reduced
+    # Rayleigh-Ritz problem mirrors the serial dense Hermitian path, including
+    # pivoted-QR rank compression so an oversized trial subspace (M0 greater than
+    # the number of eigenvalues in the interval) does not make the projected
+    # pencil rank deficient — that was the bug that produced wrong eigenpairs.
     N = size(A, 1)
+    size(A, 2) == N || throw(ArgumentError("Matrix A must be square"))
+    size(B) == (N, N) || throw(ArgumentError("Matrix B must match size of A"))
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
-
-    # Initialize Feast parameters first (needed for contour generation)
     feastdefault!(fpm)
 
-    # Generate integration contour
-    contour = feast_contour(Emin, Emax, fpm)
-    ne = length(contour.Zne)
-
-    # Initialize moment matrices (shared across workers)
-    Aq = zeros(T, M0, M0)
-    Sq = zeros(T, M0, M0)
-
-    # Initialize workspace for subspace
-    workspace = FeastWorkspaceReal{T}(N, M0)
-
-    # Match the serial kernels: deterministic seeded subspaces make production
-    # runs reproducible and keep Float32 tests independent of global RNG state.
-    _feast_seeded_subspace!(workspace.work)
-    eps_tolerance = feast_tolerance(fpm, T)
-    max_loops = fpm[4]
-    distributed_serial_fallback = !use_threads && nworkers() == 1
-    if distributed_serial_fallback
+    # Preserve the historical contract: with threading off and no worker
+    # processes, computation proceeds serially over contour points.
+    if !use_threads && nworkers() == 1
         @warn "No worker processes available, falling back to serial computation"
     end
-    
-    # Complex moment matrices for accumulation
-    zAq = zeros(Complex{T}, M0, M0)
-    zSq = zeros(Complex{T}, M0, M0)
 
-    # Filtered subspace accumulator (spectral projector applied to Q)
+    contour = feast_contour(Emin, Emax, fpm)
+    Zne = contour.Zne
+    Wne = contour.Wne
+
+    eps_tol = feast_tolerance(fpm, T)
+    max_loops = fpm[4]
+
+    # Trial subspace (deterministic complex seed, matches serial Hermitian path).
+    Q = Matrix{Complex{T}}(undef, N, M0)
+    _feast_seeded_subspace_complex!(Q)
+    active_dim = M0
+
+    # Scratch reused across refinement loops. Kept complex through the reduced
+    # Rayleigh-Ritz problem (mirrors the serial dense Hermitian path); only the
+    # final eigenvectors are projected to real for output.
     Q_proj = zeros(Complex{T}, N, M0)
-    Q_proj_real = zeros(T, N, M0)
-    lambda_tmp = similar(workspace.lambda)
+    q_basis = Matrix{Complex{T}}(undef, N, M0)
+    AQ = Matrix{Complex{T}}(undef, N, M0)
+    BQ = Matrix{Complex{T}}(undef, N, M0)
+    Sq = Matrix{Complex{T}}(undef, M0, M0)
+    Aq = Matrix{Complex{T}}(undef, M0, M0)
+    BQ_loop = Matrix{Complex{T}}(undef, N, M0)
+    qcol = Vector{Complex{T}}(undef, N)
+    lambda = zeros(T, M0)
+    q = zeros(T, N, M0)
+    res = zeros(T, M0)
+    lambda_tmp = similar(lambda)
     perm = Vector{Int}(undef, M0)
-    q_tmp = similar(workspace.q)
+    q_tmp = similar(q)
     residual_Aq = Vector{T}(undef, N)
     residual_Bq = Vector{T}(undef, N)
     residual = Vector{T}(undef, N)
 
-    # Main Feast refinement loop
+    epsout = T(Inf)
+    info_code = Int(Feast_SUCCESS)
+    loop_done = 0
+    M_found = 0
+
+    # Factorize each shifted system once and reuse across refinement loops.
+    factors = _pfeast_factorize_contour(A, B, Zne, use_threads)
+    verbose && println("pfeast_sygv!: $(length(Zne)) contour points, threads=$(Threads.nthreads())")
+
     for loop in 1:max_loops
-        # Reset complex moment matrices and Q_proj
-        fill!(zAq, zero(Complex{T}))
-        fill!(zSq, zero(Complex{T}))
+        loop_done = loop
         fill!(Q_proj, zero(Complex{T}))
 
-        # Parallel computation of moments for each contour point
-        if use_threads && Threads.nthreads() > 1
-            # Use threading for shared memory parallelism
-            # Only print verbose output on first iteration to avoid spam
-            moments = pfeast_compute_moments_threaded(A, B, workspace.work, contour, M0; verbose=(verbose && loop == 1))
-        elseif distributed_serial_fallback
-            moments = pfeast_compute_moments_serial(A, B, workspace.work, contour, M0)
-        else
-            # Use distributed computing for multiple processes
-            moments = pfeast_compute_moments_distributed(A, B, workspace.work, contour, M0)
-        end
+        # Parallel contour sweep with cached factorizations:
+        # Q_proj = sum 2*Wne * (z*B - A)^{-1} (B*Q), with BQ = B*Q formed once.
+        qblk = view(Q, :, 1:active_dim)
+        bq = view(BQ_loop, :, 1:active_dim)
+        mul!(bq, B, qblk)
+        _pfeast_accumulate_qproj!(view(Q_proj, :, 1:active_dim), factors, bq,
+                                  Wne, use_threads)
 
-        # Accumulate complex moments AND Q_proj
-        for (aq_contrib, sq_contrib, qproj_contrib) in moments
-            zAq .+= aq_contrib
-            zSq .+= sq_contrib
-            Q_proj .+= qproj_contrib
-        end
-
-        # Solve reduced eigenvalue problem
         try
-            # For half-contour integration, take real part directly (no 0.5 symmetrization needed)
-            _feast_copy_real!(Aq, zAq)
-            _feast_copy_real!(Sq, zSq)
-
-            # Symmetrize reduced matrices using wrapper
-            Aq_sym = Symmetric(Aq)
-            Sq_sym = Symmetric(Sq)
-
-            # IMPORTANT: Solve Sq*x = lambda*Aq*x (not Aq*x = lambda*Sq*x)
-            # This is because zAq ≈ Q'*P*Q and zSq ≈ Q'*A*P*Q where P is the spectral projector
-            F = try
-                eigen(Sq_sym, Aq_sym)
-            catch e
-                # Fall back to general solver if not positive definite
-                eigen(Sq, Aq)
+            # Orthonormalize / rank-compress the (complex) filtered subspace.
+            rank = _feast_qr_compress!(q_basis, Q_proj, active_dim;
+                                       rank_tol=sqrt(eps(T)))
+            if rank == 0
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
             end
 
-            lambda_red = real.(F.values)
-            v_red = real.(F.vectors)
+            q_rank = view(q_basis, :, 1:rank)
+            AQ_r = view(AQ, :, 1:rank)
+            BQ_r = view(BQ, :, 1:rank)
+            Sq_r = view(Sq, 1:rank, 1:rank)
+            Aq_r = view(Aq, 1:rank, 1:rank)
 
-            # Get real part of filtered subspace for projection
-            _feast_copy_real!(Q_proj_real, Q_proj)
+            # Reduced Hermitian-definite pencil: Sq = Qᴴ A Q, Aq = Qᴴ B Q.
+            mul!(AQ_r, A, q_rank)
+            mul!(Sq_r, adjoint(q_rank), AQ_r)
+            mul!(BQ_r, B, q_rank)
+            mul!(Aq_r, adjoint(q_rank), BQ_r)
 
-            # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q
-            # This is the core FEAST algorithm - use spectral projector output
-            for idx in 1:M0
-                mul!(view(workspace.q, :, idx), Q_proj_real, view(v_red, :, idx))
-                workspace.lambda[idx] = lambda_red[idx]
+            # Solve Sq*v = lambda*Aq*v. Eigenvalues real (Hermitian-definite);
+            # the fallback covers a non-positive-definite reduced B.
+            local lambda_red, v_red
+            try
+                Fr = eigen(Hermitian(Sq_r), Hermitian(Aq_r))
+                lambda_red = Fr.values
+                v_red = Fr.vectors
+            catch err
+                (isa(err, PosDefException) || isa(err, LinearAlgebra.LAPACKException)) || rethrow(err)
+                Fr = eigen(Sq_r, Aq_r)
+                lambda_red = real.(Fr.values)
+                v_red = Fr.vectors
             end
 
-            # Reorder: put eigenvalues inside interval first while maintaining pairing
-            M = _feast_reorder_by_interval!(workspace.lambda, workspace.q, perm,
-                                             lambda_tmp, q_tmp, Emin, Emax, M0)
-
-            if M == 0
-                return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[],
-                                       Int(Feast_ERROR_NO_CONVERGENCE), zero(T), loop)
-            end
-
-            # Normalize eigenvectors (matches dense solver)
-            for j in 1:M
-                q_norm = norm(view(workspace.q, :, j))
-                if q_norm > 0
-                    view(workspace.q, :, j) ./= q_norm
+            # Project to complex eigenvectors; store the real part for output.
+            for idx in 1:rank
+                mul!(qcol, q_rank, view(v_red, :, idx))
+                @inbounds for i in 1:N
+                    q[i, idx] = real(qcol[i])
                 end
+                lambda[idx] = lambda_red[idx]
             end
 
-            # Compute residuals
-            feast_residual!(A, B, workspace.lambda, workspace.q, workspace.res,
-                            M, residual_Aq, residual_Bq, residual)
-            epsout = maximum(workspace.res[1:M])
-
-            # Check convergence
-            if epsout <= eps_tolerance
-                feast_sort!(workspace.lambda, workspace.q, workspace.res, M)
-                return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M,
-                                       workspace.res[1:M], Int(Feast_SUCCESS), epsout, loop)
+            M = _feast_reorder_by_interval!(lambda, q, perm, lambda_tmp, q_tmp,
+                                            Emin, Emax, rank)
+            if M == 0
+                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                break
             end
 
-            # Prepare for next iteration - update ALL M0 columns to maintain subspace
-            copyto!(view(workspace.work, :, 1:M0), view(workspace.q, :, 1:M0))
-            
-        catch e
-            return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[], 
-                                   Int(Feast_ERROR_LAPACK), zero(T), loop)
+            for j in 1:M
+                nrm = norm(view(q, :, j))
+                nrm > 0 && (view(q, :, j) ./= nrm)
+            end
+
+            feast_residual!(A, B, lambda, q, res, M,
+                            residual_Aq, residual_Bq, residual)
+            epsout = maximum(view(res, 1:M))
+            M_found = M
+
+            if epsout <= eps_tol
+                feast_sort!(lambda, q, res, M)
+                return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
+                                         Int(Feast_SUCCESS), epsout, loop)
+            end
+
+            active_dim = rank
+            copyto!(view(Q, :, 1:active_dim), view(q, :, 1:active_dim))
+        catch err
+            info_code = Int(Feast_ERROR_LAPACK)
+            @warn "pfeast_sygv! reduced eigenproblem failed" exception=err
+            break
         end
     end
-    
-    # Maximum iterations reached
-    M = count(i -> feast_inside_contour(workspace.lambda[i], Emin, Emax), 1:M0)
-    # Handle case where no eigenvalues found (avoid maximum on empty array)
-    final_epsout = M > 0 ? maximum(workspace.res[1:M]) : zero(T)
-    return FeastResult{T, T}(workspace.lambda[1:M], workspace.q[:, 1:M], M,
-                           workspace.res[1:M], Int(Feast_ERROR_NO_CONVERGENCE),
-                           final_epsout, max_loops)
+
+    # Did not converge within max_loops (or broke early).
+    if info_code == Int(Feast_SUCCESS)
+        info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+    end
+    M = M_found
+    M > 1 && feast_sort!(lambda, q, res, M)
+    return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
+                             info_code, epsout, loop_done)
 end
 
 # Threaded computation of moments (returns complex moments and Q_proj contributions)

@@ -139,7 +139,10 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         mpi_state.loop = loop
 
         # Each rank applies its local contour resolvents to the trial subspace,
-        # then the partial filtered subspaces are summed across ranks.
+        # then the partial filtered subspaces are summed across ranks. For dense
+        # systems the per-loop solves are heavy and distribute well, so the
+        # reduced Rayleigh-Ritz is left replicated on every rank (an Allreduce,
+        # not root-only) — that scales better here than idling ranks on root.
         qblk = view(Q, :, 1:active_dim)
         bq = view(BQ_loop, :, 1:active_dim)
         mul!(bq, B, qblk)
@@ -153,9 +156,6 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         global_Q_proj = MPI.Allreduce(Q_proj_local[:, 1:active_dim], MPI.SUM, comm)
 
         try
-            # Orthonormalize / rank-compress the global filtered subspace. All
-            # ranks hold the same global_Q_proj, so they compute identical
-            # reduced problems and stay consistent without further communication.
             rank_r = _feast_qr_compress!(q_basis, global_Q_proj, active_dim;
                                          rank_tol=sqrt(eps(T)))
             if rank_r == 0
@@ -206,8 +206,6 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                 nrm > 0 && (view(q, :, j) ./= nrm)
             end
 
-            # All ranks have identical q/lambda, so the residual is computed
-            # locally (A, B are replicated) — consistent across ranks.
             feast_residual!(A, B, lambda, q, res, M,
                             residual_Aq, residual_Bq, residual)
             epsout = maximum(view(res, 1:M))
@@ -380,11 +378,14 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     info_code = Int(Feast_SUCCESS)
     loop_done = 0
     M_found = 0
+    flags = Vector{Int}(undef, 4)   # [rank_r, M, status, info]; status: 0=continue 1=converged 2=stop
+    epsbuf = Vector{T}(undef, 1)
 
     for loop in 1:max_loops
         loop_done = loop
         mpi_state.loop = loop
 
+        # Distributed contour solves: each rank applies only its local resolvents.
         qblk = view(Q, :, 1:active_dim)
         bq = view(BQ_loop, :, 1:active_dim)
         mul!(bq, B, qblk)
@@ -395,79 +396,101 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             w = 2 * mpi_state.local_Wne[e]
             @. qpl += w * Y
         end
-        global_Q_proj = MPI.Allreduce(Q_proj_local[:, 1:active_dim], MPI.SUM, comm)
 
-        try
-            rank_r = _feast_qr_compress!(q_basis, global_Q_proj, active_dim;
-                                         rank_tol=sqrt(eps(T)))
-            if rank_r == 0
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-                break
-            end
+        # Sum the partial filtered subspaces to ROOT ONLY. The reduced
+        # Rayleigh-Ritz (QR compress + dense N×M0 work) then runs once on root
+        # instead of being replicated on every rank (which contended for memory
+        # bandwidth and capped scaling). Results are broadcast back.
+        global_Q_proj = MPI.Reduce(Q_proj_local[:, 1:active_dim], MPI.SUM, root, comm)
 
-            q_rank = view(q_basis, :, 1:rank_r)
-            AQ_r = view(AQ, :, 1:rank_r)
-            BQ_r = view(BQm, :, 1:rank_r)
-            Sq_r = view(Sq, 1:rank_r, 1:rank_r)
-            Aq_r = view(Aq, 1:rank_r, 1:rank_r)
-
-            mul!(AQ_r, A, q_rank)
-            mul!(Sq_r, adjoint(q_rank), AQ_r)
-            mul!(BQ_r, B, q_rank)
-            mul!(Aq_r, adjoint(q_rank), BQ_r)
-
-            local lambda_red, v_red
+        rank_r = active_dim
+        M = 0
+        status = 0
+        if rank == root
+            gqp = global_Q_proj::Matrix{Complex{T}}
             try
-                Fr = eigen(Hermitian(Sq_r), Hermitian(Aq_r))
-                lambda_red = Fr.values
-                v_red = Fr.vectors
-            catch err
-                (isa(err, PosDefException) || isa(err, LinearAlgebra.LAPACKException)) || rethrow(err)
-                Fr = eigen(Sq_r, Aq_r)
-                lambda_red = real.(Fr.values)
-                v_red = Fr.vectors
-            end
-
-            for idx in 1:rank_r
-                mul!(qcol, q_rank, view(v_red, :, idx))
-                @inbounds for i in 1:N
-                    q[i, idx] = real(qcol[i])
+                rank_r = _feast_qr_compress!(q_basis, gqp, active_dim;
+                                             rank_tol=sqrt(eps(T)))
+                if rank_r == 0
+                    status = 2
+                    info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                else
+                    q_rank = view(q_basis, :, 1:rank_r)
+                    AQ_r = view(AQ, :, 1:rank_r)
+                    BQ_r = view(BQm, :, 1:rank_r)
+                    Sq_r = view(Sq, 1:rank_r, 1:rank_r)
+                    Aq_r = view(Aq, 1:rank_r, 1:rank_r)
+                    mul!(AQ_r, A, q_rank)
+                    mul!(Sq_r, adjoint(q_rank), AQ_r)
+                    mul!(BQ_r, B, q_rank)
+                    mul!(Aq_r, adjoint(q_rank), BQ_r)
+                    local lambda_red, v_red
+                    try
+                        Fr = eigen(Hermitian(Sq_r), Hermitian(Aq_r))
+                        lambda_red = Fr.values
+                        v_red = Fr.vectors
+                    catch err
+                        (isa(err, PosDefException) || isa(err, LinearAlgebra.LAPACKException)) || rethrow(err)
+                        Fr = eigen(Sq_r, Aq_r)
+                        lambda_red = real.(Fr.values)
+                        v_red = Fr.vectors
+                    end
+                    for idx in 1:rank_r
+                        mul!(qcol, q_rank, view(v_red, :, idx))
+                        @inbounds for i in 1:N
+                            q[i, idx] = real(qcol[i])
+                        end
+                        lambda[idx] = lambda_red[idx]
+                    end
+                    M = _feast_reorder_by_interval!(lambda, q, perm, lambda_tmp, q_tmp,
+                                                    Emin, Emax, rank_r)
+                    if M == 0
+                        status = 2
+                        info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                    else
+                        for j in 1:M
+                            nrm = norm(view(q, :, j))
+                            nrm > 0 && (view(q, :, j) ./= nrm)
+                        end
+                        feast_residual!(A, B, lambda, q, res, M,
+                                        residual_Aq, residual_Bq, residual)
+                        epsout = maximum(view(res, 1:M))
+                        status = epsout <= eps_tolerance ? 1 : 0
+                    end
                 end
-                lambda[idx] = lambda_red[idx]
+            catch err
+                status = 2
+                info_code = Int(Feast_ERROR_LAPACK)
             end
+            flags[1] = rank_r; flags[2] = M; flags[3] = status; flags[4] = info_code
+        end
 
-            M = _feast_reorder_by_interval!(lambda, q, perm, lambda_tmp, q_tmp,
-                                            Emin, Emax, rank_r)
-            if M == 0
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-                break
-            end
-
-            for j in 1:M
-                nrm = norm(view(q, :, j))
-                nrm > 0 && (view(q, :, j) ./= nrm)
-            end
-
-            feast_residual!(A, B, lambda, q, res, M,
-                            residual_Aq, residual_Bq, residual)
-            epsout = maximum(view(res, 1:M))
-            mpi_state.epsout = epsout
-            M_found = M
-
-            if epsout <= eps_tolerance
-                mpi_state.converged = true
-                mpi_state.info = Int(Feast_SUCCESS)
-                feast_sort!(lambda, q, res, M)
-                return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
-                                         Int(Feast_SUCCESS), epsout, loop)
-            end
-
-            active_dim = rank_r
-            copyto!(view(Q, :, 1:active_dim), view(q, :, 1:active_dim))
-        catch err
-            info_code = Int(Feast_ERROR_LAPACK)
+        # Broadcast the control word, then the result data the other ranks need.
+        MPI.Bcast!(flags, root, comm)
+        rank_r = flags[1]; M = flags[2]; status = flags[3]; info_code = flags[4]
+        if status == 2
+            M_found = 0
             break
         end
+        MPI.Bcast!(lambda, root, comm)
+        MPI.Bcast!(q, root, comm)
+        MPI.Bcast!(res, root, comm)
+        epsbuf[1] = epsout
+        MPI.Bcast!(epsbuf, root, comm)
+        epsout = epsbuf[1]
+        mpi_state.epsout = epsout
+        M_found = M
+
+        if status == 1
+            mpi_state.converged = true
+            mpi_state.info = Int(Feast_SUCCESS)
+            feast_sort!(lambda, q, res, M)
+            return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
+                                     Int(Feast_SUCCESS), epsout, loop)
+        end
+
+        active_dim = rank_r
+        copyto!(view(Q, :, 1:active_dim), view(q, :, 1:active_dim))
     end
 
     if info_code == Int(Feast_SUCCESS)

@@ -907,6 +907,13 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
     _feast_seeded_subspace_complex!(Q_basis)
     MPI.Bcast!(Q_basis, root, comm)
 
+    # Cache this rank's local factorizations once (direct solver only); reused
+    # across all refinement loops. Iterative solves have nothing to cache.
+    local_factors = solver_choice == :direct ?
+        [lu(z * B - A) for z in mpi_state.local_Zne] : nothing
+    BQ_loop = similar(Q_basis)
+    Q_proj_local_buf = similar(Q_basis)
+
     Aq_herm = Matrix{Complex{T}}(undef, M0, M0)
     Sq_herm = Matrix{Complex{T}}(undef, M0, M0)
     AQc = similar(Q_basis)
@@ -928,13 +935,24 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
         # Each rank solves its local contour points; only the partial filtered
         # subspace (complex) is needed. The reduced pencil is rebuilt from an
         # ORTHONORMAL basis below — what the old rank-deficient moment path lacked.
-        _, _, local_Q_proj, local_success =
-            mpi_compute_complex_hermitian_moments(A, B, Q_basis,
-                                                  mpi_state.local_Zne,
-                                                  mpi_state.local_Wne, M0,
-                                                  solver_choice, tol,
-                                                  solver_maxiter, solver_restart,
-                                                  comm)
+        if solver_choice == :direct
+            mul!(BQ_loop, B, Q_basis)
+            fill!(Q_proj_local_buf, zero(Complex{T}))
+            for (e, Fe) in enumerate(local_factors)
+                Y = Fe \ BQ_loop
+                @. Q_proj_local_buf += (2 * mpi_state.local_Wne[e]) * Y
+            end
+            local_Q_proj = Q_proj_local_buf
+            local_success = true
+        else
+            _, _, local_Q_proj, local_success =
+                mpi_compute_complex_hermitian_moments(A, B, Q_basis,
+                                                      mpi_state.local_Zne,
+                                                      mpi_state.local_Wne, M0,
+                                                      solver_choice, tol,
+                                                      solver_maxiter, solver_restart,
+                                                      comm)
+        end
         if _mpi_success_count(local_success, comm) != MPI.Comm_size(comm)
             info_code = solver_choice == :direct ? Int(Feast_ERROR_LAPACK) : Int(Feast_ERROR_NO_CONVERGENCE)
             break
@@ -1059,6 +1077,13 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
     _feast_seeded_subspace_complex!(Q_basis)
     MPI.Bcast!(Q_basis, root, comm)
 
+    # Cache this rank's local factorizations once (direct solver only); reused
+    # across all refinement loops. Iterative solves have nothing to cache.
+    local_factors = solver_choice == :direct ?
+        [lu(z * B - A) for z in mpi_state.local_Zne] : nothing
+    BQ_loop = similar(Q_basis)
+    Q_proj_local_buf = similar(Q_basis)
+
     Q_proj = similar(Q_basis)
     solutions = similar(Q_basis)
     solutions_tmp = similar(Q_basis)
@@ -1077,13 +1102,26 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
 
     for loop_idx in 0:fpm[4]
         loop_count = loop_idx
-        local_Q_proj, local_success =
-            mpi_compute_complex_general_projection(A, B, Q_basis,
-                                                   mpi_state.local_Zne,
-                                                   mpi_state.local_Wne, M0,
-                                                   solver_choice, tol,
-                                                   solver_maxiter, solver_restart,
-                                                   comm)
+        if solver_choice == :direct
+            # Cached factorizations: apply each local resolvent to B*Q. General
+            # FEAST uses the full contour, so the weight is Wne[e] (no factor 2).
+            mul!(BQ_loop, B, Q_basis)
+            fill!(Q_proj_local_buf, zero(Complex{T}))
+            for (e, Fe) in enumerate(local_factors)
+                Y = Fe \ BQ_loop
+                @. Q_proj_local_buf += mpi_state.local_Wne[e] * Y
+            end
+            local_Q_proj = Q_proj_local_buf
+            local_success = true
+        else
+            local_Q_proj, local_success =
+                mpi_compute_complex_general_projection(A, B, Q_basis,
+                                                       mpi_state.local_Zne,
+                                                       mpi_state.local_Wne, M0,
+                                                       solver_choice, tol,
+                                                       solver_maxiter, solver_restart,
+                                                       comm)
+        end
         if _mpi_success_count(local_success, comm) != MPI.Comm_size(comm)
             info_code = solver_choice == :direct ? Int(Feast_ERROR_LAPACK) : Int(Feast_ERROR_NO_CONVERGENCE)
             break

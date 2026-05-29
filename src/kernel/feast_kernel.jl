@@ -470,6 +470,7 @@ end
         state.perm = Vector{Int}(undef, M0)
         state.q_tmp = Matrix{Complex{T}}(undef, N, M0)
         state.residual = Vector{Complex{T}}(undef, N)
+        state.moment = Matrix{Complex{T}}(undef, M0, M0)
 
         Ze[] = state.Zne[1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
@@ -515,13 +516,22 @@ end
 
         weight = 2 * Wne[e]
 
-        # Accumulate filtered subspace (spectral projector applied to Q0)
+        # Accumulate filtered subspace (spectral projector applied to Q0).
+        # The dotted broadcast fuses into the destination view without a temp.
         Q_proj[:, 1:M_current] .+= weight .* workc[:, 1:M_current]
 
-        # Accumulate moments: Q0' * Y where Y is the solution
-        temp = Q0' * workc[:, 1:M_current]
-        zAq[1:M_current, 1:M_current] .+= weight * temp
-        zSq[1:M_current, 1:M_current] .+= weight * Zne[e] * temp
+        # Accumulate moments Q0' * Y in place. mul! writes into preallocated
+        # scratch, then a fused loop folds the weighted contributions into the
+        # complex accumulators — no per-contour-point M×M matrix is allocated.
+        moment = view(state.moment, 1:M_current, 1:M_current)
+        mul!(moment, adjoint(view(Q0, :, 1:M_current)),
+             view(workc, :, 1:M_current))
+        zweight = weight * Zne[e]
+        @inbounds for j in 1:M_current, i in 1:M_current
+            m = moment[i, j]
+            zAq[i, j] += weight * m
+            zSq[i, j] += zweight * m
+        end
 
         state.e = e + 1
 
@@ -532,43 +542,49 @@ end
         else
             state.e = 1
             try
-                Q0 = state.Q0
-                M_current = size(Q0, 2)
+                M_current = size(state.Q0, 2)
 
-                # Solve generalized eigenvalue problem: Sq*v = lambda*Aq*v
-                F = eigen(zSq[1:M_current, 1:M_current], zAq[1:M_current, 1:M_current])
-                lambda_red = real.(F.values)
+                # Solve reduced generalized eigenproblem: zSq*v = lambda*zAq*v.
+                # eigen allocates F internally (unavoidable); the surrounding
+                # real.() and matmul-result allocations are removed below.
+                F = eigen(view(zSq, 1:M_current, 1:M_current),
+                          view(zAq, 1:M_current, 1:M_current))
                 v_red = F.vectors
 
-                # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q0
-                # For complex Hermitian problems, Q_proj is complex — do NOT take real()
-                # since eigenvectors of complex Hermitian matrices are genuinely complex.
-                Q_proj = state.Q_proj
-                q[:, 1:M_current] = Q_proj[:, 1:M_current] * v_red[:, 1:M_current]
-                lambda[1:M_current] = lambda_red[1:M_current]
+                # Eigenvalues are real for Hermitian pencils; copy real parts in
+                # place instead of allocating via real.(F.values).
+                _feast_copy_real!(view(lambda, 1:M_current),
+                                  view(F.values, 1:M_current))
 
-                # Reorder: put eigenvalues inside the interval first
+                # Project ALL eigenvectors using the FILTERED subspace (Q_proj),
+                # not original Q0. Q_proj stays complex for Hermitian problems
+                # since their eigenvectors are genuinely complex. mul! writes
+                # straight into q without a temporary product matrix.
+                mul!(view(q, :, 1:M_current),
+                     view(state.Q_proj, :, 1:M_current), v_red)
+
+                # Reorder: in-interval eigenpairs to the front. One membership
+                # test per eigenvalue; outside pairs fill in from the back.
                 M = 0
                 perm = state.perm
-                for i in 1:M_current
+                tail = M_current
+                @inbounds for i in 1:M_current
                     if feast_inside_contour(lambda[i], Emin, Emax)
                         M += 1
                         perm[M] = i
-                    end
-                end
-                outside_position = M
-                for i in 1:M_current
-                    if !feast_inside_contour(lambda[i], Emin, Emax)
-                        outside_position += 1
-                        perm[outside_position] = i
+                    else
+                        perm[tail] = i
+                        tail -= 1
                     end
                 end
 
+                lambda_scratch = view(res, 1:M_current)
+                copyto!(lambda_scratch, view(lambda, 1:M_current))
                 copyto!(view(state.q_tmp, :, 1:M_current),
                         view(q, :, 1:M_current))
                 for new_idx in 1:M_current
                     old_idx = perm[new_idx]
-                    lambda[new_idx] = lambda_red[old_idx]
+                    lambda[new_idx] = lambda_scratch[old_idx]
                     copyto!(view(q, :, new_idx),
                             view(state.q_tmp, :, old_idx))
                 end
@@ -813,14 +829,20 @@ end
                 lambda_red = F.values
                 v_red = F.vectors
 
-                # Count eigenvalues inside contour region (elliptical if fpm[18]/[19] set)
+                # Partition eigenvalues by contour membership in a single pass:
+                # in-contour pairs to the front of perm, outside pairs to the
+                # back. One ellipse membership test per eigenvalue (was two).
                 M = 0
                 perm = state.perm
+                tail = M0
                 for i in 1:M0
                     if feast_inside_gcontour(lambda_red[i], Emid, r; fpm=fpm)
                         M += 1
                         perm[M] = i
                         lambda[M] = lambda_red[i]
+                    else
+                        perm[tail] = i
+                        tail -= 1
                     end
                 end
 
@@ -834,23 +856,9 @@ end
                     return
                 end
 
-                # Project ALL M0 eigenvectors to maintain full subspace
-                fill!(workc, zero(Complex{T}))
-                for idx in 1:M0
-                    for k in 1:N
-                        for j in 1:M0
-                            workc[k, idx] += q[k, j] * v_red[j, idx]
-                        end
-                    end
-                end
-
-                outside_position = M
-                for i in 1:M0
-                    if !feast_inside_gcontour(lambda_red[i], Emid, r; fpm=fpm)
-                        outside_position += 1
-                        perm[outside_position] = i
-                    end
-                end
+                # Project all M0 eigenvectors to maintain the full subspace:
+                # workc = q * v_red via BLAS (replaces an O(N·M0²) scalar loop).
+                mul!(view(workc, :, 1:M0), view(q, :, 1:M0), v_red)
 
                 copyto!(state.workc_tmp, view(workc, :, 1:M0))
                 for new_idx in 1:M0

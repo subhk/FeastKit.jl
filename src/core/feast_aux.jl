@@ -25,10 +25,12 @@ function _copy_contour(contour::FeastContour{T}) where T<:Real
 end
 
 function feast_distribution_type(N::Int,
-                                 isa::AbstractVector{<:Integer},
-                                 jsa::AbstractVector{<:Integer};
+                                 ia::AbstractVector{<:Integer},
+                                 ja::AbstractVector{<:Integer};
                                  comm::Any = nothing)
-    if length(isa) == N + 1 && !isempty(jsa)
+    # `ia`/`ja` are the CSR row-pointer / column-index arrays (renamed from
+    # `isa`/`jsa`, which shadowed `Base.isa`).
+    if length(ia) == N + 1 && !isempty(ja)
         return :csr
     else
         return :unknown
@@ -221,19 +223,20 @@ function _feast_reorder_by_gcontour!(lambda::AbstractVector{Complex{T}},
         size(vector_tmp, 2) >= M0 || throw(BoundsError(vector_tmp, (1, M0)))
     end
 
+    # Single pass: in-contour eigenpairs fill perm from the front, outside ones
+    # from the back. The ellipse membership test (with rotation/aspect) is the
+    # costly part, so evaluating it once per eigenvalue instead of twice halves
+    # that work. Outside ordering is irrelevant — only the leading `ninside`
+    # pairs are consumed by callers.
     ninside = 0
+    tail = M0
     @inbounds for i in 1:M0
         if feast_inside_gcontour(lambda[i], Emid, r; fpm=fpm)
             ninside += 1
             perm[ninside] = i
-        end
-    end
-
-    next_index = ninside
-    @inbounds for i in 1:M0
-        if !feast_inside_gcontour(lambda[i], Emid, r; fpm=fpm)
-            next_index += 1
-            perm[next_index] = i
+        else
+            perm[tail] = i
+            tail -= 1
         end
     end
 

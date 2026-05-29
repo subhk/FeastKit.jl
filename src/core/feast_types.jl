@@ -160,12 +160,14 @@ mutable struct FeastHRCIState{T<:Real}
     perm::Vector{Int}
     q_tmp::Matrix{Complex{T}}
     residual::Vector{Complex{T}}
+    moment::Matrix{Complex{T}}    # Preallocated Q0' * Y scratch (avoids per-point alloc)
 
     function FeastHRCIState{T}() where T<:Real
         new{T}(false, Complex{T}[], Complex{T}[], 0, 1,
                Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
                0, zero(T), 0, Int[],
-               Matrix{Complex{T}}(undef, 0, 0), Complex{T}[])
+               Matrix{Complex{T}}(undef, 0, 0), Complex{T}[],
+               Matrix{Complex{T}}(undef, 0, 0))
     end
 end
 

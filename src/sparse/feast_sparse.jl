@@ -1378,8 +1378,15 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
             @. Q_proj += weight * workc_block
 
             mul!(moment, transpose(Q_block), workc_block)
-            Aq_block .+= real.(weight .* moment)
-            Sq_block .+= real.((weight * Zne[e]) .* moment)
+            # Fold weighted moments into the real reduced matrices in place.
+            # Broadcasting `real.(weight .* moment)` would allocate two M0×M0
+            # temporaries per contour point; the fused loop allocates nothing.
+            zweight = weight * Zne[e]
+            @inbounds for j in 1:M0, i in 1:M0
+                m = moment[i, j]
+                Aq_block[i, j] += real(weight * m)
+                Sq_block[i, j] += real(zweight * m)
+            end
         end
 
         if gmres_failed

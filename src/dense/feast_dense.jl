@@ -456,7 +456,25 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
     temp_matrix = Matrix{Complex{T}}(undef, N, N)
     rhs_buffer = Matrix{Complex{T}}(undef, N, M0)
     rhs_copy = Matrix{Complex{T}}(undef, N, M0)
-    factor_cache = Dict{Complex{T}, LinearAlgebra.LU{Complex{T}, Matrix{Complex{T}}, Vector{Int}}}()
+    # Cache factorizations by contour point (fpm[50]) instead of hashing the
+    # complex shift in a Dict. Sized lazily from fpm[51] once the kernel has
+    # built the contour; the concrete element type keeps lookups inferrable.
+    factor_cache = Vector{Union{Nothing, LinearAlgebra.LU{Complex{T}, Matrix{Complex{T}}, Vector{Int}}}}()
+
+    # Shifted matrix-vector product for the iterative solver. Defined once here
+    # (not rebuilt inside the SOLVE branch each iteration) so the closure and the
+    # buffers it captures are created a single time.
+    function shifted_mul!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
+        if B_is_identity
+            @. tmpBx = current_shift[] * x
+        else
+            mul!(tmpBx, B_iter, x)
+            @. tmpBx = current_shift[] * tmpBx
+        end
+        mul!(tmpAx, A_iter, x)
+        @. y = tmpBx - tmpAx
+        return y
+    end
 
     # Persistent RCI state (must be reused across calls in the loop)
     grci_state = FeastGRCIState{T}()
@@ -486,18 +504,25 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
             z = Ze[]
             if use_direct
                 try
-                    factor = get(factor_cache, z, nothing)
-                    if factor === nothing
+                    if isempty(factor_cache)
+                        resize!(factor_cache, fpm[51])
+                        fill!(factor_cache, nothing)
+                    end
+                    e = fpm[50]   # current contour point index set by the kernel
+                    cached = (1 <= e <= length(factor_cache)) ? factor_cache[e] : nothing
+                    if cached === nothing
                         if B_is_identity
                             _feast_dense_shifted_identity_minus!(temp_matrix, z, A)
                         else
                             @. temp_matrix = z * B - A
                         end
-                        factor = lu(temp_matrix)
-                        factor_cache[z] = factor
+                        cached = lu(temp_matrix)
+                        if 1 <= e <= length(factor_cache)
+                            factor_cache[e] = cached
+                        end
                     end
-                    LU_factorization[] = factor
-                catch e
+                    LU_factorization[] = cached
+                catch err
                     info[] = Int(Feast_ERROR_LAPACK)
                     break
                 end
@@ -525,17 +550,6 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
                 end
             else
                 copyto!(rhs_copy, rhs)
-                function shifted_mul!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
-                    if B_is_identity
-                        @. tmpBx = current_shift[] * x
-                    else
-                        mul!(tmpBx, B_iter, x)
-                        @. tmpBx = current_shift[] * tmpBx
-                    end
-                    mul!(tmpAx, A_iter, x)
-                    @. y = tmpBx - tmpAx
-                    return y
-                end
                 success = solve_dense_shifted!(workspace.workc[:, 1:M0], rhs_copy,
                                                shifted_mul!, solver_choice, tol_value,
                                                solver_maxiter, solver_restart)

@@ -141,28 +141,29 @@ function hybrid_compute_threaded_moments(A::AbstractMatrix{T}, B::AbstractMatrix
     thread_sq_contributions = [zeros(T, M0, M0) for _ in 1:Threads.nthreads()]
     
     # Parallel loop over local contour points
+    work_block = view(work, :, 1:M0)
     Threads.@threads for e in 1:local_ne
         tid = Threads.threadid()
         z = local_Zne[e]
         w = local_Wne[e]
-        
+
         try
             # Solve linear system for this contour point
             system_matrix = z * B - A
             F = lu(system_matrix)
-            rhs = B * work[:, 1:M0]
+            rhs = B * work_block
             workc_local = F \ rhs
-            
-            # Accumulate to thread-local storage
+
+            # Accumulate to thread-local storage (views: no per-(i,j) column copies)
             # IMPORTANT: Sq requires real(w * z * inner_product), NOT real(w * inner_product) * real(z)
             for j in 1:M0
                 for i in 1:M0
-                    inner_product = dot(work[:, i], workc_local[:, j])
+                    inner_product = dot(view(work, :, i), view(workc_local, :, j))
                     thread_contributions[tid][i, j] += real(w * inner_product)
                     thread_sq_contributions[tid][i, j] += real(w * z * inner_product)
                 end
             end
-            
+
         catch err
             @warn "Thread $tid: Linear solve failed for contour point $e: $err"
         end

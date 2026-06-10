@@ -1225,11 +1225,40 @@ function difeast_scsrgvx!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                           solver_restart=solver_restart)
 end
 
+# --- Sparse polynomial FEAST ---------------------------------------------
+# Same first-companion linearization as the dense feast_pep!, but the d·N
+# pencil is assembled from sparse blocks and handed to the sparse general
+# solver — the coefficients are never densified.
+function _feast_sparse_pep!(coeffs::Vector{SparseMatrixCSC{Complex{T},Int}}, d::Int,
+                            Emid::Complex{T}, r::T, M0::Int,
+                            fpm::Vector{Int}) where T<:Real
+    N = _check_polynomial_coeffs(coeffs, d)
+    CT = Complex{T}
+
+    # First companion form for P(λ) = A_1 + λA_2 + … + λ^d A_{d+1}:
+    #   A_lin = [ 0 I … 0 ; … ; -A_1 … -A_d ],  B_lin = diag(I, …, I, A_{d+1})
+    Iblk = sparse(one(CT) * I, N, N)
+    bottom = reduce(hcat, [-Ak for Ak in coeffs[1:d]])
+    A_lin = d > 1 ?
+        vcat(hcat(spzeros(CT, (d - 1) * N, N), blockdiag(ntuple(_ -> Iblk, d - 1)...)),
+             bottom) : bottom
+    B_lin = d > 1 ? blockdiag(ntuple(_ -> Iblk, d - 1)..., coeffs[d + 1]) : coeffs[d + 1]
+
+    result = feast_gcsrgv!(A_lin, B_lin, Emid, r, M0 * d, fpm)
+
+    # Eigenvectors of the original problem are the first N components.
+    M = result.M
+    return FeastGeneralResult{T}(result.lambda[1:M], result.q[1:N, 1:M], M,
+                                 result.res[1:M], result.info, result.epsout,
+                                 result.loop)
+end
+
 function feast_scsrpev!(A::Vector{SparseMatrixCSC{T,Int}}, d::Int,
                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
     length(A) == d + 1 || throw(ArgumentError("Need d+1 coefficient matrices"))
-    dense_coeffs = [Matrix{T}(Ai) for Ai in A]
-    return feast_sypev!(dense_coeffs, d, Emid, r, M0, fpm)
+    # Widen values to complex but KEEP the sparse structure.
+    coeffs = [SparseMatrixCSC{Complex{T},Int}(Ai) for Ai in A]
+    return _feast_sparse_pep!(coeffs, d, Emid, r, M0, fpm)
 end
 
 function feast_scsrpevx!(A::Vector{SparseMatrixCSC{T,Int}}, d::Int,
@@ -1244,8 +1273,7 @@ end
 function feast_hcsrpev!(A::Vector{SparseMatrixCSC{Complex{T},Int}}, d::Int,
                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
     length(A) == d + 1 || throw(ArgumentError("Need d+1 coefficient matrices"))
-    dense_coeffs = [Matrix{Complex{T}}(Ai) for Ai in A]
-    return feast_hepev!(dense_coeffs, d, Emid, r, M0, fpm)
+    return _feast_sparse_pep!(A, d, Emid, r, M0, fpm)
 end
 
 function feast_hcsrpevx!(A::Vector{SparseMatrixCSC{Complex{T},Int}}, d::Int,
@@ -1260,8 +1288,7 @@ end
 function feast_gcsrpev!(A::Vector{SparseMatrixCSC{Complex{T},Int}}, d::Int,
                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
     length(A) == d + 1 || throw(ArgumentError("Need d+1 coefficient matrices"))
-    dense_coeffs = [Matrix{Complex{T}}(Ai) for Ai in A]
-    return feast_gepev!(dense_coeffs, d, Emid, r, M0, fpm)
+    return _feast_sparse_pep!(A, d, Emid, r, M0, fpm)
 end
 
 function feast_gcsrpevx!(A::Vector{SparseMatrixCSC{Complex{T},Int}}, d::Int,

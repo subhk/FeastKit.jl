@@ -126,8 +126,14 @@ function _feast_qr_compress!(basis::AbstractMatrix{Tv},
     end
 
     if rank > 0
-        qmat = Matrix(F.Q)
-        copyto!(view(basis, :, 1:rank), view(qmat, :, 1:rank))
+        # First `rank` columns of Q without materializing the full thin Q:
+        # apply the Householder reflectors to an identity block in place.
+        basis_block = view(basis, :, 1:rank)
+        fill!(basis_block, zero(Tv))
+        @inbounds for i in 1:rank
+            basis_block[i, i] = one(Tv)
+        end
+        lmul!(F.Q, basis_block)
     end
     return rank
 end

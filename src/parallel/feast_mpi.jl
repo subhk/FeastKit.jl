@@ -114,6 +114,7 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     # eigenpairs for M0 larger than the number of eigenvalues in the interval.
     Q_proj_local = Matrix{Complex{T}}(undef, N, M0)
     BQ_loop = Matrix{Complex{T}}(undef, N, M0)
+    Y_loop = Matrix{Complex{T}}(undef, N, M0)
     q_basis = Matrix{Complex{T}}(undef, N, M0)
     AQ = Matrix{Complex{T}}(undef, N, M0)
     BQm = Matrix{Complex{T}}(undef, N, M0)
@@ -149,15 +150,19 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         B_is_identity ? copyto!(bq, qblk) : mul!(bq, B, qblk)
         qpl = view(Q_proj_local, :, 1:active_dim)
         fill!(qpl, zero(Complex{T}))
+        Yv = view(Y_loop, :, 1:active_dim)
         for (e, Fe) in enumerate(local_factors)
-            Y = Fe \ bq
+            copyto!(Yv, bq)
+            ldiv!(Fe, Yv)
             w = 2 * mpi_state.local_Wne[e]
-            @. qpl += w * Y
+            @. qpl += w * Yv
         end
-        global_Q_proj = MPI.Allreduce(Q_proj_local[:, 1:active_dim], MPI.SUM, comm)
+        # In-place Allreduce: every rank's partial sum is replaced by the global
+        # sum, no per-loop slice copy or fresh receive buffer.
+        MPI.Allreduce!(qpl, MPI.SUM, comm)
 
         try
-            rank_r = _feast_qr_compress!(q_basis, global_Q_proj, active_dim;
+            rank_r = _feast_qr_compress!(q_basis, qpl, active_dim;
                                          rank_tol=sqrt(eps(T)))
             if rank_r == 0
                 info_code = Int(Feast_ERROR_NO_CONVERGENCE)
@@ -257,6 +262,9 @@ function mpi_compute_local_moments(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     Aq_local = zeros(T, M0, M0)
     Sq_local = zeros(T, M0, M0)
     Q_proj_local = zeros(T, N, M0)
+    work_block = view(work, :, 1:M0)
+    rhs_real = Matrix{T}(undef, N, M0)
+    workc_local = Matrix{Complex{T}}(undef, N, M0)
 
     # Process each local contour point
     for e in 1:local_ne
@@ -268,19 +276,19 @@ function mpi_compute_local_moments(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             system_matrix = z * B - A
             F = lu(system_matrix)
 
-            # Right-hand side
-            rhs = B * work[:, 1:M0]
-
-            # Solve linear systems
-            workc_local = F \ rhs
+            # Right-hand side B * Q0 stays a real product (BLAS for dense B),
+            # is widened into the reused complex buffer, and solved in place.
+            mul!(rhs_real, B, work_block)
+            copyto!(workc_local, rhs_real)
+            ldiv!(F, workc_local)
 
             # Factor of 2 for half-contour symmetry
             weight = 2 * w
 
-            # Accumulate moment contribution
+            # Accumulate moment contribution (views: no per-(i,j) column copies)
             for j in 1:M0
                 for i in 1:M0
-                    inner_product = dot(work[:, i], workc_local[:, j])
+                    inner_product = dot(view(work, :, i), view(workc_local, :, j))
                     Aq_local[i, j] += real(weight * inner_product)
                     Sq_local[i, j] += real(weight * z * inner_product)
                 end
@@ -317,12 +325,16 @@ function mpi_compute_residuals!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     # receive buffers with matching lengths, even though only the first M
     # entries are active for the current iteration.
     local_res = zeros(T, length(res))
+    N = size(A, 1)
+    Aq_buf = Vector{T}(undef, N)
+    Bq_buf = Vector{T}(undef, N)
     for j in start_idx:min(end_idx, M)
-        # Relative residual: ||A*q - λ*B*q|| / max(|λ|, 1)
-        Aq = A * q[:, j]
-        Bq = B * q[:, j]
-        residual = Aq - lambda[j] * Bq
-        local_res[j] = norm(residual) / max(abs(lambda[j]), one(eltype(lambda)))
+        # Relative residual: ||A*q - λ*B*q|| / max(|λ|, 1), buffers reused.
+        qj = view(q, :, j)
+        mul!(Aq_buf, A, qj)
+        mul!(Bq_buf, B, qj)
+        @. Aq_buf -= lambda[j] * Bq_buf
+        local_res[j] = norm(Aq_buf) / max(abs(lambda[j]), one(eltype(lambda)))
     end
 
     # Reduce residuals across all ranks
@@ -368,6 +380,9 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
 
     Q_proj_local = Matrix{Complex{T}}(undef, N, M0)
     BQ_loop = Matrix{Complex{T}}(undef, N, M0)
+    # UMFPACK factors are always ComplexF64 (it promotes Float32 inputs), so the
+    # in-place solve buffer must match that eltype, not Complex{T}.
+    Y_loop = Matrix{Complex{promote_type(T, Float64)}}(undef, N, M0)
     q_basis = Matrix{Complex{T}}(undef, N, M0)
     AQ = Matrix{Complex{T}}(undef, N, M0)
     BQm = Matrix{Complex{T}}(undef, N, M0)
@@ -401,25 +416,27 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
         B_is_identity ? copyto!(bq, qblk) : mul!(bq, B, qblk)
         qpl = view(Q_proj_local, :, 1:active_dim)
         fill!(qpl, zero(Complex{T}))
+        Yv = view(Y_loop, :, 1:active_dim)
         for (e, Fe) in enumerate(local_factors)
-            Y = Fe \ bq
+            copyto!(Yv, bq)
+            ldiv!(Fe, Yv)
             w = 2 * mpi_state.local_Wne[e]
-            @. qpl += w * Y
+            @. qpl += w * Yv
         end
 
         # Sum the partial filtered subspaces to ROOT ONLY. The reduced
         # Rayleigh-Ritz (QR compress + dense N×M0 work) then runs once on root
         # instead of being replicated on every rank (which contended for memory
-        # bandwidth and capped scaling). Results are broadcast back.
-        global_Q_proj = MPI.Reduce(Q_proj_local[:, 1:active_dim], MPI.SUM, root, comm)
+        # bandwidth and capped scaling). Results are broadcast back. The reduce
+        # is in place: root's qpl becomes the global sum, no fresh buffer.
+        MPI.Reduce!(qpl, MPI.SUM, root, comm)
 
         rank_r = active_dim
         M = 0
         status = 0
         if rank == root
-            gqp = global_Q_proj::Matrix{Complex{T}}
             try
-                rank_r = _feast_qr_compress!(q_basis, gqp, active_dim;
+                rank_r = _feast_qr_compress!(q_basis, qpl, active_dim;
                                              rank_tol=sqrt(eps(T)))
                 if rank_r == 0
                     status = 2
@@ -931,6 +948,10 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
     B_is_identity = (B == I)   # standard problem: skip per-loop identity matmuls
     BQ_loop = similar(Q_basis)
     Q_proj_local_buf = similar(Q_basis)
+    # In-place solve buffer. Sparse factors are UMFPACK and always ComplexF64
+    # (it promotes Float32 inputs); dense LU keeps Complex{T}.
+    Y_loop = A isa AbstractSparseMatrix ?
+        Matrix{Complex{promote_type(T, Float64)}}(undef, N, M0) : similar(Q_basis)
 
     Aq_herm = Matrix{Complex{T}}(undef, M0, M0)
     Sq_herm = Matrix{Complex{T}}(undef, M0, M0)
@@ -957,8 +978,9 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
             B_is_identity ? copyto!(BQ_loop, Q_basis) : mul!(BQ_loop, B, Q_basis)
             fill!(Q_proj_local_buf, zero(Complex{T}))
             for (e, Fe) in enumerate(local_factors)
-                Y = Fe \ BQ_loop
-                @. Q_proj_local_buf += (2 * mpi_state.local_Wne[e]) * Y
+                copyto!(Y_loop, BQ_loop)
+                ldiv!(Fe, Y_loop)
+                @. Q_proj_local_buf += (2 * mpi_state.local_Wne[e]) * Y_loop
             end
             local_Q_proj = Q_proj_local_buf
             local_success = true
@@ -976,7 +998,9 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
             break
         end
 
-        Q_proj .= MPI.Allreduce(local_Q_proj, MPI.SUM, comm)
+        # Direct send/recv Allreduce into the persistent buffer — no fresh
+        # receive array per refinement loop.
+        MPI.Allreduce!(local_Q_proj, Q_proj, MPI.SUM, comm)
 
         try
             # Orthonormalize the filtered subspace, then Hermitian Rayleigh-Ritz:
@@ -1110,6 +1134,10 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
     B_is_identity = (B == I)   # standard problem: skip per-loop identity matmuls
     BQ_loop = similar(Q_basis)
     Q_proj_local_buf = similar(Q_basis)
+    # In-place solve buffer. Sparse factors are UMFPACK and always ComplexF64
+    # (it promotes Float32 inputs); dense LU keeps Complex{T}.
+    Y_loop = A isa AbstractSparseMatrix ?
+        Matrix{Complex{promote_type(T, Float64)}}(undef, N, M0) : similar(Q_basis)
 
     Q_proj = similar(Q_basis)
     solutions = similar(Q_basis)
@@ -1135,8 +1163,9 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
             B_is_identity ? copyto!(BQ_loop, Q_basis) : mul!(BQ_loop, B, Q_basis)
             fill!(Q_proj_local_buf, zero(Complex{T}))
             for (e, Fe) in enumerate(local_factors)
-                Y = Fe \ BQ_loop
-                @. Q_proj_local_buf += mpi_state.local_Wne[e] * Y
+                copyto!(Y_loop, BQ_loop)
+                ldiv!(Fe, Y_loop)
+                @. Q_proj_local_buf += mpi_state.local_Wne[e] * Y_loop
             end
             local_Q_proj = Q_proj_local_buf
             local_success = true
@@ -1154,7 +1183,9 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
             break
         end
 
-        Q_proj .= MPI.Allreduce(local_Q_proj, MPI.SUM, comm)
+        # Direct send/recv Allreduce into the persistent buffer — no fresh
+        # receive array per refinement loop.
+        MPI.Allreduce!(local_Q_proj, Q_proj, MPI.SUM, comm)
         try
             # Orthonormalize the filtered subspace before the (non-Hermitian)
             # Rayleigh-Ritz: Ared = Qᴴ A Q, Bred = Qᴴ B Q. Fixes the rank-deficient

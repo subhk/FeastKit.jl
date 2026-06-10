@@ -72,15 +72,16 @@ function _pfeast_factorize_contour(A::Matrix{T}, B::Matrix{T},
         blas_threads = BLAS.get_num_threads()
         BLAS.set_num_threads(1)
         try
+            # lu! factorizes the broadcast temporary in place — no second copy.
             Threads.@threads for e in 1:ne
-                factors[e] = lu(Zne[e] .* B .- A)
+                factors[e] = lu!(Zne[e] .* B .- A)
             end
         finally
             BLAS.set_num_threads(blas_threads)
         end
     else
         for e in 1:ne
-            factors[e] = lu(Zne[e] .* B .- A)
+            factors[e] = lu!(Zne[e] .* B .- A)
         end
     end
     return factors
@@ -98,24 +99,30 @@ function _pfeast_accumulate_qproj!(Q_proj::AbstractMatrix{Complex{T}},
     ne = length(factors)
     N, M = size(BQ)
     if use_threads && Threads.nthreads() > 1 && ne > 1
-        contribs = Vector{Matrix{Complex{T}}}(undef, ne)
+        # Chunk the points so each task owns one solve buffer and one local
+        # accumulator: 2 allocations per chunk instead of one retained N×M
+        # matrix per contour point. Chunks are indexed by position (never by
+        # threadid()), so task migration cannot alias buffers.
+        nchunks = min(Threads.nthreads(), ne)
+        chunks = collect(Iterators.partition(1:ne, cld(ne, nchunks)))
+        partials = Vector{Matrix{Complex{T}}}(undef, length(chunks))
         blas_threads = BLAS.get_num_threads()
         BLAS.set_num_threads(1)
         try
-            # `local` is essential: without it `Yt` would share function scope
-            # with the serial branch's buffer and every thread would clobber a
-            # single shared array (a data race).
-            Threads.@threads for e in 1:ne
+            Threads.@threads for ci in eachindex(chunks)
                 local Yt = Matrix{Complex{T}}(undef, N, M)
-                copyto!(Yt, BQ)
-                ldiv!(factors[e], Yt)
-                @. Yt *= 2 * Wne[e]
-                contribs[e] = Yt
+                local acc = zeros(Complex{T}, N, M)
+                for e in chunks[ci]
+                    copyto!(Yt, BQ)
+                    ldiv!(factors[e], Yt)
+                    @. acc += (2 * Wne[e]) * Yt
+                end
+                partials[ci] = acc
             end
         finally
             BLAS.set_num_threads(blas_threads)
         end
-        for c in contribs
+        for c in partials
             Q_proj .+= c
         end
     else
@@ -493,25 +500,24 @@ function pfeast_solve_single_point(A::Matrix{T}, B::Matrix{T}, work::Matrix{T},
     Sq_local = zeros(Complex{T}, M0, M0)
     Q_proj_local = zeros(Complex{T}, N, M0)
 
+    work_block = view(work, :, 1:M0)
     try
-        # Form and factorize (z*B - A)
-        system_matrix = z * B - A
-        F = lu(system_matrix)
+        # Factorize (z*B - A) in place on the broadcast temporary — one copy.
+        F = lu!(z .* B .- A)
 
-        # Right-hand side: B * Q0 (complex)
-        rhs = Complex{T}.(B * work[:, 1:M0])
-
-        # Solve linear systems: Y = (z*B - A) \ (B*Q0)
-        workc_local = F \ rhs
+        # Right-hand side: B * Q0 (real BLAS product), promoted to complex once
+        # in workc_local, then solved in place.
+        workc_local = Complex{T}.(B * work_block)
+        ldiv!(F, workc_local)
 
         # Compute complex moment contribution with factor of 2 for half-contour symmetry
-        temp = work[:, 1:M0]' * workc_local
+        temp = work_block' * workc_local
         weight = 2 * w  # Factor of 2 for conjugate half-contour
-        Aq_local .= weight .* temp
-        Sq_local .= weight * z .* temp
+        @. Aq_local = weight * temp
+        @. Sq_local = (weight * z) * temp
 
         # Accumulate filtered subspace contribution
-        Q_proj_local .= weight .* workc_local
+        @. Q_proj_local = weight * workc_local
 
     catch err
         @warn "Linear solve failed for contour point z=$z: $err"
@@ -585,8 +591,11 @@ function _pfeast_accumulate_qproj_sparse!(Q_proj::AbstractMatrix{Complex{T}},
         BLAS.set_num_threads(1)
         try
             Threads.@threads for e in 1:ne
+                # Scale the solve result in place; assignment converts to
+                # Complex{T} only when UMFPACK promoted the eltype (Float32).
                 local Yt = factors[e] \ BQ
-                contribs[e] = Matrix{Complex{T}}((2 * Wne[e]) .* Yt)
+                @. Yt *= 2 * Wne[e]
+                contribs[e] = Yt
             end
         finally
             BLAS.set_num_threads(blas_threads)
@@ -776,7 +785,6 @@ function pfeast_compute_sparse_moments_threaded(A::SparseMatrixCSC{T,Int},
         Aq_local = zeros(T, M0, M0)
         Sq_local = zeros(T, M0, M0)
         Q_proj_local = zeros(T, N, M0)
-        rhs = Matrix{Complex{T}}(undef, N, M0)
         workc_local = Matrix{Complex{T}}(undef, N, M0)
         temp = Matrix{Complex{T}}(undef, M0, M0)
 
@@ -787,11 +795,9 @@ function pfeast_compute_sparse_moments_threaded(A::SparseMatrixCSC{T,Int},
             # Sparse LU factorization
             F = lu(system_matrix)
 
-            # Right-hand side: B * Q0
-            mul!(rhs, B, work_block)
-
-            # Solve sparse linear systems: Y = (z*B - A) \ (B*Q0)
-            copyto!(workc_local, rhs)
+            # Right-hand side B * Q0 lands directly in the complex solve buffer,
+            # then the sparse solve runs in place — no separate rhs copy.
+            mul!(workc_local, B, work_block)
             ldiv!(F, workc_local)
 
             # Compute moment contribution with factor of 2 for half-contour symmetry

@@ -235,12 +235,10 @@ function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:Real
     Zne = Vector{Complex{T}}(undef, ne)
     Wne = Vector{Complex{T}}(undef, ne)
 
-    # Precompute Gauss–Legendre nodes/weights if needed
-    x_gl = nothing
-    w_gl = nothing
-    if fpm16 == 0
-        x_gl, w_gl = FastGaussQuadrature.gausslegendre(ne)
-    end
+    # Precompute Gauss–Legendre nodes/weights if needed. Typed empty fallback
+    # keeps x_gl/w_gl concrete (Vector{Float64}) instead of Union{Nothing, ...}.
+    x_gl, w_gl = fpm16 == 0 ? FastGaussQuadrature.gausslegendre(ne) :
+                              (Float64[], Float64[])
 
     for e in 1:ne
         if fpm16 == 0  # Gauss-Legendre integration (matches Fortran exactly)

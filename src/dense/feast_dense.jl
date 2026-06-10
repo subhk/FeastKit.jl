@@ -265,19 +265,20 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
             end
 
             # Solve Hermitian generalized eigenproblem: Sq*x = lambda*Aq*x
-            # Eigenvalues are real; eigenvectors are complex.
-            lambda_red = Vector{T}(undef, 0)
-            v_red = Array{Complex{T}}(undef, 0, 0)
+            # Eigenvalues are real; eigenvectors are complex. Both branches
+            # already produce Vector{T} / Matrix{Complex{T}}, so the bindings
+            # are type-stable without defensive constructor copies.
+            local lambda_red, v_red
             try
                 F = eigen(Hermitian(Sq_rank), Hermitian(Aq_rank))
-                lambda_red = Vector{T}(F.values)
-                v_red = Matrix{Complex{T}}(F.vectors)
+                lambda_red = F.values
+                v_red = F.vectors
             catch e
                 if isa(e, PosDefException) || isa(e, LAPACKException)
                     # Fall back to general complex eigenvalue solver
                     F = eigen(Sq_rank, Aq_rank)
-                    lambda_red = Vector{T}(real.(F.values))
-                    v_red = Matrix{Complex{T}}(F.vectors)
+                    lambda_red = real.(F.values)
+                    v_red = F.vectors
                 else
                     rethrow(e)
                 end
@@ -334,7 +335,7 @@ function _feast_dense_complex_hermitian(A::Matrix{Complex{T}},
             end
 
             active_dim = rank
-            Q_basis[:, 1:active_dim] .= solutions[:, 1:active_dim]
+            copyto!(view(Q_basis, :, 1:active_dim), view(solutions, :, 1:active_dim))
         catch err
             info_code = Int(Feast_ERROR_LAPACK)
             @warn "Reduced dense Hermitian eigenproblem failed" exception=err
@@ -608,7 +609,7 @@ end
 
 # Polynomial helpers
 
-function _check_polynomial_coeffs(coeffs::Vector{Matrix{Complex{T}}}, d::Int) where T<:Real
+function _check_polynomial_coeffs(coeffs::Vector{<:AbstractMatrix{Complex{T}}}, d::Int) where T<:Real
     length(coeffs) == d + 1 ||
         throw(ArgumentError("Need d+1 coefficient matrices, got $(length(coeffs)) for degree $d"))
     N = size(coeffs[1], 1)
@@ -632,7 +633,7 @@ function _evaluate_polynomial_matrix!(dest::AbstractMatrix{Complex{T}},
 end
 
 function _apply_polynomial!(dest::AbstractVector{Complex{T}},
-                            coeffs::Vector{Matrix{Complex{T}}}, λ::Complex{T},
+                            coeffs::Vector{<:AbstractMatrix{Complex{T}}}, λ::Complex{T},
                             vec::AbstractVector{Complex{T}},
                             scratch::AbstractVector{Complex{T}}) where T<:Real
     fill!(dest, zero(Complex{T}))

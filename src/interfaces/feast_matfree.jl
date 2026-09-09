@@ -3,7 +3,6 @@
 
 using LinearAlgebra
 using SparseArrays
-using Krylov
 
 """
     MatrixFreeOperator{T}
@@ -178,6 +177,12 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
         fpm[3] = round(Int, -log10(tol))  # Set tolerance
         fpm[4] = maxiter  # Set max iterations
     end
+
+    # Reject a bad N/M0/interval here, the way every other entry point does. The
+    # kernel also refuses them, but by reporting an info code rather than
+    # throwing, which would make this interface disagree with the rest.
+    fpm_vec = fpm isa FeastParameters ? fpm.fpm : fpm
+    check_feast_srci_input(N, M0, Emin, Emax, fpm_vec)
     
     # Allocate workspace if not provided
     if workspace === nothing
@@ -223,25 +228,28 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
             # Result should be stored in workc
             try
                 linear_solver(workc, Ze[], work)
-            catch e
+            catch err
+                @debug "Matrix-free linear solver callback failed" exception=err
                 info[] = Int(Feast_ERROR_LAPACK)
                 break
             end
-            
+
         elseif ijob[] == Int(Feast_RCI_MULT_A)
-            # Compute A * q, store result in work
-            # mode[] contains M = number of eigenvalues found
+            # Compute A * q, store result in work.
+            # mode[] is how many columns of q the kernel wants multiplied.
             M = mode[]
-            if M >= 1
-                for j in 1:M
-                    mul!(view(work, :, j), A_op, view(q, :, j))
-                end
+            for j in 1:M
+                mul!(view(work, :, j), A_op, view(q, :, j))
             end
-            
-        # Note: Feast_RCI_MULT_B is NOT issued by feast_srci! for symmetric problems.
-        # The B matrix is handled implicitly through the linear solver callback
-        # (z*B - A)^{-1}. The residual uses ||Aq - λq|| which assumes B=I or
-        # that the eigenvalue problem has been transformed appropriately.
+
+        elseif ijob[] == Int(Feast_RCI_MULT_B)
+            # Compute B * q, store result in work. The kernel needs this both to
+            # build the reduced mass matrix and to form the generalized residual
+            # ||A q - lambda B q||.
+            M = mode[]
+            for j in 1:M
+                mul!(view(work, :, j), B_op, view(q, :, j))
+            end
 
         else
             # Unknown RCI code
@@ -295,6 +303,10 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
         fpm[3] = round(Int, -log10(tol))
         fpm[4] = maxiter
     end
+
+    # Same up-front validation as the Hermitian matrix-free entry point.
+    fpm_vec = fpm isa FeastParameters ? fpm.fpm : fpm
+    check_feast_grci_input(N, M0, center, radius, fpm_vec)
     
     # Allocate workspace if not provided
     if workspace === nothing
@@ -344,6 +356,7 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
                 copyto!(rhs, workc)
                 linear_solver(workc, Ze[], rhs)
             catch e
+                @debug "Matrix-free linear solver callback failed" exception=e
                 info[] = Int(Feast_ERROR_LAPACK)
                 break
             end
@@ -673,14 +686,16 @@ function create_iterative_solver(A_op::MatrixFreeOperator{T},
                                 restart::Int = 30,
                                 preconditioner = nothing) where T
 
+    FEAST_KRYLOV_AVAILABLE[] ||
+        throw(ArgumentError("create_iterative_solver needs Krylov.jl. Run `using Krylov` to load the FeastKitKrylovExt extension."))
+
     N = size(A_op, 1)
     CT = T <: Real ? Complex{T} : T
     current_shift = Ref(zero(CT))
     temp = Vector{CT}(undef, N)
     temp_A = Vector{CT}(undef, N)
     xj = Vector{CT}(undef, N)
-    gmres_workspace = Krylov.GmresWorkspace(N, N, Vector{CT};
-                                            memory=max(restart, 2))
+    gmres_workspace = _feast_gmres_workspace(N, CT; memory=max(restart, 2))
 
     function shifted_mul!(y, x)
         # y = (z*B - A) * x
@@ -705,19 +720,17 @@ function create_iterative_solver(A_op::MatrixFreeOperator{T},
                 xj[i] = CT(X[i, j])
             end
             if solver_type == :gmres
-                Krylov.gmres!(gmres_workspace, shifted_op, xj;
-                              restart=true,
-                              rtol=rtol,
-                              atol=rtol,
-                              itmax=maxiter)
-                copyto!(view(Y, :, j), gmres_workspace.x)
-                converged = gmres_workspace.stats.solved
+                converged = _feast_gmres!(gmres_workspace, shifted_op, xj;
+                                          restart=true,
+                                          rtol=rtol,
+                                          atol=rtol,
+                                          itmax=maxiter)
+                copyto!(view(Y, :, j), _feast_gmres_solution(gmres_workspace))
             elseif solver_type == :bicgstab
-                result, stats = Krylov.bicgstab(shifted_op, xj;
-                                                rtol=rtol, atol=rtol,
-                                                itmax=maxiter)
+                result, converged = _feast_bicgstab(shifted_op, xj;
+                                                    rtol=rtol, atol=rtol,
+                                                    itmax=maxiter)
                 @views Y[:, j] .= result
-                converged = stats.solved
             elseif solver_type == :cg
                 # CG only works for SPD systems - but (z*B - A) is NOT SPD for complex z
                 # CG should not be used with FEAST's complex contour points

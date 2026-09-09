@@ -48,16 +48,17 @@ git remote add upstream https://github.com/subhk/FeastKit.jl.git
 
 ### Set Up Development Environment
 
-```julia
-# Start Julia in project mode
+```bash
+# Start Julia with the package environment active
 julia --project=.
+```
 
-# Install dependencies
+```julia
+# Then, in that session:
 using Pkg
 Pkg.instantiate()
 Pkg.develop(path=".")
 
-# Verify setup
 using FeastKit
 ```
 
@@ -237,10 +238,12 @@ end
 Tests are in `test/runtests.jl` and `test/test_*.jl`:
 
 ```julia
+using Test
+
 @testset "Feature Name" begin
     @testset "Subfeature" begin
-        @test some_condition
-        @test another_condition
+        @test 1 + 1 == 2          # some condition
+        @test isapprox(1.0, 1.0)  # another condition
     end
 end
 ```
@@ -257,22 +260,25 @@ end
 
 ```julia
 @testset "feast_sygv!" begin
-    # Setup
+    # Setup. feast_sygv! takes dense `Matrix` arguments, and the interval has to
+    # hold no more eigenvalues than M0: this one is 2 - 2cos(kπ/(n+1)), so
+    # (0.0, 1.0) would contain 23 of them and could never converge with M0 = 10.
     n = 100
-    A = SymTridiagonal(2*ones(n), -ones(n-1))
+    A = Matrix(SymTridiagonal(2*ones(n), -ones(n-1)))
     B = Matrix(1.0I, n, n)
+    Emin, Emax = 0.0, 0.05
     fpm = zeros(Int, 64)
     feastinit!(fpm)
 
     @testset "Basic functionality" begin
-        result = feast_sygv!(A, B, 0.0, 1.0, 10, fpm)
+        result = feast_sygv!(A, B, Emin, Emax, 10, copy(fpm))
         @test result.info == 0
         @test result.M > 0
-        @test all(0.0 .<= result.lambda[1:result.M] .<= 1.0)
+        @test all(Emin .<= result.lambda[1:result.M] .<= Emax)
     end
 
     @testset "Residual accuracy" begin
-        result = feast_sygv!(A, B, 0.0, 1.0, 10, fpm)
+        result = feast_sygv!(A, B, Emin, Emax, 10, copy(fpm))
         for i in 1:result.M
             λ, x = result.lambda[i], result.q[:, i]
             residual = norm(A*x - λ*B*x)
@@ -281,7 +287,7 @@ end
     end
 
     @testset "Error handling" begin
-        @test_throws ArgumentError feast_sygv!(A, B, 1.0, 0.0, 10, fpm)  # Invalid interval
+        @test_throws ArgumentError feast_sygv!(A, B, 1.0, 0.0, 10, copy(fpm))  # Invalid interval
     end
 end
 ```

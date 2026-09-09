@@ -111,11 +111,22 @@ end
 # These replace the global Dict{UInt64, Dict{Symbol, Any}} approach that was
 # keyed by objectid (not GC-stable, not thread-safe, memory leak on exceptions).
 
+# RCI sub-phases. The FEAST protocol issues MULT_A and MULT_B twice per
+# refinement loop -- once to build the reduced Rayleigh-Ritz pencil and once to
+# evaluate residuals -- so the kernels record which of the two is outstanding.
+const FEAST_PHASE_IDLE = 0
+const FEAST_PHASE_PROJECT_A = 1
+const FEAST_PHASE_PROJECT_B = 2
+const FEAST_PHASE_RESIDUAL_A = 3
+const FEAST_PHASE_RESIDUAL_B = 4
+
 """
     FeastSRCIState{T<:Real}
 
 Explicit state object for the `feast_srci!` RCI kernel (real symmetric/Hermitian problems).
 Create with `FeastSRCIState{T}()` and pass to `feast_srci!` via the `state` keyword argument.
+The same object must be reused for every call in one RCI loop; the kernel stores
+the contour, the trial subspace, and the outstanding sub-phase in it.
 """
 mutable struct FeastSRCIState{T<:Real}
     initialized::Bool
@@ -123,21 +134,25 @@ mutable struct FeastSRCIState{T<:Real}
     Wne::Vector{Complex{T}}
     ne::Int
     e::Int
-    Q0::Matrix{T}
-    Q_proj::Matrix{Complex{T}}
-    zAq::Matrix{Complex{T}}    # Complex moment accumulator (take real() only after full contour)
-    zSq::Matrix{Complex{T}}    # Complex moment accumulator (take real() only after full contour)
+    Q0::Matrix{T}                 # Current trial subspace (N x M0)
+    Q_proj::Matrix{Complex{T}}    # Accumulated filtered subspace over the contour
+    Qb::Matrix{T}                 # Orthonormal basis after pivoted-QR compression
+    AQ::Matrix{T}                 # Holds A*q while B*q is being requested
+    phase::Int                    # Which MULT_A / MULT_B request is outstanding
+    rank::Int                     # Numerical rank of the filtered subspace
+    active::Int                   # Columns of Q0 currently in use
     M::Int
     perm::Vector{Int}
     q_tmp::Matrix{T}
+    lambda_tmp::Vector{T}
     residual::Vector{T}
-    moment::Matrix{Complex{T}}
 
     function FeastSRCIState{T}() where T<:Real
         new{T}(false, Complex{T}[], Complex{T}[], 0, 1,
                Matrix{T}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
-               Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0), 0,
-               Int[], Matrix{T}(undef, 0, 0), T[], Matrix{Complex{T}}(undef, 0, 0))
+               Matrix{T}(undef, 0, 0), Matrix{T}(undef, 0, 0),
+               FEAST_PHASE_IDLE, 0, 0, 0,
+               Int[], Matrix{T}(undef, 0, 0), T[], T[])
     end
 end
 
@@ -154,20 +169,25 @@ mutable struct FeastHRCIState{T<:Real}
     e::Int
     Q0::Matrix{Complex{T}}
     Q_proj::Matrix{Complex{T}}
+    Qb::Matrix{Complex{T}}
+    AQ::Matrix{Complex{T}}
+    phase::Int
+    rank::Int
+    active::Int
     M::Int
     eps::T
     maxloop::Int
     perm::Vector{Int}
     q_tmp::Matrix{Complex{T}}
+    lambda_tmp::Vector{T}
     residual::Vector{Complex{T}}
-    moment::Matrix{Complex{T}}    # Preallocated Q0' * Y scratch (avoids per-point alloc)
 
     function FeastHRCIState{T}() where T<:Real
         new{T}(false, Complex{T}[], Complex{T}[], 0, 1,
                Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
-               0, zero(T), 0, Int[],
-               Matrix{Complex{T}}(undef, 0, 0), Complex{T}[],
-               Matrix{Complex{T}}(undef, 0, 0))
+               Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
+               FEAST_PHASE_IDLE, 0, 0, 0, zero(T), 0, Int[],
+               Matrix{Complex{T}}(undef, 0, 0), T[], Complex{T}[])
     end
 end
 
@@ -179,17 +199,23 @@ Explicit state object for the `feast_grci!` RCI kernel (general non-Hermitian pr
 mutable struct FeastGRCIState{T<:Real}
     initialized::Bool
     Q0::Matrix{Complex{T}}
-    mult_a_for_projection::Bool  # Distinguishes two MULT_A calls (moved out of fpm[54])
+    phase::Int                  # Distinguishes the projection and residual MULT_A/MULT_B calls
     Zne::Vector{Complex{T}}     # Cached contour nodes
     Wne::Vector{Complex{T}}     # Cached contour weights
     perm::Vector{Int}
     workc_tmp::Matrix{Complex{T}}
+    Qb::Matrix{Complex{T}}      # Orthonormal basis after pivoted-QR compression
+    AQ::Matrix{Complex{T}}      # Holds A*q while B*q is being requested
+    rank::Int                   # Numerical rank of the filtered subspace
+    active::Int                 # Columns of Q0 currently in use
     residual::Vector{Complex{T}}
 
     function FeastGRCIState{T}() where T<:Real
-        new{T}(false, Matrix{Complex{T}}(undef, 0, 0), false,
+        new{T}(false, Matrix{Complex{T}}(undef, 0, 0), FEAST_PHASE_IDLE,
                Complex{T}[], Complex{T}[], Int[],
-               Matrix{Complex{T}}(undef, 0, 0), Complex{T}[])
+               Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
+               Matrix{Complex{T}}(undef, 0, 0), 0, 0,
+               Complex{T}[])
     end
 end
 
@@ -200,11 +226,21 @@ Explicit state object for the polynomial RCI kernel `_feast_poly_grci!`.
 """
 mutable struct FeastPolyRCIState{T<:Real}
     initialized::Bool
-    moment::Matrix{Complex{T}}
+    # Beyn's two contour moments of the resolvent applied to the trial block,
+    # S0 = sum w_e P(z_e)^-1 Q and S1 = sum w_e z_e P(z_e)^-1 Q, kept at full
+    # N x M0 size. The earlier kernel only accumulated their M0 x M0
+    # projections Q^H S0 and Q^H S1, which leaves no room to detect that S0 is
+    # rank deficient -- the ordinary case whenever M0 exceeds the number of
+    # eigenvalues inside the contour.
+    S0::Matrix{Complex{T}}
+    S1::Matrix{Complex{T}}
+    basis::Matrix{Complex{T}}   # leading left singular vectors of S0
+    rank::Int
     residual::Vector{Complex{T}}
 
     function FeastPolyRCIState{T}() where T<:Real
-        new{T}(false, Matrix{Complex{T}}(undef, 0, 0), Complex{T}[])
+        empty = Matrix{Complex{T}}(undef, 0, 0)
+        new{T}(false, copy(empty), copy(empty), copy(empty), 0, Complex{T}[])
     end
 end
 
@@ -224,8 +260,30 @@ struct FeastContour{T<:Real}
     end
 end
 
-# Feast RCI job identifiers (matches Fortran FEAST ijob values)
-# See FEAST documentation for details on each operation
+"""
+    FeastRCIJob
+
+Feast RCI job identifiers, numbered to match the Fortran FEAST `ijob` values.
+
+Which codes a caller must actually handle depends on the kernel:
+
+| Kernel | Emits |
+|:--|:--|
+| `feast_srci!`, `feast_hrci!` | `FACTORIZE`, `SOLVE`, `MULT_A`, `MULT_B`, `DONE` |
+| `feast_grci!` | `FACTORIZE`, `SOLVE`, `MULT_A`, `MULT_B`, `DONE` |
+| `_feast_poly_grci!` | `FACTORIZE`, `SOLVE`, `MULT_A`, `DONE` |
+
+`MULT_A` and `MULT_B` are each issued twice per refinement loop: once on the
+compressed basis to build the reduced Rayleigh-Ritz pencil, and once on the Ritz
+vectors to evaluate `||A q - λ B q||`. The kernels track which is outstanding
+internally, so a caller just multiplies `q[:, 1:mode[]]` every time.
+
+The remaining codes are defined for numbering compatibility with Fortran FEAST
+but are **never emitted** by these kernels: `FACTORIZE_T`, `SOLVE_T`,
+`MULT_A_H`, `MULT_B_H`, `BIORTHOG` and `REDUCED_SYSTEM`. The non-Hermitian
+kernel uses a single (right) contour and does not bi-orthogonalize, so a port of
+Fortran RCI code that supplies handlers for those codes will find them unused.
+"""
 @enum FeastRCIJob begin
     Feast_RCI_INIT = -1              # Initialize RCI loop
     Feast_RCI_DONE = 0               # Convergence achieved, exit
@@ -234,18 +292,18 @@ end
     Feast_RCI_FACTORIZE = 10         # Factorize (Ze*B - A)
     Feast_RCI_SOLVE = 11             # Solve linear system using existing factorization
 
-    # Transpose factorization and solve (for non-Hermitian problems)
-    # In Fortran: ijob=20 prepares transpose solve, ijob=21 solves (Ze*B - A)^T * x = b
+    # Transpose factorization and solve (for non-Hermitian problems).
+    # Reserved for Fortran numbering compatibility; not emitted here.
     Feast_RCI_FACTORIZE_T = 20       # Factorize for transpose solve
     Feast_RCI_SOLVE_T = 21           # Solve transpose linear system
 
     # Matrix-vector products
     Feast_RCI_MULT_A = 30            # Compute A * X
-    Feast_RCI_MULT_A_H = 31          # Compute A^H * X (conjugate transpose)
+    Feast_RCI_MULT_A_H = 31          # Compute A^H * X (reserved; not emitted)
     Feast_RCI_MULT_B = 40            # Compute B * X
-    Feast_RCI_MULT_B_H = 41          # Compute B^H * X (conjugate transpose)
+    Feast_RCI_MULT_B_H = 41          # Compute B^H * X (reserved; not emitted)
 
-    # Advanced operations for non-Hermitian problems
+    # Advanced operations for non-Hermitian problems (reserved; not emitted)
     Feast_RCI_BIORTHOG = 50          # Bi-orthogonalization step
     Feast_RCI_REDUCED_SYSTEM = 60    # Solve reduced eigenvalue system
 end

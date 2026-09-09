@@ -112,7 +112,15 @@ function feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads;
             return pfeast_scsrgv!(copy(A), copy(B), interval[1], interval[2], M0, fpm;
                                   use_threads=(backend == :threads))
         elseif A isa Matrix && B isa Matrix
-            return _backend_fallback("Dense threaded/distributed backend is disabled because it does not currently match serial results",
+            if backend == :threads
+                # Re-enabled: the dense threaded path disagreed with serial only
+                # because it took real(q) of a complex Ritz vector without
+                # removing the global phase, which collapsed columns whose phase
+                # sat near +-i. See _feast_real_column!.
+                return pfeast_sygv!(copy(A), copy(B), interval[1], interval[2], M0, fpm;
+                                    use_threads=true)
+            end
+            return _backend_fallback("Dense distributed backend is not implemented; contour points are distributed across workers only for sparse storage",
                                      strict_backend, A, B, interval, M0, fpm)
         else
             return _backend_fallback("Threaded/distributed backend requires both matrices to use the same dense or sparse storage",
@@ -244,9 +252,9 @@ function feast_parallel_info()
     println("\nMPI:")
     if mpi_available()
         try
-            comm = MPI.COMM_WORLD
-            rank = MPI.Comm_rank(comm)
-            mpi_size = MPI.Comm_size(comm)
+            comm = _mpi_world_comm()
+            rank = _mpi_comm_rank(comm)
+            mpi_size = _mpi_comm_size(comm)
             println("  MPI initialized: Yes")
             println("  Current rank: $rank")
             println("  Total processes: $mpi_size")

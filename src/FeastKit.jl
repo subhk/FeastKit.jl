@@ -14,7 +14,7 @@ export pfeast_sygv!, pfeast_scsrgv!, pfeast_compute_all_contour_points!, pfeast_
 export mpi_feast, mpi_feast_general, feast_hybrid, MPIFeastState
 export mpi_feast_heev!, mpi_feast_hegv!, mpi_feast_geev!, mpi_feast_gegv!
 export mpi_feast_hcsrev!, mpi_feast_hcsrgv!, mpi_feast_gcsrev!, mpi_feast_gcsrgv!
-export feast_summary, feast_validate_interval
+export feast_summary, feast_validate_interval, feast_estimate_count
 export check_feast_srci_input, feast_inside_contour, feast_inside_gcontour
 export feast_name, feast_memory_estimate
 export full_to_banded, full_to_general_banded, banded_to_full, feast_banded_info
@@ -126,27 +126,25 @@ using SparseArrays
 using Distributed
 using FastGaussQuadrature
 
-# Krylov is optional at runtime. Direct FEAST paths work without it, while
-# iterative variants check this flag before asking for GMRES-based solves.
+# Krylov is an optional dependency, wired in by the FeastKitKrylovExt package
+# extension. Direct FEAST paths work without it; iterative (IFEAST) variants
+# check this flag before asking for a GMRES-based solve. The extension flips it
+# in its own __init__.
 const FEAST_KRYLOV_AVAILABLE = Ref(false)
-try
-    using Krylov: gmres
-    import Krylov
-    FEAST_KRYLOV_AVAILABLE[] = true
-catch e
-    @debug "Krylov.jl not available; iterative FEAST variants requiring GMRES will be disabled." exception=e
-    FEAST_KRYLOV_AVAILABLE[] = false
-end
 
-# Load MPI symbols at compile time when available, but defer all MPI runtime
-# decisions to __init__ so normal package loading never starts MPI implicitly.
+# Internal seam the Krylov extension fills in. Keeping the parent module free of
+# Krylov types means the iterative call sites do not have to know about the
+# solver's stats objects: each of these returns whether the solve converged.
+function _feast_gmres end
+function _feast_gmres_workspace end
+function _feast_gmres! end
+function _feast_gmres_solution end
+function _feast_bicgstab end
+
+# MPI is likewise optional, provided by FeastKitMPIExt. All MPI runtime
+# decisions are deferred to __init__ so loading FeastKit never starts MPI.
 const MPI_AVAILABLE = Ref(false)
-const _MPI_LOADED = try
-    using MPI
-    true
-catch
-    false
-end
+_mpi_extension_loaded() = Base.get_extension(@__MODULE__, :FeastKitMPIExt) !== nothing
 
 # Include order follows the dependency graph: data types and parameter helpers
 # first, kernel state machines next, storage-specific solvers after that, and
@@ -155,27 +153,26 @@ include("core/feast_types.jl")
 include("core/feast_parameters.jl")
 include("core/feast_tools.jl")
 include("core/feast_aux.jl")
+include("parallel/feast_mpi_stubs.jl")
 include("core/feast_backend_utils.jl")
 include("kernel/feast_kernel.jl")
 include("dense/feast_dense.jl")
 include("sparse/feast_sparse.jl")
+# Shared drivers over the RCI kernels for real symmetric and complex Hermitian
+# problems. Included after both storage layers because they use the dense and
+# sparse shifted-solve helpers.
+include("core/feast_rci_drivers.jl")
 include("banded/feast_banded.jl")
 include("interfaces/feast_precision_aliases.jl")
 include("parallel/feast_parallel.jl")
 include("parallel/feast_parallel_rci.jl")
+include("parallel/feast_parallel_comparison.jl")
 include("interfaces/feast_interfaces.jl")
 include("interfaces/feast_matfree.jl")
 include("deprecations.jl")
 
-# MPI files define methods that should be visible when MPI is installed. Actual
-# MPI execution stays gated by MPI_AVAILABLE[] and explicit user opt-in.
-if _MPI_LOADED
-    include("parallel/feast_mpi.jl")
-    include("parallel/feast_mpi_interface.jl")
-end
-
 function __init__()
-    if !_MPI_LOADED
+    if !_mpi_extension_loaded()
         MPI_AVAILABLE[] = false
         return
     end
@@ -196,9 +193,9 @@ function __init__()
     end
 
     try
-        MPI_AVAILABLE[] = MPI.Initialized()
+        MPI_AVAILABLE[] = _mpi_initialized()
     catch e
-        @debug "MPI.Initialized() check failed, MPI features disabled" exception=e
+        @debug "MPI initialization check failed, MPI features disabled" exception=e
         MPI_AVAILABLE[] = false
     end
 end

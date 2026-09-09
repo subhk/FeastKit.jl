@@ -231,7 +231,10 @@ function feastdefault!(fpm::Vector{Int})
 
     # fpm[18]: Ellipsoid contour ratio a/b * 100 (b is [Emin-Emax])
     # For symmetric/Hermitian: default 30 (narrow ellipse), 100=circle
-    if fpm[18] == FEAST_UNINITIALIZED
+    # Treat 0 as uninitialized, as fpm[2]/[4]/[8] already are: a zero aspect
+    # ratio collapses the contour onto a line segment, which silently returns
+    # garbage. It is what a bare `zeros(Int, 64)` (no feastinit!) leaves behind.
+    if fpm[18] == FEAST_UNINITIALIZED || fpm[18] == 0
         fpm[18] = 100  # Default: circle
         # For direct FEAST (dig[3]=1) and linear eigenvalue (dig[6]<=5)
         if dig[3] == 1 && dig[6] <= 5

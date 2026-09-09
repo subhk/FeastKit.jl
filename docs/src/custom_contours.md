@@ -293,7 +293,7 @@ function multi_level_feast(A, eigenvalue_regions; M0_per_region=10)
     all_eigenvalues = all_eigenvalues[perm]
     all_eigenvectors = all_eigenvectors[:, perm]
     
-    println("\\nTotal eigenvalues found: $(length(all_eigenvalues))")
+    println("\nTotal eigenvalues found: $(length(all_eigenvalues))")
     return all_eigenvalues, all_eigenvectors
 end
 
@@ -457,6 +457,8 @@ end
 ### Diagnostic Tools
 
 ```julia
+using Statistics   # for `mean` below
+
 function diagnose_contour_quality(contour, A, interval)
     """
     Analyze contour quality for eigenvalue computation.

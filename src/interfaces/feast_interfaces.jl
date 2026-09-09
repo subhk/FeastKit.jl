@@ -129,6 +129,18 @@ end
 @inline _real_component_type(::Type{Complex{T}}) where T<:Real = T
 @inline _real_component_type(::Type{T}) where T<:Real = T
 
+# Search-interval endpoints should not have to match the matrix element type
+# exactly. `feast(A, (0, 1))` and `feast(A, (0.0, 1))` are the natural things to
+# write, and feast_general already promotes its center/radius the same way.
+@inline _feast_interval_type(::Type{T}) where T<:AbstractFloat = T
+@inline _feast_interval_type(::Type{<:Integer}) = Float64
+@inline _feast_interval_type(::Type{T}) where T<:Real = float(T)
+
+function _feast_promote_interval(A::AbstractMatrix, interval::Tuple{Real,Real})
+    T = _feast_interval_type(_real_component_type(eltype(A)))
+    return T(interval[1]), T(interval[2])
+end
+
 function _ensure_complex_matrix(A::AbstractMatrix)
     materialized = _materialize_matrix(A)
     return eltype(materialized) <: Complex ? materialized : Complex.(materialized)
@@ -149,6 +161,11 @@ function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                use_threads::Bool = true,
                comm = nothing) where T<:Real
     # Main Feast interface for real symmetric generalized eigenvalue problems
+    T <: Integer && return feast(float.(A), float.(B),
+                                 (float(interval[1]), float(interval[2]));
+                                 M0=M0, fpm=fpm, backend=backend, parallel=parallel,
+                                 strict_backend=strict_backend, use_threads=use_threads,
+                                 comm=comm)
     size(A, 1) == size(A, 2) || throw(ArgumentError("A must be square"))
     size(B) == size(A) || throw(ArgumentError("B must match the size of A"))
     issymmetric(A) || throw(ArgumentError("feast expects a symmetric real matrix A; use feast_general for non-symmetric problems"))
@@ -211,6 +228,12 @@ function feast(A::AbstractMatrix{T}, interval::Tuple{T,T};
                strict_backend::Bool = false,
                use_threads::Bool = true, comm = nothing) where T<:Real
     # Feast interface for standard real symmetric eigenvalue problems (B = I)
+    # No FEAST path can run in integer arithmetic: the tolerance is 10^-fpm[3]
+    # and the contour is complex. Promote and re-enter.
+    T <: Integer && return feast(float.(A), (float(interval[1]), float(interval[2]));
+                                 M0=M0, fpm=fpm, backend=backend, parallel=parallel,
+                                 strict_backend=strict_backend, use_threads=use_threads,
+                                 comm=comm)
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     issymmetric(A) || throw(ArgumentError("feast expects a symmetric real matrix A; use feast_general for non-symmetric problems"))
@@ -560,6 +583,29 @@ function feast_summary(result::FeastResult)
     feast_summary(stdout, result)
 end
 
+# Non-Hermitian solves return a FeastGeneralResult, whose eigenvalues are
+# complex. Without these methods `feast_summary(feast_general(...))` was a
+# MethodError even though the docs present the function generically.
+function feast_summary(io::IO, result::FeastGeneralResult)
+    println(io, "FeastKit Eigenvalue Solution Summary (non-Hermitian)")
+    println(io, "="^40)
+    println(io, "Eigenvalues found: ", result.M)
+    println(io, "Final residual: ", result.epsout)
+    println(io, "Refinement loops: ", result.loop)
+    println(io, "Exit status: ", result.info == 0 ? "Success" : "Error $(result.info)")
+    if result.M > 0
+        println(io, "\nEigenvalues:")
+        for i in 1:result.M
+            println(io, "  λ[$i] = ", result.lambda[i], "  (residual: ", result.res[i], ")")
+        end
+    end
+    return nothing
+end
+
+function feast_summary(result::FeastGeneralResult)
+    feast_summary(stdout, result)
+end
+
 # Compatibility shim: allow `redirect_stdout(io::IOBuffer) do ... end` with IOBuffer
 # Remove previous IOBuffer redirection shim; tests now use IO-based summary.
 
@@ -638,4 +684,38 @@ function feast_validate_interval(A::AbstractMatrix{Complex{T}}, interval::Tuple{
     end
 
     return (min_est, max_est)
+end
+
+# --- Interval / element-type promotion -------------------------------------
+#
+# The typed methods above require the interval endpoints to match the matrix's
+# real element type exactly, so `feast(A, (0, 1))` was a MethodError. These
+# fallbacks convert the endpoints (and an integer-valued matrix) and forward.
+
+# An integer-valued matrix has no typed method to fall through to, so promote
+# its element type here as well -- forwarding only the interval would recurse
+# straight back into this method.
+@inline _feast_promote_eltype(A::AbstractMatrix) =
+    eltype(A) <: Integer ? _materialize_matrix_eltype(A, Float64) :
+    eltype(A) <: Complex{<:Integer} ? _materialize_matrix_eltype(A, ComplexF64) : A
+
+function feast(A::AbstractMatrix, interval::Tuple{Real,Real}; kwargs...)
+    Ap = _feast_promote_eltype(A)
+    return feast(Ap, _feast_promote_interval(Ap, interval); kwargs...)
+end
+
+function feast(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{Real,Real}; kwargs...)
+    Ap = _feast_promote_eltype(A)
+    Bp = _feast_promote_eltype(B)
+    if eltype(Ap) !== eltype(Bp)
+        TE = promote_type(eltype(Ap), eltype(Bp))
+        Ap = _materialize_matrix_eltype(Ap, TE)
+        Bp = _materialize_matrix_eltype(Bp, TE)
+    end
+    return feast(Ap, Bp, _feast_promote_interval(Ap, interval); kwargs...)
+end
+
+function feast_banded(A::Matrix, kla::Int, interval::Tuple{Real,Real}; kwargs...)
+    Ap = _feast_promote_eltype(A)
+    return feast_banded(Ap, kla, _feast_promote_interval(Ap, interval); kwargs...)
 end

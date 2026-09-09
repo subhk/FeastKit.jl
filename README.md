@@ -27,6 +27,20 @@ using Pkg
 Pkg.add("FeastKit")
 ```
 
+### Optional dependencies
+
+Krylov and MPI are weak dependencies, loaded through package extensions, so the
+base install stays small. Load them alongside FeastKit when you need them:
+
+```julia
+using FeastKit
+using Krylov   # enables the iterative IFEAST paths (solver=:gmres)
+using MPI      # enables mpi_feast and the other distributed drivers
+```
+
+Direct (factorization-based) FEAST needs neither. Calling an iterative variant
+without Krylov, or an MPI driver without MPI, reports what to load.
+
 ## Quick Start
 
 ### Basic Usage

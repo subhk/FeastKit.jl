@@ -11,12 +11,11 @@ const _feast_contour_next_id = Threads.Atomic{Int}(1)
 const _feast_contour_lock = ReentrantLock()
 
 function _next_contour_id()
-    # Reset counter when registry is empty to prevent unbounded growth
-    # Caller must hold _feast_contour_lock
-    if isempty(FEAST_CUSTOM_CONTOURS)
-        Threads.atomic_xchg!(_feast_contour_next_id, 2)
-        return 1
-    end
+    # IDs are never reused. Recycling them (the old code reset the counter to 1
+    # whenever the registry emptied) meant a stale fpm[29] left over from a
+    # `copy(fpm)` could silently resolve to an unrelated contour registered
+    # later. The counter is an Int, so monotonic growth costs nothing; the
+    # registry itself is bounded by delete! and feast_clear_all_contours!.
     return Threads.atomic_add!(_feast_contour_next_id, 1)
 end
 
@@ -91,6 +90,89 @@ function _feast_hermitian_part!(dest::AbstractMatrix{Complex{T}},
         dest[i, j] = half * (src[i, j] + conj(src[j, i]))
     end
     return dest
+end
+
+"""
+    _feast_real_column!(dest, src)
+
+Write the real eigenvector represented by the complex column `src` into `dest`,
+normalized to unit 2-norm. Returns the norm before normalization.
+
+Eigenvectors of a real symmetric pencil are real only up to one global complex
+phase. Calling `real.(src)` without removing that phase collapses the column
+whenever the phase sits near ±i, which silently returns a near-zero vector in
+place of an eigenvector. The largest-magnitude entry fixes the phase.
+"""
+function _feast_real_column!(dest::AbstractVector{T},
+                             src::AbstractVector{Complex{T}}) where T<:Real
+    n = length(dest)
+    @boundscheck n == length(src) || throw(DimensionMismatch("dest and src must have equal length"))
+
+    pivot = 1
+    pivot_mag = zero(T)
+    @inbounds for i in 1:n
+        mag = abs(src[i])
+        if mag > pivot_mag
+            pivot_mag = mag
+            pivot = i
+        end
+    end
+    rotation = pivot_mag > 0 ? conj(src[pivot]) / pivot_mag : one(Complex{T})
+
+    colnorm = zero(T)
+    @inbounds for i in 1:n
+        value = real(rotation * src[i])
+        dest[i] = value
+        colnorm += value * value
+    end
+    colnorm = sqrt(colnorm)
+    if colnorm > 0
+        inv_norm = inv(colnorm)
+        @inbounds for i in 1:n
+            dest[i] *= inv_norm
+        end
+    end
+    return colnorm
+end
+
+"""
+    _feast_symmetric_part!(A)
+
+Replace `A` by `(A + Aᵀ) / 2` in place. Reduced FEAST pencils are symmetric in
+exact arithmetic; forcing the symmetry lets the small eigenproblem use the
+symmetric-definite LAPACK path instead of the general one, which would return
+complex eigenvalues that the real kernels then have to discard.
+"""
+function _feast_symmetric_part!(A::AbstractMatrix{T}) where T<:Real
+    n = size(A, 1)
+    @boundscheck size(A, 2) == n || throw(DimensionMismatch("A must be square"))
+    half = T(0.5)
+    @inbounds for j in 1:n, i in (j + 1):n
+        avg = half * (A[i, j] + A[j, i])
+        A[i, j] = avg
+        A[j, i] = avg
+    end
+    return A
+end
+
+"""
+    _feast_hermitian_part!(A)
+
+In-place `(A + Aᴴ) / 2`, the complex counterpart of [`_feast_symmetric_part!`](@ref).
+"""
+function _feast_hermitian_part!(A::AbstractMatrix{Complex{T}}) where T<:Real
+    n = size(A, 1)
+    @boundscheck size(A, 2) == n || throw(DimensionMismatch("A must be square"))
+    half = T(0.5)
+    @inbounds for j in 1:n
+        A[j, j] = complex(real(A[j, j]), zero(T))
+        for i in (j + 1):n
+            avg = half * (A[i, j] + conj(A[j, i]))
+            A[i, j] = avg
+            A[j, i] = conj(avg)
+        end
+    end
+    return A
 end
 
 """
@@ -340,27 +422,30 @@ Call this in long-running applications to prevent unbounded registry growth.
 function feast_clear_all_contours!()
     lock(_feast_contour_lock) do
         empty!(FEAST_CUSTOM_CONTOURS)
-        Threads.atomic_xchg!(_feast_contour_next_id, 1)
     end
     return nothing
 end
 
 function with_custom_contour(solver::Function, fpm::Vector{Int}, contour::FeastContour{T}) where T<:Real
-    old_flag = fpm[29]  # Save custom contour ID (0 = none, >0 = contour ID)
+    old_id = fpm[29]  # Save custom contour ID (0 = none, >0 = contour ID)
     old_ne = fpm[2]
-    old_contour = feast_get_custom_contour(T, fpm)
+    old_contour = old_id > 0 ?
+        lock(() -> get(FEAST_CUSTOM_CONTOURS, old_id, nothing), _feast_contour_lock) :
+        nothing
     feast_set_custom_contour!(fpm, contour)
     try
         return solver()
     finally
-        # Clear the temporary contour
+        # Drop the temporary contour and put the caller's back under its
+        # original ID. Re-registering it under a fresh ID would leave any other
+        # copy of fpm still holding old_id pointing at nothing.
         feast_clear_custom_contour!(fpm)
         if old_contour !== nothing
-            # Re-register the original contour (gets a new ID)
-            feast_set_custom_contour!(fpm, old_contour)
-        else
-            fpm[29] = old_flag
+            lock(_feast_contour_lock) do
+                FEAST_CUSTOM_CONTOURS[old_id] = old_contour
+            end
         end
+        fpm[29] = old_id
         fpm[2] = old_ne
     end
 end

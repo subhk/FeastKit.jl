@@ -30,15 +30,16 @@ julia --project -e 'using Pkg; Pkg.test(coverage=true)'
 
 ### Specific Tests
 
-```julia
-# Interactive testing
+```bash
 julia --project
+```
 
+```julia-repl
 julia> using Test
+
 julia> include("test/runtests.jl")
 
-# Run specific test file
-julia> include("test/test_matrix_free.jl")
+julia> include("test/test_matrix_free.jl")   # a single file
 ```
 
 ### Test with Specific Configuration
@@ -301,7 +302,7 @@ end
     end
 
     @testset "Matrix-free solve" begin
-        result = feast(A_op, (0.0, 1.0), M0=10, solver=:cg)
+        result = feast(A_op, (0.0, 1.0), M0=10, solver=:gmres)
         @test result.info == 0 || result.M > 0
     end
 end
@@ -366,8 +367,7 @@ end
 
 ### Isolating Failures
 
-```julia
-# Run single test interactively
+```bash
 julia --project
 ```
 
@@ -376,10 +376,13 @@ using FeastKit, LinearAlgebra, Test
 
 # Set up test case
 n = 100
-A = SymTridiagonal(2*ones(n), -ones(n-1))
+A = Matrix(SymTridiagonal(2*ones(n), -ones(n-1)))
 
-# Run the failing test
-result = feast(A, (0.5, 1.5), M0=10)
+# Reproduce the failing call. Count what the interval holds first: (0.5, 1.5)
+# contains 19 eigenvalues here, so M0 = 10 can only ever report info = 5.
+exact(k) = 2 - 2cos(k * π / (n + 1))
+expected = count(k -> 0.5 <= exact(k) <= 1.5, 1:n)
+result = feast(A, (0.5, 1.5), M0 = 2 * expected)
 
 # Inspect results
 result.info
@@ -461,18 +464,30 @@ using Random
 @testset "Reproducible tests" begin
     Random.seed!(42)
     A = Symmetric(randn(50, 50))
-    result = feast(A, (-1.0, 1.0), M0=10)
-    @test result.M == expected_M  # Should always match
+    # Take the expected count from a dense reference rather than a magic number,
+    # so the test states what it means and survives a reseed.
+    expected_M = count(λ -> -1.0 <= λ <= 1.0, eigvals(A))
+    result = feast(A, (-1.0, 1.0), M0=2 * expected_M)
+    @test result.info == 0
+    @test result.M == expected_M
 end
 ```
 
 ### Numerical Tolerance
 
 ```julia
+using FeastKit, LinearAlgebra, Test
+
+A = Matrix(Diagonal([1.0e-6, 2.0e-6, 1.0, 2.0, 100.0]))
+expected = sort(eigvals(A))
+result = feast(A, (0.0, 3.0), M0 = 8)
+computed = sort(result.lambda[1:result.M])
+expected = expected[1:length(computed)]
+
 # Use appropriate tolerances
 @test isapprox(computed, expected, rtol=1e-10)  # Relative
 @test isapprox(computed, expected, atol=1e-12)  # Absolute
-@test abs(computed - expected) < 1e-10          # Manual
+@test all(abs.(computed .- expected) .< 1e-10)  # Manual
 
 # For eigenvalues with different scales
 for (λ_computed, λ_expected) in zip(computed, expected)

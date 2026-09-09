@@ -254,12 +254,12 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
                 v_red = Fr.vectors
             end
 
-            # Project to complex eigenvectors; store the real part for output.
+            # Project to complex eigenvectors; store the phase-corrected real
+            # part for output. real(qcol) alone collapses a column whose global
+            # phase sits near +-i.
             for idx in 1:rank
                 mul!(qcol, q_rank, view(v_red, :, idx))
-                @inbounds for i in 1:N
-                    q[i, idx] = real(qcol[i])
-                end
+                _feast_real_column!(view(q, :, idx), qcol)
                 lambda[idx] = lambda_red[idx]
             end
 

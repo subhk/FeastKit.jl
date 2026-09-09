@@ -37,6 +37,11 @@ jobs:
       - name: Run tests
         env:
           JULIA_NUM_THREADS: '2'
+          # Without these the high-level feast() smoke run and the whole
+          # parallel-support block were skipped on every CI run.
+          FEAST_RUN_LONG_TESTS: 'true'
+          FEAST_RUN_PARALLEL_TESTS: 'true'
+          FEASTKIT_TEST_PARALLEL: 'true'
         run: julia --project -e 'using Pkg; Pkg.test()'
 
   distributed-backend:
@@ -91,9 +96,17 @@ jobs:
           FEASTKIT_ENABLE_MPI: 'true'
           FEASTKIT_TEST_MPI: 'true'
         run: |
-          julia --project -e '
+          julia -e '
+            using Pkg
+            # MPI is a weak dependency, so it is not in the package project.
+            # Build a throwaway env that has both, which is also what activates
+            # the FeastKitMPIExt extension.
+            env = mktempdir()
+            Pkg.activate(env)
+            Pkg.develop(path=".")
+            Pkg.add(["MPI", "Krylov"])
             using MPI
-            run(`$(MPI.mpiexec()) -n 2 julia --project test/test_parallel_backends.jl`)
+            run(`$(MPI.mpiexec()) -n 2 julia --project=$(env) test/test_parallel_backends.jl`)
           '
 
   docs-links:

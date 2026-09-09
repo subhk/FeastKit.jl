@@ -115,6 +115,7 @@ function feast_hybrid(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             workspace.work[:, 1:M0] = workspace.q[:, 1:M0]
 
         catch e
+            @debug "MPI FEAST solve failed" exception=e
             return FeastResult{T, T}(T[], Matrix{T}(undef, N, 0), 0, T[],
                                    Int(Feast_ERROR_LAPACK), zero(T), loop)
         end
@@ -178,75 +179,5 @@ function hybrid_compute_threaded_moments(A::AbstractMatrix{T}, B::AbstractMatrix
     return local_Aq, local_Sq
 end
 
-# Performance comparison across all parallel backends
-function feast_parallel_comparison(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple, M0::Int)
-    # Compare performance across all available parallel backends
-    
-    println("FeastKit Parallel Backend Comparison")
-    println("="^50)
-    println("Matrix size: $(size(A, 1))")
-    println("Search interval: $interval")
-    println("Subspace size: $M0")
-    println("Available backends:")
-    println("  Threads: $(Threads.nthreads())")
-    println("  Workers: $(Distributed.nworkers())")
-    println("  MPI: $(mpi_available() ? "Yes" : "No")")
-    
-    results = Dict{Symbol, Any}()
-    
-    # Serial benchmark
-    println("\n1. Serial execution:")
-    serial_time = @elapsed begin
-        results[:serial] = feast(A, B, interval, M0=M0, parallel=:serial)
-    end
-    println("   Time: $(serial_time:.3f) seconds")
-    println("   Eigenvalues: $(results[:serial].M)")
-    
-    # Threading benchmark
-    if Threads.nthreads() > 1
-        println("\n2. Threading execution:")
-        thread_time = @elapsed begin
-            results[:threads] = feast(A, B, interval, M0=M0, parallel=:threads)
-        end
-        println("   Time: $(thread_time:.3f) seconds")
-        println("   Eigenvalues: $(results[:threads].M)")
-        println("   Speedup: $(serial_time/thread_time:.2f)x")
-    end
-    
-    # Distributed benchmark
-    if Distributed.nworkers() > 1
-        println("\n3. Distributed execution:")
-        dist_time = @elapsed begin
-            results[:distributed] = feast(A, B, interval, M0=M0, parallel=:distributed)
-        end
-        println("   Time: $(dist_time:.3f) seconds") 
-        println("   Eigenvalues: $(results[:distributed].M)")
-        println("   Speedup: $(serial_time/dist_time:.2f)x")
-    end
-    
-    # MPI benchmark
-    if mpi_available()
-        println("\n4. MPI execution:")
-        mpi_time = @elapsed begin
-            results[:mpi] = feast(A, B, interval, M0=M0, parallel=:mpi)
-        end
-        println("   Time: $(mpi_time:.3f) seconds")
-        println("   Eigenvalues: $(results[:mpi].M)")
-        println("   Speedup: $(serial_time/mpi_time:.2f)x")
-        
-        # Hybrid MPI+threads if both available
-        if Threads.nthreads() > 1
-            println("\n5. Hybrid MPI+Threading:")
-            hybrid_time = @elapsed begin
-                results[:hybrid] = feast_hybrid(A, B, interval, M0=M0, use_threads_per_rank=true)
-            end
-            println("   Time: $(hybrid_time:.3f) seconds")
-            println("   Eigenvalues: $(results[:hybrid].M)")
-            println("   Speedup: $(serial_time/hybrid_time:.2f)x")
-        end
-    end
-    
-    return results
-end
 
 # Note: feast_parallel_info() is defined in feast_backend_utils.jl

@@ -5,54 +5,6 @@
 using LinearAlgebra
 using SparseArrays
 
-# MPI-specific FeastKit state
-mutable struct MPIFeastState{T<:Real}
-    # MPI communication info
-    comm::MPI.Comm
-    rank::Int
-    size::Int
-    root::Int
-
-    # Feast parameters
-    N::Int
-    M0::Int
-    ne::Int
-
-    # Local contour points assigned to this rank
-    local_points::Vector{Int}
-    local_Zne::Vector{Complex{T}}
-    local_Wne::Vector{Complex{T}}
-
-    # Convergence state
-    converged::Bool
-    loop::Int
-    epsout::T
-    info::Int
-
-    function MPIFeastState{T}(comm::MPI.Comm, N::Int, M0::Int, ne::Int, root::Int=0) where T<:Real
-        rank = MPI.Comm_rank(comm)
-        size = MPI.Comm_size(comm)
-
-        # Distribute contour points among MPI ranks
-        points_per_rank = div(ne, size)
-        remainder = ne % size
-
-        # Calculate local points for this rank
-        start_idx = rank * points_per_rank + min(rank, remainder) + 1
-        local_count = points_per_rank + (rank < remainder ? 1 : 0)
-        local_points = collect(start_idx:(start_idx + local_count - 1))
-
-        new(
-            comm, rank, size, root,
-            N, M0, ne,
-            local_points,
-            Vector{Complex{T}}(undef, local_count),
-            Vector{Complex{T}}(undef, local_count),
-            false, 0, zero(T), 0
-        )
-    end
-end
-
 # Main MPI FeastKit interface
 function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                          Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
@@ -84,7 +36,8 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     Wne_global = MPI.bcast(rank == root ? contour.Wne : Vector{Complex{T}}(undef, ne), root, comm)
 
     # Create MPI state
-    mpi_state = MPIFeastState{T}(comm, N, M0, ne, root)
+    mpi_state = MPIFeastState{T}(comm, MPI.Comm_rank(comm), MPI.Comm_size(comm),
+                                 N, M0, ne, root)
 
     # Distribute contour points
     for (i, global_idx) in enumerate(mpi_state.local_points)
@@ -202,9 +155,7 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
 
             for idx in 1:rank_r
                 mul!(qcol, q_rank, view(v_red, :, idx))
-                @inbounds for i in 1:N
-                    q[i, idx] = real(qcol[i])
-                end
+                _feast_real_column!(view(q, :, idx), qcol)
                 lambda[idx] = lambda_red[idx]
             end
 
@@ -362,7 +313,8 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     Zne_global = MPI.bcast(rank == root ? contour.Zne : Vector{Complex{T}}(undef, ne), root, comm)
     Wne_global = MPI.bcast(rank == root ? contour.Wne : Vector{Complex{T}}(undef, ne), root, comm)
 
-    mpi_state = MPIFeastState{T}(comm, N, M0, ne, root)
+    mpi_state = MPIFeastState{T}(comm, MPI.Comm_rank(comm), MPI.Comm_size(comm),
+                                 N, M0, ne, root)
     _mpi_distribute_complex_contour!(mpi_state, Zne_global, Wne_global)
 
     feastdefault!(fpm)
@@ -619,7 +571,7 @@ function _mpi_solver_choice(solver::Symbol)
     solver_choice in (:direct, :gmres) ||
         throw(ArgumentError("Unsupported MPI FEAST solver '$solver'. Use :direct, :gmres, or :iterative."))
     solver_choice == :gmres && !FEAST_KRYLOV_AVAILABLE[] &&
-        throw(ArgumentError("Krylov.jl is required for iterative MPI FEAST solves."))
+        throw(ArgumentError("Krylov.jl is required for iterative MPI FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     return solver_choice
 end
 
@@ -934,7 +886,8 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
     Zne_global = MPI.bcast(rank == root ? contour.Zne : Vector{Complex{T}}(undef, ne), root, comm)
     Wne_global = MPI.bcast(rank == root ? contour.Wne : Vector{Complex{T}}(undef, ne), root, comm)
 
-    mpi_state = MPIFeastState{T}(comm, N, M0, ne, root)
+    mpi_state = MPIFeastState{T}(comm, MPI.Comm_rank(comm), MPI.Comm_size(comm),
+                                 N, M0, ne, root)
     _mpi_distribute_complex_contour!(mpi_state, Zne_global, Wne_global)
 
     Q_basis = zeros(Complex{T}, N, M0)
@@ -1120,7 +1073,8 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
     Zne_global = MPI.bcast(rank == root ? contour.Zne : Vector{Complex{T}}(undef, ne), root, comm)
     Wne_global = MPI.bcast(rank == root ? contour.Wne : Vector{Complex{T}}(undef, ne), root, comm)
 
-    mpi_state = MPIFeastState{T}(comm, N, M0, ne, root)
+    mpi_state = MPIFeastState{T}(comm, MPI.Comm_rank(comm), MPI.Comm_size(comm),
+                                 N, M0, ne, root)
     _mpi_distribute_complex_contour!(mpi_state, Zne_global, Wne_global)
 
     Q_basis = zeros(Complex{T}, N, M0)

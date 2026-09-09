@@ -197,8 +197,10 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
     # Persistent RCI state (must be reused across calls in the loop)
     grci_state = FeastGRCIState{T}()
 
-    # Safety counter to prevent infinite loops
-    max_rci_iterations = fpm[2] * (fpm[4] + 1) * 10  # num_points * (max_loops + 1) * safety_factor
+    # Allow initialization first, then size the guard from the kernel's actual
+    # contour, including custom nodes. fpm[2] controls the real half-contour
+    # and is unrelated to this general solver's workload.
+    max_rci_iterations = 1
     rci_iteration_count = 0
 
     @views while true
@@ -216,6 +218,13 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
                    workspace.zAq, workspace.zSq, fpm, epsout, loop,
                    Emid, r, M0, lambda_complex, q_complex,
                    mode, workspace.res, info; state=grci_state)
+
+        if rci_iteration_count == 1
+            # Each sweep has two jobs per node and four A/B multiply jobs.
+            # fpm[4] counts refinements after the initial sweep.
+            ne = length(grci_state.Zne)
+            max_rci_iterations = (2 * ne + 4) * (fpm[4] + 1) + 8
+        end
 
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             # Factorize Ze*B - A

@@ -2,6 +2,58 @@ using Test, FeastKit, LinearAlgebra, SparseArrays
 
 review_fpm() = (f = zeros(Int, 64); feastinit!(f); f)
 
+@testset "Second review regressions" begin
+    @testset "Parallel saturation agrees with serial" begin
+        for storage in (Matrix, sparse), m in (1, 3)
+            A = storage(Matrix{Float64}(I,3,3))
+            solver = storage === Matrix ? FeastKit.pfeast_sygv! : FeastKit.pfeast_scsrgv!
+            r = solver(A, copy(A), 0.5, 1.5, m, review_fpm())
+            reference = feast(A, (0.5,1.5); M0=m)
+            @test r.info == reference.info
+            @test r.M == m
+            @test r.lambda ≈ ones(m)
+        end
+    end
+
+    @testset "Matrix-free accepts parameter wrappers" begin
+        for T in (Float64, ComplexF64)
+            A = Matrix(Diagonal(T[1,2,3])); B = Matrix{T}(I,3,3)
+            ao = LinearOperator{T}((y,x)->mul!(y,A,x),(3,3); issymmetric=true)
+            bo = LinearOperator{T}((y,x)->copyto!(y,x),(3,3); issymmetric=true)
+            solve = (Y,z,X)->copyto!(Y,(z*B-A)\X)
+            params = feastinit()
+            results = map((params,params.fpm)) do f
+                T === Float64 ? feast(ao,bo,(0.5,2.5); M0=3,solver=solve,fpm=f) :
+                    feast_general(ao,bo,1.5+0im,0.75; M0=3,solver=solve,fpm=f)
+            end
+            @test all(r -> r.info == 0 && r.M == 2, results)
+            @test results[1].lambda ≈ results[2].lambda
+        end
+    end
+
+    @testset "Dense general job budget follows the actual contour" begin
+        A = Matrix(Diagonal(ComplexF64[1,2,3]))
+        for custom in (false,true)
+            f = review_fpm(); f[2]=1; f[8]=32; f[4]=1; f[16]=1
+            if custom
+                # More nodes than either of the normal-contour settings.
+                cf = review_fpm(); cf[8]=128; cf[16]=1
+                c = feast_gcontour(1.5+0im,0.75,cf)
+                FeastKit.feast_set_custom_contour!(f,c)
+                f[2]=1
+            end
+            try
+                r=feast_general(A,1.5+0im,0.75; M0=3,fpm=f)
+                @test r.info == 0
+                @test r.M == 2
+                @test sort(real.(r.lambda)) ≈ [1.,2.] atol=1e-8
+            finally
+                custom && FeastKit.feast_clear_custom_contour!(f)
+            end
+        end
+    end
+end
+
 @testset "Review regressions" begin
     @testset "Single precision sparse solves" begin
         for CT in (Float32, ComplexF32), generalized in (false, true), cache in (0, 1)

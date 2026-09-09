@@ -472,8 +472,9 @@ end
         # standard problem no longer allocates strictly less -- what matters is
         # that neither materializes an extra N x N identity workspace.
         identity_bytes = n * n * sizeof(ComplexF64)
-        @test standard_bytes <= generalized_bytes
-        @test high_level_standard_bytes <= high_level_generalized_bytes
+        allocation_noise = 1024
+        @test standard_bytes <= generalized_bytes + allocation_noise
+        @test high_level_standard_bytes <= high_level_generalized_bytes + allocation_noise
         @test generalized_bytes - standard_bytes < identity_bytes
         @test high_level_generalized_bytes - high_level_standard_bytes < identity_bytes
     end

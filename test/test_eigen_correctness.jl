@@ -428,7 +428,9 @@ fresh_fpm() = (v = zeros(Int, 64); feastinit!(v); v)
         fpm[4] = 30     # refinement loops
 
         result = feast_grcipev!(coeffs, 2, center, radius, 3, copy(fpm))
-        @test result.info == 0
+        # All N probe directions are occupied. The eigenpairs are accurate,
+        # but the moment method cannot certify that no further roots exist.
+        @test result.info == Int(FeastKit.Feast_ERROR_M0)
         @test result.M == 3
         @test isapprox(sort(real.(result.lambda[1:result.M])), roots; atol = 1.0e-8)
 
@@ -442,7 +444,7 @@ fresh_fpm() = (v = zeros(Int, 64); feastinit!(v); v)
 
         # The real-coefficient entry point drives the same kernel.
         real_result = feast_srcipev!(coeffs_real, 2, center, radius, 3, copy(fpm))
-        @test real_result.info == 0
+        @test real_result.info == Int(FeastKit.Feast_ERROR_M0)
         @test real_result.M == 3
         @test isapprox(sort(real.(real_result.lambda[1:real_result.M])), roots;
                        atol = 1.0e-8)
@@ -510,7 +512,7 @@ fresh_fpm() = (v = zeros(Int, 64); feastinit!(v); v)
         fpm[4] = 30
 
         result = feast_grcipev!(coeffs, 2, center, radius, 3, copy(fpm))
-        @test result.info == 0
+        @test result.info == Int(FeastKit.Feast_ERROR_M0)
         @test result.M == 3
         @test eltype(result.lambda) <: Complex
         @test isapprox(sort(result.lambda[1:result.M]; by = imag), expected;

@@ -589,6 +589,17 @@ diagnostics = diagnose_contour_quality(contour, A, interval)
 
 ---
 
+## Expert reverse-communication state
+
+The expert RCI wrappers `feast_srcix!`, `feast_hrcix!`, and `feast_grcix!`
+accept a `state` keyword just like their ordinary-contour counterparts.
+Construct a `FeastSRCIState{T}`, `FeastHRCIState{T}`, or `FeastGRCIState{T}`
+once and pass the same object with `state=state` on every call in the RCI loop.
+The contour arguments alone do not preserve the trial subspace or iteration
+phase between calls.
+
+---
+
 <div align="center">
   <p><strong>Master advanced contour integration techniques with FeastKit.jl</strong></p>
   ← [Performance](performance.md) | [API Reference](api_reference.md) →

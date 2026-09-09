@@ -54,6 +54,7 @@ end
         # This block is intended for mpiexec-driven jobs. It verifies direct API,
         # high-level backend routing, and precision-prefixed aliases together.
         @eval using MPI
+        @eval using Krylov
         MPI.Init()
         comm = MPI.COMM_WORLD
         rank = MPI.Comm_rank(comm)

@@ -22,10 +22,12 @@ import FeastKit: MPIFeastState, FeastResult, FeastGeneralResult,
                  feastinit!, feastdefault!, feast_tolerance,
                  feast_contour, feast_gcontour, feast_inside_contour,
                  feast_residual!, feast_sort!, feast_sort_general!,
-                 check_feast_srci_input,
+                 check_feast_srci_input, check_feast_grci_input,
                  _feast_qr_compress!, _feast_real_column!,
                  _feast_reorder_by_interval!, _feast_reorder_by_gcontour!,
                  _feast_seeded_subspace!, _feast_seeded_subspace_complex!,
+                 solve_shifted_iterative!, solve_dense_shifted!,
+                 FEAST_KRYLOV_AVAILABLE,
                  mpi_available, feast, feast_parallel_info
 
 # Entry points this extension implements.

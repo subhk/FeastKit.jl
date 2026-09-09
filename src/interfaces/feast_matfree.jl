@@ -211,7 +211,7 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
     # Matrix-free RCI loop
     while true
         # Call Feast RCI kernel
-        feast_srci!(ijob, N, Ze, work, workc, Aq, Sq, fpm,
+        feast_srci!(ijob, N, Ze, work, workc, Aq, Sq, fpm_vec,
                    epsout, loop, Emin, Emax, M0, lambda, q, mode, res, info; state=srci_state)
         
         if ijob[] == Int(Feast_RCI_DONE)
@@ -338,7 +338,7 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
     # Matrix-free RCI loop for general problems. `ijob` tells us which user
     # operation the core FEAST state machine needs next.
     while true
-        feast_grci!(ijob, N, Ze, work, workc, zAq, zSq, fpm,
+        feast_grci!(ijob, N, Ze, work, workc, zAq, zSq, fpm_vec,
                    epsout, loop, center, radius, M0, lambda, q, mode, res, info; state=grci_state)
         
         if ijob[] == Int(Feast_RCI_DONE)

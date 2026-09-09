@@ -283,7 +283,7 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
             if epsout <= eps_tol
                 feast_sort!(lambda, q, res, M)
                 return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
-                                         Int(Feast_SUCCESS), epsout, loop)
+                                         _feast_exit_info(true, M, M0, N), epsout, loop)
             end
 
             active_dim = rank
@@ -297,7 +297,7 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
 
     # Did not converge within max_loops (or broke early).
     if info_code == Int(Feast_SUCCESS)
-        info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+        info_code = _feast_exit_info(false, M_found, M0, N)
     end
     M = M_found
     M > 1 && feast_sort!(lambda, q, res, M)
@@ -741,7 +741,7 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             if epsout <= eps_tol
                 feast_sort!(lambda, q, res, M)
                 return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
-                                         Int(Feast_SUCCESS), epsout, loop)
+                                         _feast_exit_info(true, M, M0, N), epsout, loop)
             end
 
             active_dim = rank
@@ -754,7 +754,7 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     end
 
     if info_code == Int(Feast_SUCCESS)
-        info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+        info_code = _feast_exit_info(false, M_found, M0, N)
     end
     M = M_found
     M > 1 && feast_sort!(lambda, q, res, M)

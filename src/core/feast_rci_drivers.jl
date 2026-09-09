@@ -105,10 +105,10 @@ _feast_factor_cache(::Matrix{Complex{T}}, n::Int) where T<:Real =
     Vector{Union{Nothing, LinearAlgebra.LU{Complex{T}, Matrix{Complex{T}}, Vector{Int}}}}(nothing, n)
 
 _feast_factor_cache(::SparseMatrixCSC{T,Int}, n::Int) where T<:Real =
-    Vector{Union{Nothing, SparseArrays.UMFPACK.UmfpackLU{Complex{T}, Int}}}(nothing, n)
+    Vector{Union{Nothing, SparseArrays.UMFPACK.UmfpackLU{ComplexF64, Int}}}(nothing, n)
 
 _feast_factor_cache(::SparseMatrixCSC{Complex{T},Int}, n::Int) where T<:Real =
-    Vector{Union{Nothing, SparseArrays.UMFPACK.UmfpackLU{Complex{T}, Int}}}(nothing, n)
+    Vector{Union{Nothing, SparseArrays.UMFPACK.UmfpackLU{ComplexF64, Int}}}(nothing, n)
 
 # Shifted matrix-vector product used by the iterative (GMRES) solver path.
 # `A` and `B` may be real or already complex; the Krylov vectors are complex
@@ -332,7 +332,7 @@ function _feast_symmetric_real(A::AbstractMatrix{T},
                 end
                 copyto!(workspace.workc, rhs_real)
                 try
-                    ldiv!(factor, workspace.workc)
+                    _feast_factor_solve!(factor, workspace.workc)
                 catch err
                     @debug "Shifted solve failed" shift=Ze[] exception=err
                     info[] = Int(Feast_ERROR_LAPACK)
@@ -499,7 +499,7 @@ function _feast_hermitian_complex(A::AbstractMatrix{Complex{T}},
                 end
                 copyto!(workspace.workc, rhs)
                 try
-                    ldiv!(factor, workspace.workc)
+                    _feast_factor_solve!(factor, workspace.workc)
                 catch err
                     @debug "Shifted solve failed" shift=Ze[] exception=err
                     info[] = Int(Feast_ERROR_LAPACK)
@@ -585,7 +585,16 @@ function feast_estimate_count(A::AbstractMatrix, interval::Tuple{Real,Real};
     end
     feastdefault!(params)
 
-    RT = real(float(eltype(A)))
+    # Match the public solver's storage/type normalization, including wrappers
+    # backed by sparse matrices and pencils with mixed coefficient types.
+    ET = B === nothing ? float(eltype(A)) : float(promote_type(eltype(A), eltype(B)))
+    A = _materialize_matrix_eltype(A, ET)
+    B = B === nothing ? nothing : _materialize_matrix_eltype(B, ET)
+    if B !== nothing && (A isa SparseMatrixCSC) != (B isa SparseMatrixCSC)
+        A = Matrix(A)
+        B = Matrix(B)
+    end
+    RT = real(ET)
     Emin, Emax = RT(interval[1]), RT(interval[2])
     Emin < Emax || throw(ArgumentError("interval must satisfy Emin < Emax"))
 
@@ -608,7 +617,7 @@ function feast_estimate_count(A::AbstractMatrix, interval::Tuple{Real,Real};
         shifted = _feast_shifted_complex(A, B, contour.Zne[e])
         factor = _feast_refactorize(factor, shifted, true)
         copyto!(X, rhs)
-        ldiv!(factor, X)
+        _feast_factor_solve!(factor, X)
         weight = 2 * contour.Wne[e]   # the omitted conjugate half
         @inbounds for i in eachindex(acc, X)
             acc[i] += weight * X[i]

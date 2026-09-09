@@ -37,6 +37,10 @@ end
                             res::Vector{T}, info::Ref{Int};
                             state::FeastSRCIState{T} = FeastSRCIState{T}()) where T<:Real
 
+    # mode is an output: publish a count only when issuing a multiply or
+    # returning Ritz pairs. Early exits must not leak the previous job's rank.
+    mode[] = 0
+
     if ijob[] == -1  # Initialization
         feastdefault!(fpm)
 
@@ -387,10 +391,11 @@ function feast_srcix!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                       lambda::Vector{T}, q::Matrix{T}, mode::Ref{Int},
                       res::Vector{T}, info::Ref{Int},
                       Zne::AbstractVector{Complex{TZ}},
-                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+                      Wne::AbstractVector{Complex{TW}};
+                      state::FeastSRCIState{T} = FeastSRCIState{T}()) where {T<:Real, TZ<:Real, TW<:Real}
     with_custom_contour(fpm, Zne, Wne) do
         feast_srci!(ijob, N, Ze, work, workc, Aq, Sq, fpm, epsout, loop,
-                    Emin, Emax, M0, lambda, q, mode, res, info)
+                    Emin, Emax, M0, lambda, q, mode, res, info; state=state)
     end
 end
 
@@ -401,10 +406,11 @@ function feast_hrcix!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                       lambda::Vector{T}, q::Matrix{Complex{T}}, mode::Ref{Int},
                       res::Vector{T}, info::Ref{Int},
                       Zne::AbstractVector{Complex{TZ}},
-                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+                      Wne::AbstractVector{Complex{TW}};
+                      state::FeastHRCIState{T} = FeastHRCIState{T}()) where {T<:Real, TZ<:Real, TW<:Real}
     with_custom_contour(fpm, Zne, Wne) do
         feast_hrci!(ijob, N, Ze, work, workc, zAq, zSq, fpm, epsout, loop,
-                    Emin, Emax, M0, lambda, q, mode, res, info)
+                    Emin, Emax, M0, lambda, q, mode, res, info; state=state)
     end
 end
 
@@ -415,10 +421,11 @@ function feast_grcix!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                       lambda::Vector{Complex{T}}, q::Matrix{Complex{T}}, mode::Ref{Int},
                       res::Vector{T}, info::Ref{Int},
                       Zne::AbstractVector{Complex{TZ}},
-                      Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
+                      Wne::AbstractVector{Complex{TW}};
+                      state::FeastGRCIState{T} = FeastGRCIState{T}()) where {T<:Real, TZ<:Real, TW<:Real}
     with_custom_contour(fpm, Zne, Wne) do
         feast_grci!(ijob, N, Ze, work, workc, Aq, Sq, fpm, epsout, loop,
-                    Emid, r, M0, lambda, q, mode, res, info)
+                    Emid, r, M0, lambda, q, mode, res, info; state=state)
     end
 end
 
@@ -493,6 +500,8 @@ end
                             lambda::Vector{T}, q::Matrix{Complex{T}},
                             mode::Ref{Int}, res::Vector{T}, info::Ref{Int};
                             state::FeastHRCIState{T} = FeastHRCIState{T}()) where T<:Real
+
+    mode[] = 0
 
     if ijob[] == -1
         feastdefault!(fpm)
@@ -804,6 +813,8 @@ end
                             lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
                             mode::Ref{Int}, res::Vector{T}, info::Ref{Int};
                             state::FeastGRCIState{T} = FeastGRCIState{T}()) where T<:Real
+
+    mode[] = 0
 
     # Feast RCI for general (non-Hermitian) eigenvalue problems
     # Uses circular contour in complex plane
@@ -1542,10 +1553,12 @@ end
         if converged || loop[] >= maxloop
             feast_sort_general!(lambda, q, res, M)
             mode[] = M
-            # Not _feast_exit_info: M0 here is the width of Beyn's probe block,
-            # not a FEAST trial subspace, and the rank truncation already reports
-            # the count. M == M0 carries no 'subspace too small' meaning.
-            info[] = converged ? Int(Feast_SUCCESS) : Int(Feast_ERROR_NO_CONVERGENCE)
+            # A full-rank moment may hide additional roots. Only a linear
+            # problem spanning all N dimensions is complete by construction;
+            # higher-degree problems can contain up to dmax*N roots.
+            saturated = M == min(N, M0) && M < dmax * N
+            info[] = saturated ? Int(Feast_ERROR_M0) :
+                     converged ? Int(Feast_SUCCESS) : Int(Feast_ERROR_NO_CONVERGENCE)
             ijob[] = Int(Feast_RCI_DONE)
             fpm[53] = 0  # Clear initialization flag
             state.initialized = false

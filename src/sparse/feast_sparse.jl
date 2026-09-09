@@ -5,6 +5,27 @@ using SparseArrays
 using LinearAlgebra
 using Random
 
+# UMFPACK promotes single-precision matrices to double precision. Its ldiv!
+# methods require RHS storage to match the factor, so narrow only after solving.
+_feast_factor_solve!(factor, rhs) = ldiv!(factor, rhs)
+function _feast_factor_solve!(factor::SparseArrays.UMFPACK.UmfpackLU{ComplexF64},
+                              rhs::AbstractMatrix{ComplexF32})
+    wide_rhs = Matrix{ComplexF64}(rhs)
+    ldiv!(factor, wide_rhs)
+    copyto!(rhs, wide_rhs)
+    return rhs
+end
+
+_feast_factor_solve!(dest, factor, rhs) = ldiv!(dest, factor, rhs)
+function _feast_factor_solve!(dest::AbstractMatrix{ComplexF32},
+                              factor::SparseArrays.UMFPACK.UmfpackLU{ComplexF64},
+                              rhs::AbstractMatrix{ComplexF32})
+    wide_rhs = Matrix{ComplexF64}(rhs)
+    ldiv!(factor, wide_rhs)
+    copyto!(dest, wide_rhs)
+    return dest
+end
+
 # Shifted operator for GMRES solves on explicit sparse matrices.
 struct SparseShiftedOperator{CT<:Complex,TA<:AbstractMatrix,TB<:AbstractMatrix}
     A::TA
@@ -302,7 +323,7 @@ problems.
     # fpm[10] = 1 (default) caches one factorization per contour point;
     # fpm[10] = 0 keeps a single slot and refactorizes on each visit.
     store_factors = fpm[10] == 1
-    factor_cache = Vector{Union{Nothing, SparseArrays.UMFPACK.UmfpackLU{Complex{T}, Int}}}(undef,
+    factor_cache = Vector{Union{Nothing, SparseArrays.UMFPACK.UmfpackLU{ComplexF64, Int}}}(undef,
                        store_factors ? length(Zne) : 1)
     fill!(factor_cache, nothing)
 
@@ -337,7 +358,7 @@ problems.
                         solver_factor = lu(shifted_matrix)
                         factor_cache[slot] = solver_factor
                     end
-                    ldiv!(shifted_block, solver_factor, rhs_block)
+                    _feast_factor_solve!(shifted_block, solver_factor, rhs_block)
                     store_factors || (factor_cache[1] = nothing)
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)
@@ -665,7 +686,7 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     # is indexed by contour point (fpm[50]) rather than keyed by the complex
     # shift, so it cannot grow past the contour and float keys never collide.
     store_factors = fpm[10] == 1
-    factor_cache = Vector{Union{Nothing, SparseArrays.UMFPACK.UmfpackLU{Complex{T}, Int}}}()
+    factor_cache = Vector{Union{Nothing, SparseArrays.UMFPACK.UmfpackLU{ComplexF64, Int}}}()
     current_slot = 1
 
     # Persistent RCI state (must be reused across calls in the loop)
@@ -714,7 +735,7 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
                     break
                 end
                 try
-                    ldiv!(workc_block, factor, rhs)
+                    _feast_factor_solve!(workc_block, factor, rhs)
                 catch err
                     @debug "Sparse general shifted solve failed" exception=err
                     info[] = Int(Feast_ERROR_LAPACK)

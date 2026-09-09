@@ -570,6 +570,14 @@ normal case, since the count is what you are trying to find out. The kernel
 truncates the moment `S0 = U Σ Wᴴ` at its numerical rank before forming the
 reduced matrix, so the extra width costs work but not accuracy.
 
+If every available probe direction yields an enclosed eigenpair
+(`M == min(N, M0)`), the kernel returns `Feast_ERROR_M0` even when the
+reported residuals are small: additional enclosed roots cannot be ruled out.
+Increase `M0` when it is smaller than `N`. If the probe already spans `N`
+directions, use a smaller contour or a companion-linearization driver such as
+`feast_gepev!`, which works in the full `degree*N` space. A degree-one problem
+with all `N` eigenpairs is complete and can still return success.
+
 Accuracy is governed by how well the quadrature resolves the contour integral
 rather than by refinement loops. If the residual is too large, add contour
 points (`fpm[8]`) before raising the loop count (`fpm[4]`).

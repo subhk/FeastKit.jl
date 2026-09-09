@@ -19,7 +19,7 @@ Comprehensive collection of FeastKit.jl examples from basic usage to advanced ap
 
 **Problem**: Find eigenvalues of a simple symmetric matrix.
 
-```julia
+```@example ex1
 using FeastKit, LinearAlgebra
 
 # Create a 5×5 symmetric matrix
@@ -35,7 +35,7 @@ display(A)
 # Find eigenvalues between 2 and 6
 result = feast(A, (2.0, 6.0), M0=5)
 
-println("\\nFEAST Results:")
+println("\nFEAST Results:")
 println("Status: $(result.info == 0 ? "Success" : "Failed")")
 println("Found $(result.M) eigenvalues")
 
@@ -46,24 +46,25 @@ end
 
 # Compare with Julia's built-in eigensolver
 all_eigvals = sort(eigvals(A))
-println("\\nAll eigenvalues (Julia): $all_eigvals")
+println("\nAll eigenvalues (Julia): $all_eigvals")
 ```
 
-**Expected Output:**
+**Expected Output:** the eigenvalues of this matrix are `4 - 2cos(kπ/6)`:
+
 ```
 Found 5 eigenvalues
-λ[1] = 2.0
-λ[2] = 3.0
-λ[3] = 4.0  
-λ[4] = 5.0
-λ[5] = 6.0
+λ[1] = 2.2679491924311224
+λ[2] = 2.9999999999999996
+λ[3] = 4.0
+λ[4] = 5.000000000000001
+λ[5] = 5.732050807568878
 ```
 
 ### Example 2: Sparse Matrix Eigenvalues
 
 **Problem**: Find eigenvalues of a large sparse tridiagonal matrix.
 
-```julia
+```@example ex2
 using FeastKit, SparseArrays, LinearAlgebra
 
 # Create large sparse tridiagonal matrix  
@@ -74,8 +75,8 @@ println("Sparse matrix: $(n)×$(n) with $(nnz(A)) nonzeros")
 
 # Find the 10 smallest eigenvalues
 # For this tridiagonal matrix: λₖ = 2 - 2*cos(kπ/(n+1))
-λ_min = 2 - 2*cos(π/(n+1))      # ≈ 0.0001  
-λ_10 = 2 - 2*cos(10π/(n+1))     # ≈ 0.001
+λ_min = 2 - 2*cos(π/(n+1))      # ≈ 9.85e-6
+λ_10 = 2 - 2*cos(10π/(n+1))     # ≈ 9.85e-4
 
 println("Expected λ₁ ≈ $λ_min")
 println("Expected λ₁₀ ≈ $λ_10")
@@ -83,7 +84,7 @@ println("Expected λ₁₀ ≈ $λ_10")
 # FeastKit search
 result = feast(A, (λ_min * 0.9, λ_10 * 1.1), M0=12)
 
-println("\\nFEAST found $(result.M) eigenvalues:")
+println("\nFEAST found $(result.M) eigenvalues:")
 for i in 1:result.M
     k = round(Int, acos(1 - result.lambda[i]/2) * (n+1) / π)
     λ_exact = 2 - 2*cos(k*π/(n+1))
@@ -96,7 +97,7 @@ end
 
 **Problem**: Solve A*x = λ*B*x with two different matrices.
 
-```julia
+```@example ex3
 using FeastKit, LinearAlgebra
 
 # Create matrices A (stiffness) and B (mass)
@@ -108,10 +109,12 @@ println("Generalized eigenvalue problem: A*x = λ*B*x")
 println("A: $(n)×$(n) tridiagonal (stiffness)")  
 println("B: $(n)×$(n) tridiagonal (mass)")
 
-# Find eigenvalues between 0.5 and 2.5
-result = feast(A, B, (0.5, 2.5), M0=15)
+# The pencil's eigenvalues run from ~0 to 5 across 100 modes; (0.5, 2.5) would
+# contain 32 of them, more than M0. Bracket the eight smallest instead --
+# M0 must be at least the number of eigenvalues inside the interval.
+result = feast(A, B, (0.0, 0.0517), M0=15)
 
-println("\\nResults:")
+println("\nResults:")
 println("Found $(result.M) generalized eigenvalues")
 
 # Display first few eigenvalues and check generalized orthogonality  
@@ -124,11 +127,14 @@ for i in 1:min(5, result.M)
     println("λ[$i] = $λ (residual: $residual)")
 end
 
-# Check B-orthogonality of eigenvectors: X'*B*X = I
+# FeastKit returns eigenvectors normalized in the 2-norm, not B-orthonormalized,
+# so X'BX is diagonal but not the identity. Check that instead, or rescale by
+# sqrt.(diag(X'BX)) first if you need X'BX = I.
 if result.M > 1
     X = result.q[:, 1:result.M]
-    orthogonality = norm(X' * B * X - I)
-    println("\\nB-orthogonality error: $orthogonality")
+    G = X' * Matrix(B) * X
+    off_diagonal = norm(G - Diagonal(diag(G)))
+    println("\nB-orthogonality (off-diagonal) error: $off_diagonal")
 end
 ```
 
@@ -169,7 +175,7 @@ println("Discretized with $n points, h = $h")
 
 result = feast(A, B, (0.1, ω²_max), M0=8)
 
-println("\\nNatural frequencies (Hz):")
+println("\nNatural frequencies (Hz):")
 frequencies = sqrt.(result.lambda[1:result.M]) / (2π)
 
 for i in 1:result.M
@@ -246,9 +252,9 @@ println("Searching for eigenvalues up to $(ω²_search_max)")
 println("Fundamental frequency ω₁₁² = $ω²_fundamental")
 
 result = feast(A_op, (0.8 * ω²_fundamental, 1.2 * ω²_search_max), 
-              M0=10, solver=:cg, solver_opts=(rtol=1e-6, maxiter=500))
+              M0=10, solver=:gmres, solver_opts=(rtol=1e-6, maxiter=500))
 
-println("\\n2D Membrane Modes:")
+println("\n2D Membrane Modes:")
 println("Found $(result.M) eigenfrequencies")
 
 # Match with analytical modes
@@ -265,7 +271,7 @@ end
 # Visualize first mode shape
 if result.M > 0
     mode1 = reshape(result.q[:, 1], nx, ny)
-    println("\\nFirst mode shape computed (reshape to $(nx)×$(ny) grid for visualization)")
+    println("\nFirst mode shape computed (reshape to $(nx)×$(ny) grid for visualization)")
 end
 ```
 
@@ -320,7 +326,7 @@ E_max = 5.5         # Up to n = 5
 
 result = feast(H, (E_ground - 0.1, E_max + 0.1), M0=8)
 
-println("\\nQuantum Energy Levels:")
+println("\nQuantum Energy Levels:")
 println("Found $(result.M) energy eigenstates")
 
 for i in 1:result.M
@@ -332,7 +338,7 @@ for i in 1:result.M
 end
 
 # Check normalization of wavefunctions
-println("\\nWavefunction normalization check:")
+println("\nWavefunction normalization check:")
 for i in 1:min(3, result.M)
     ψ = result.q[:, i]
     norm_ψ = sqrt(sum(ψ.^2) * h)  # Numerical integration
@@ -402,17 +408,17 @@ K_op = LinearOperator{Float64}(stiffness_matvec!, (n_dofs, n_dofs), issymmetric=
 M_op = LinearOperator{Float64}(mass_matvec!, (n_dofs, n_dofs), 
                               issymmetric=true, isposdef=true)
 
-println("\\nCreated matrix-free operators")
+println("\nCreated matrix-free operators")
 println("Searching for natural frequencies between 0.1 and 2.0 Hz...")
 
 # Find structural modes (natural frequencies)
 ω²_min, ω²_max = (2π * 0.1)^2, (2π * 2.0)^2
 
 result = feast(K_op, M_op, (ω²_min, ω²_max), M0=20,
-              solver=:cg,
+              solver=:gmres,
               solver_opts=(rtol=1e-4, maxiter=200))
 
-println("\\nStructural Analysis Results:")
+println("\nStructural Analysis Results:")
 println("Found $(result.M) vibrational modes")
 
 frequencies_Hz = sqrt.(result.lambda[1:result.M]) / (2π)
@@ -420,7 +426,7 @@ for i in 1:result.M
     println("Mode $i: f = $(frequencies_Hz[i]) Hz")
 end
 
-println("\\nMatrix-free calculation completed successfully!")
+println("\nMatrix-free calculation completed successfully!")
 println("Peak memory usage: ~$(8 * n_dofs * result.M / 1e6) MB")
 ```
 
@@ -457,8 +463,9 @@ A_op = LinearOperator{Float64}(laplacian!, (n, n), issymmetric=true, isposdef=tr
 interval = (10.0, 50.0)  # Search range
 
 # Test different iterative solvers
+# CG is deliberately absent: the shifted system z*B - A is complex and
+# indefinite at every contour point, so FEAST rejects :cg.
 solvers = [
-    (:cg, "Conjugate Gradient"),
     (:gmres, "GMRES"), 
     (:bicgstab, "BiCGSTAB(l)")
 ]
@@ -466,13 +473,11 @@ solvers = [
 results = Dict()
 
 for (solver_name, description) in solvers
-    println("\\n" * "="^50)
+    println("\n" * "="^50)
     println("Testing solver: $description")
     
     # Configure solver options
-    if solver_name == :cg
-        opts = (rtol=1e-6, maxiter=300)
-    elseif solver_name == :gmres  
+    if solver_name == :gmres
         opts = (rtol=1e-6, restart=50, maxiter=300)
     else  # bicgstab
         opts = (rtol=1e-6, l=2, maxiter=300)
@@ -498,10 +503,10 @@ for (solver_name, description) in solvers
 end
 
 # Summary comparison
-println("\\n" * "="^60)
+println("\n" * "="^60)
 println("SOLVER COMPARISON SUMMARY")
 println("="^60)
-printf_str = "%-20s %-10s %-8s %-12s\\n"
+printf_str = "%-20s %-10s %-8s %-12s\n"
 @printf(printf_str, "Solver", "Time (s)", "Found", "Status")
 println("-"^60)
 
@@ -525,9 +530,11 @@ end
 ```julia
 using FeastKit, LinearAlgebra
 
-# Create a challenging matrix (clustered eigenvalues)
-n = 200
-A = diagm(0 => vcat(0.98:0.002:1.02, 2.0:0.1:5.0))  # Tight cluster + spread
+# Create a challenging matrix (clustered eigenvalues). Let n follow the
+# diagonal that is actually built -- the two ranges give 21 + 31 = 52 entries.
+diagonal = vcat(0.98:0.002:1.02, 2.0:0.1:5.0)
+n = length(diagonal)                                 # 52
+A = diagm(0 => diagonal)                             # Tight cluster + spread
 A = A + 0.01 * randn(n, n)  # Add small random perturbation  
 A = (A + A') / 2  # Ensure symmetry
 
@@ -544,10 +551,10 @@ integration_methods = [
     (2, "Zolotarev")
 ]
 
-println("\\nComparing integration methods for clustered eigenvalues:")
+println("\nComparing integration methods for clustered eigenvalues:")
 
 for (method_id, method_name) in integration_methods
-    println("\\n" * "-"^40)
+    println("\n" * "-"^40)
     println("Method: $method_name")
     
     # Test different numbers of integration points
@@ -556,7 +563,7 @@ for (method_id, method_name) in integration_methods
         contour = feast_contour_expert(target_interval[1], target_interval[2], 
                                      ne, method_id, 100)
         
-        println("\\n  Integration points: $ne")
+        println("\n  Integration points: $ne")
         println("  Contour nodes: $(length(contour.Zne))")
         
         # Create custom FMP parameters
@@ -609,12 +616,12 @@ search_regions = [
     (3.0 + 2.0im, 1.5, "Upper right")
 ]
 
-println("\\nSearching in multiple circular regions:")
+println("\nSearching in multiple circular regions:")
 
 all_found_eigenvalues = ComplexF64[]
 
 for (center, radius, description) in search_regions
-    println("\\n" * "="^50) 
+    println("\n" * "="^50)
     println("Region: $description")
     println("Center: $center, Radius: $radius")
     
@@ -644,17 +651,21 @@ for (center, radius, description) in search_regions
     end
 end
 
-println("\\n" * "="^60)
+println("\n" * "="^60)
 println("SUMMARY: Found $(length(all_found_eigenvalues)) unique eigenvalues")
 
 # Compare with full eigendecomposition
 true_eigenvalues = eigvals(A)
 println("Total eigenvalues in matrix: $(length(true_eigenvalues))")
 
-# Visualize eigenvalue distribution (if plotting available)
-try
-    using Plots
-    
+# Visualize eigenvalue distribution. Plots is not a FeastKit dependency, so
+# check for it first: `using` inside a try/catch does not work, because Julia
+# hoists it out of the block when lowering and the catch never runs.
+if Base.find_package("Plots") === nothing
+    println("Plots.jl not installed; skipping the eigenvalue-distribution figure.")
+else
+    @eval using Plots
+
     p = scatter(real.(true_eigenvalues), imag.(true_eigenvalues), 
                label="All eigenvalues", alpha=0.6, ms=4)
     scatter!(p, real.(all_found_eigenvalues), imag.(all_found_eigenvalues),
@@ -673,9 +684,6 @@ try
     ylabel!(p, "Imaginary part")
     title!(p, "Complex Eigenvalue Distribution")
     display(p)
-    
-catch e
-    println("Plotting not available: $e")
 end
 ```
 
@@ -700,30 +708,41 @@ println("Quadratic Eigenvalue Problem: (λ²M + λC + K)x = 0")
 println("Damped vibration system")
 println("System size: $(n)×$(n)")
 
-# Convert to matrix-free operators for polynomial FeastKit
-K_op = LinearOperator{ComplexF64}((y, x) -> mul!(y, K, real.(x)), (n, n))
-C_op = LinearOperator{ComplexF64}((y, x) -> mul!(y, C, real.(x)), (n, n))  
-M_op = LinearOperator{ComplexF64}((y, x) -> mul!(y, M, real.(x)), (n, n))
+# Convert to matrix-free operators for polynomial FeastKit. Apply each matrix
+# to the vector it is given: taking real.(x) first would make the operators
+# non-linear over the complex field, and FEAST's contour shifts are complex.
+K_op = LinearOperator{ComplexF64}((y, x) -> mul!(y, K, x), (n, n))
+C_op = LinearOperator{ComplexF64}((y, x) -> mul!(y, C, x), (n, n))
+M_op = LinearOperator{ComplexF64}((y, x) -> mul!(y, M, x), (n, n))
 
 # Coefficient array: P(λ) = K + λC + λ²M
 coeffs = [K_op, C_op, M_op]
 
 println("Polynomial coefficients: P(λ) = K + λC + λ²M")
 
-# Search for eigenvalues near origin (low-frequency modes)
-center = 0.0 + 0.0im
-radius = 2.0
+# Every eigenvalue of this QEP sits on Re λ = -0.05 with |Im λ| up to ~2, so a
+# disc of radius 2 at the origin would enclose all 2n = 100 of them. Take a
+# small disc on the low-frequency part of that line.
+center = -0.05 + 0.2im
+radius = 0.12
 
 println("Searching in circular region: center = $center, radius = $radius")
 
-result = feast_polynomial(coeffs, center, radius, M0=10)
+# The matrix-free polynomial path solves the companion system with GMRES, which
+# lands near 1e-7 here rather than the 1e-12 default, so ask for a tolerance the
+# inner solver can actually deliver.
+fpm = zeros(Int, 64)
+feastinit!(fpm)
+fpm[3] = 6    # stop at 1e-6
 
-println("\\nPolynomial Eigenvalue Results:")
+result = feast_polynomial(coeffs, center, radius, M0=10, fpm=fpm)   # 4 eigenvalues inside
+
+println("\nPolynomial Eigenvalue Results:")
 println("Status: $(result.info == 0 ? "Success" : "Failed")")
 println("Found: $(result.M) eigenvalues")
 
 if result.M > 0
-    println("\\nEigenvalues (should be complex conjugate pairs):")
+    println("\nEigenvalues (should be complex conjugate pairs):")
     for i in 1:result.M
         λ = result.lambda[i]
         freq = abs(λ) / (2π)
@@ -750,7 +769,7 @@ if result.M > 0
 end
 
 # Compare with linearized version (for validation)
-println("\\n" * "-"^50)
+println("\n" * "-"^50)
 println("Comparison with linearized eigenvalue problem:")
 
 # Linearization: [ 0   I ] [x]     [x]
@@ -794,7 +813,7 @@ problem_sizes = [1000, 5000, 10000, 20000]
 
 println("Memory Usage Comparison: Dense vs Sparse vs Matrix-Free")
 println("="^70)
-@printf("%-10s %-15s %-15s %-15s\\n", "Size", "Dense (MB)", "Sparse (MB)", "Matrix-Free (MB)")
+@printf("%-10s %-15s %-15s %-15s\n", "Size", "Dense (MB)", "Sparse (MB)", "Matrix-Free (MB)")
 println("-"^70)
 
 for n in problem_sizes
@@ -809,12 +828,12 @@ for n in problem_sizes
     M0 = 10
     matfree_memory = 8 * n * M0 / 1e6  # Workspace vectors
     
-    @printf("%-10d %-15.1f %-15.1f %-15.1f\\n", 
+    @printf("%-10d %-15.1f %-15.1f %-15.1f\n",
            n, dense_memory, sparse_memory, matfree_memory)
     
     # Demonstrate actual usage for largest manageable size
     if n <= 5000
-        println("\\nTesting n = $n:")
+        println("\nTesting n = $n:")
         
         # Create test matrix  
         A_dense = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))
@@ -842,7 +861,7 @@ for n in problem_sizes
         println("    Found: $(result_sparse.M) eigenvalues")
         
         println("  Matrix-free:")
-        @time result_matfree = feast(A_op, interval, M0=M0, solver=:cg)  
+        @time result_matfree = feast(A_op, interval, M0=M0, solver=:gmres)
         println("    Found: $(result_matfree.M) eigenvalues")
         
         # Verify all give same results
@@ -885,16 +904,16 @@ A = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))
 interval = (0.01, 0.5)
 M0 = 20
 
-println("\\nProblem: $(n)×$(n) tridiagonal matrix")
+println("\nProblem: $(n)×$(n) tridiagonal matrix")
 println("Search interval: $interval")
 println("Max eigenvalues: $M0")
 
 # Compare serial vs parallel performance
-println("\\n" * "="^50)
+println("\n" * "="^50)
 println("Performance Comparison:")
 
 # Serial FeastKit
-println("\\nSerial FeastKit:")
+println("\nSerial FeastKit:")
 GC.gc()  # Clean garbage before timing
 serial_time = @elapsed begin
     result_serial = feast(A, interval, M0=M0, parallel=false)
@@ -906,7 +925,7 @@ println("  Status: $(result_serial.info == 0 ? "Success" : "Failed")")
 
 # Parallel FeastKit with threading  
 if Threads.nthreads() > 1
-    println("\\nThreaded FeastKit ($(Threads.nthreads()) threads):")
+    println("\nThreaded FeastKit ($(Threads.nthreads()) threads):")
     GC.gc()
     threaded_time = @elapsed begin
         result_threaded = feast(A, interval, M0=M0, parallel=:threads)
@@ -920,7 +939,7 @@ end
 
 # Distributed parallel FeastKit
 if nworkers() > 1
-    println("\\nDistributed FeastKit ($(nworkers()) workers):")
+    println("\nDistributed FeastKit ($(nworkers()) workers):")
     GC.gc()
     distributed_time = @elapsed begin
         result_distributed = feast(A, interval, M0=M0, parallel=:distributed)
@@ -940,7 +959,7 @@ if nworkers() > 1
 end
 
 # Performance summary
-println("\\n" * "="^50)
+println("\n" * "="^50)
 println("Performance Summary:")
 println("Serial time: $(serial_time) seconds") 
 
@@ -952,7 +971,7 @@ if @isdefined(distributed_time)
     println("Distributed speedup: $(serial_time / distributed_time)x")
 end
 
-println("\\nNote: Speedup depends on problem size, hardware, and communication overhead.")
+println("\nNote: Speedup depends on problem size, hardware, and communication overhead.")
 println("Larger problems generally show better parallel scalability.")
 ```
 
@@ -995,21 +1014,21 @@ println("Expected energy band: [$(ε-2t), $(ε+2t)]")
 E_valence_min, E_valence_max = ε - 2*t + 0.1, ε - 0.5  
 result_valence = feast(H_periodic, (E_valence_min, E_valence_max), M0=50)
 
-println("\\nValence band [$E_valence_min, $E_valence_max]:")
+println("\nValence band [$E_valence_min, $E_valence_max]:")
 println("  Found $(result_valence.M) states")
 
 # Conduction band (empty states, higher energies)
 E_conduct_min, E_conduct_max = ε + 0.5, ε + 2*t - 0.1
 result_conduct = feast(H_periodic, (E_conduct_min, E_conduct_max), M0=50)
 
-println("\\nConduction band [$E_conduct_min, $E_conduct_max]:")
+println("\nConduction band [$E_conduct_min, $E_conduct_max]:")
 println("  Found $(result_conduct.M) states")
 
 # States near Fermi level (band gap region)
 E_gap_min, E_gap_max = ε - 0.5, ε + 0.5  
 result_gap = feast(H_periodic, (E_gap_min, E_gap_max), M0=20)
 
-println("\\nBand gap region [$E_gap_min, $E_gap_max]:")
+println("\nBand gap region [$E_gap_min, $E_gap_max]:")
 println("  Found $(result_gap.M) states")
 
 # Calculate density of states
@@ -1021,7 +1040,7 @@ all_energies = vcat(
 
 sort!(all_energies)
 
-println("\\nElectronic Structure Summary:")
+println("\nElectronic Structure Summary:")
 println("Total states found: $(length(all_energies))")
 if length(all_energies) > 10
     println("Lowest 5 energies: $(all_energies[1:5])")
@@ -1035,12 +1054,12 @@ if result_gap.M == 0
     
     if isfinite(valence_top) && isfinite(conduct_bottom)
         band_gap = conduct_bottom - valence_top
-        println("\\nBand gap: $(band_gap) eV")
+        println("\nBand gap: $(band_gap) eV")
         println("Valence band maximum: $valence_top")  
         println("Conduction band minimum: $conduct_bottom")
     end
 else
-    println("\\nStates found in gap region - may be surface states or numerical artifacts")
+    println("\nStates found in gap region - may be surface states or numerical artifacts")
 end
 ```
 
@@ -1134,11 +1153,11 @@ search_regions = [
     (0.0 + 0.5im, 0.8, "Low frequency modes")       # Imaginary axis, low freq
 ]
 
-println("\\nSearching for instability modes:")
+println("\nSearching for instability modes:")
 all_eigenvalues = ComplexF64[]
 
 for (center, radius, description) in search_regions
-    println("\\n" * "="^40)
+    println("\n" * "="^40)
     println("Region: $description")
     println("Center: $center, Radius: $radius")
     
@@ -1167,7 +1186,7 @@ for (center, radius, description) in search_regions
 end
 
 # Stability analysis summary
-println("\\n" * "="^60)
+println("\n" * "="^60)
 println("FLOW STABILITY SUMMARY")  
 println("="^60)
 
@@ -1183,7 +1202,7 @@ if length(all_eigenvalues) > 0
     
     if length(unstable_modes) > 0
         max_growth = maximum(real.(unstable_modes))
-        println("\\nFLOW IS UNSTABLE!")
+        println("\nFLOW IS UNSTABLE!")
         println("Maximum growth rate: $max_growth")
         
         # Find most unstable mode
@@ -1193,7 +1212,7 @@ if length(all_eigenvalues) > 0
         println("Doubling time: $(log(2)/real(λ_most_unstable))")
         
     else
-        println("\\nFLOW APPEARS STABLE")
+        println("\nFLOW APPEARS STABLE")
         println("All found modes have negative or zero growth rates")
     end
 else

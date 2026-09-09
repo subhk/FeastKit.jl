@@ -260,9 +260,13 @@ end
                                        q, mode, res, info, Zne, Wne, state,
                                        work_src, workc_src, 1)
 
-        expected = Wne[1] * (work_src' * workc_src)
-        @test Aq ≈ expected
-        @test Bq ≈ Zne[1] * expected
+        # Beyn's moments are accumulated at full N x M0 width in the state
+        # object, not as the M0 x M0 projections Q^H P(z)^-1 Q that used to go
+        # into Aq/Bq. Projecting first discarded exactly the information the
+        # rank truncation needs.
+        expected = Wne[1] * workc_src
+        @test state.S0 ≈ expected
+        @test state.S1 ≈ Zne[1] * expected
 
         bytes = @allocated _repeat_feast_poly_solve_step!(
             ijob, dmax, N, Ze, work, workc, Aq, Bq, fpm, epsout, loop, Emid,
@@ -422,7 +426,18 @@ end
                                                   1)
         converted = FeastKit._complex_to_real_result(result)
         @test converted isa FeastResult{Float64, Float64}
-        @test converted.q == real.(result.q)
+        # The conversion rotates each column's global complex phase out before
+        # taking the real part, so it is not `real.(q)`: plain real() collapses
+        # a column whose phase sits near +-i. Every column comes back unit norm.
+        @test all(j -> isapprox(norm(converted.q[:, j]), 1.0; atol=1.0e-12), 1:m)
+
+        # A column that really is real up to a phase must be recovered exactly.
+        v = normalize(randn(n))
+        phased = FeastResult{Float64, ComplexF64}([1.0], reshape(cis(1.1) .* v, n, 1),
+                                                  1, [0.0], 0, 0.0, 1)
+        recovered = FeastKit._complex_to_real_result(phased).q[:, 1]
+        @test isapprox(abs.(recovered), abs.(v); atol=1.0e-12)
+        @test isapprox(norm(recovered), 1.0; atol=1.0e-12)
 
         FeastKit._complex_to_real_result(result)
         bytes = @allocated FeastKit._complex_to_real_result(result)
@@ -453,8 +468,14 @@ end
         high_level_generalized_bytes = @allocated feast(A, B, (1.2, 3.8);
                                                        M0=20, fpm=copy(fpm),
                                                        backend=:serial)
-        @test standard_bytes < generalized_bytes
-        @test high_level_standard_bytes < high_level_generalized_bytes
+        # Both paths build the shifted matrix directly from real storage, so the
+        # standard problem no longer allocates strictly less -- what matters is
+        # that neither materializes an extra N x N identity workspace.
+        identity_bytes = n * n * sizeof(ComplexF64)
+        @test standard_bytes <= generalized_bytes
+        @test high_level_standard_bytes <= high_level_generalized_bytes
+        @test generalized_bytes - standard_bytes < identity_bytes
+        @test high_level_generalized_bytes - high_level_standard_bytes < identity_bytes
     end
 
     @testset "Sparse standard solver avoids generalized identity workspace" begin
@@ -473,6 +494,8 @@ end
         feast_scsrgv!(copy(A), copy(B), 1.2, 3.8, 20, copy(fpm))
         standard_bytes = @allocated feast_scsrev!(copy(A), 1.2, 3.8, 20, copy(fpm))
         generalized_bytes = @allocated feast_scsrgv!(copy(A), copy(B), 1.2, 3.8, 20, copy(fpm))
+        # z*I - A is written straight into the complex result, so the standard
+        # path never builds a sparse identity per contour point.
         @test standard_bytes < generalized_bytes
     end
 
@@ -619,13 +642,31 @@ end
                                                          M0, copy(fpm_three))
         @test dense_three_loop_bytes <= round(Int, 1.45 * dense_one_loop_bytes)
 
-        feast_scsrev!(sparse_A, 1.2, 3.8, M0, copy(fpm_one))
-        feast_scsrev!(sparse_A, 1.2, 3.8, M0, copy(fpm_three))
+        # A ratio against the one-loop total is a poor proxy: shrinking the
+        # fixed setup cost (the real path no longer builds complex copies of A
+        # and B) raises the ratio without any extra per-loop work. Measure the
+        # slope instead, and compare it against the same solve with the
+        # factorization cache switched off via fpm[10] = 0, which is what
+        # refactorizing every loop actually costs.
+        fpm_six = copy(fpm_one)
+        fpm_six[4] = 6
+        fpm_six_nocache = copy(fpm_six)
+        fpm_six_nocache[10] = 0
+
+        for f in (fpm_one, fpm_six, fpm_six_nocache)
+            feast_scsrev!(sparse_A, 1.2, 3.8, M0, copy(f))
+            feast_scsrev!(sparse_A, 1.2, 3.8, M0, copy(f))
+        end
         sparse_one_loop_bytes = @allocated feast_scsrev!(sparse_A, 1.2, 3.8,
                                                          M0, copy(fpm_one))
-        sparse_three_loop_bytes = @allocated feast_scsrev!(sparse_A, 1.2, 3.8,
-                                                           M0, copy(fpm_three))
-        @test sparse_three_loop_bytes <= round(Int, 1.45 * sparse_one_loop_bytes)
+        sparse_six_loop_bytes = @allocated feast_scsrev!(sparse_A, 1.2, 3.8,
+                                                         M0, copy(fpm_six))
+        sparse_six_nocache_bytes = @allocated feast_scsrev!(sparse_A, 1.2, 3.8,
+                                                            M0, copy(fpm_six_nocache))
+        cached_slope = (sparse_six_loop_bytes - sparse_one_loop_bytes) / 5
+        uncached_slope = (sparse_six_nocache_bytes - sparse_one_loop_bytes) / 5
+        @test sparse_six_loop_bytes < sparse_six_nocache_bytes
+        @test cached_slope < 0.5 * uncached_slope
 
         banded_n = 200
         banded_M0 = 30
@@ -761,8 +802,37 @@ end
             @allocated feast_gbev!(banded_general_A, banded_general_k,
                                    general_center, general_radius,
                                    banded_general_M0, copy(general_fpm_five))
-        @test banded_general_five_loop_bytes <=
-              round(Int, 1.65 * banded_general_one_loop_bytes)
+        # A ratio against the one-loop total measures the wrong thing: each
+        # refinement loop legitimately allocates (a pivoted QR to rank-compress
+        # the filtered subspace, the reduced eigensolve), and banded
+        # refactorization is nearly allocation-free, so fpm[10] barely moves the
+        # total either. What "factorizations are reused" actually implies is
+        # that the per-loop slope does not grow with the number of contour
+        # points -- if each loop refactorized, the slope would scale with fpm[8].
+        function banded_general_slope(ne)
+            fpm_ne = copy(general_fpm_one)
+            fpm_ne[8] = ne
+            one_loop = copy(fpm_ne); one_loop[4] = 1
+            many_loop = copy(fpm_ne); many_loop[4] = 9
+            for f in (one_loop, many_loop)
+                feast_gbev!(banded_general_A, banded_general_k, general_center,
+                            general_radius, banded_general_M0, copy(f))
+                feast_gbev!(banded_general_A, banded_general_k, general_center,
+                            general_radius, banded_general_M0, copy(f))
+            end
+            b1 = @allocated feast_gbev!(banded_general_A, banded_general_k,
+                                        general_center, general_radius,
+                                        banded_general_M0, copy(one_loop))
+            b9 = @allocated feast_gbev!(banded_general_A, banded_general_k,
+                                        general_center, general_radius,
+                                        banded_general_M0, copy(many_loop))
+            return (b9 - b1) / 8
+        end
+
+        slope_8 = banded_general_slope(8)
+        slope_16 = banded_general_slope(16)
+        @test slope_8 > 0
+        @test slope_16 < 1.5 * slope_8
 
         complex_sym_n = 100
         complex_sym_M0 = 24

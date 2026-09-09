@@ -48,10 +48,24 @@ end
     @test auto.M == serial.M
     @test _sorted_lambda(auto) ≈ _sorted_lambda(serial) atol=1e-10
 
-    @test_throws ArgumentError feast(A, B, interval; M0=n, fpm=copy(fpm),
-                                     backend=:threads)
-    @test_throws ArgumentError feast(A, B, interval; M0=n, fpm=copy(fpm),
-                                     parallel=:threads)
+    # Dense :threads used to be rejected outright because it disagreed with
+    # serial. It now runs and must reproduce the serial answer exactly enough.
+    if Threads.nthreads() > 1
+        threaded = feast(A, B, interval; M0=n, fpm=copy(fpm), backend=:threads)
+        legacy_threaded = feast(A, B, interval; M0=n, fpm=copy(fpm), parallel=:threads)
+        @test threaded.info == serial.info
+        @test threaded.M == serial.M
+        @test _sorted_lambda(threaded) ≈ _sorted_lambda(serial) atol=1e-8
+        @test legacy_threaded.M == serial.M
+        @test _sorted_lambda(legacy_threaded) ≈ _sorted_lambda(serial) atol=1e-8
+    else
+        # Single-threaded sessions still reject an explicit :threads request.
+        @test_throws ArgumentError feast(A, B, interval; M0=n, fpm=copy(fpm),
+                                         backend=:threads)
+    end
+
+    # Threaded/distributed execution of general non-Hermitian problems is still
+    # unimplemented and must say so rather than silently running serial.
     @test_throws ArgumentError feast_general(ComplexF64.(A), 0.0 + 0.0im, 3.0;
                                              M0=n, fpm=copy(fpm), backend=:threads)
 

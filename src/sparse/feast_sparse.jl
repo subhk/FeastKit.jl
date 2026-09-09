@@ -94,11 +94,6 @@ end
     issymmetric(A) || throw(ArgumentError("Matrix must be complex symmetric (equal to its transpose)"))
 end
 
-@inline function _convert_sparse_complex(A::SparseMatrixCSC{T,Int}, ::Type{Complex{T}}) where T<:Real
-    return SparseMatrixCSC{Complex{T},Int}(A.m, A.n, copy(A.colptr), copy(A.rowval),
-                                           Complex{T}.(A.nzval))
-end
-
 function _feast_sparse_shifted_identity_minus(A::SparseMatrixCSC{Complex{T},Int},
                                               z::Complex{T}) where T<:Real
     N = size(A, 1)
@@ -180,21 +175,26 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
     for j in 1:ncols
         b = view(rhs, :, j)
         # Note: Krylov.gmres doesn't support initial guess, starts from zero
-        x_sol, stats = gmres(op, b;
-                             restart=true,
-                             memory=max(gmres_restart, 2),
-                             rtol=tol,
-                             atol=tol,
-                             itmax=maxiter)
+        x_sol, solved = _feast_gmres(op, b;
+                                     restart=true,
+                                     memory=max(gmres_restart, 2),
+                                     rtol=tol,
+                                     atol=tol,
+                                     itmax=maxiter)
         mul!(residual, op, x_sol)
         @. residual -= b
         res_norm = norm(residual)
         b_norm = norm(b)
-        # Keep this independent check aligned with Krylov's convergence test;
-        # the explicit residual may be slightly larger from roundoff alone.
-        residual_limit = 10 * tol * max(b_norm, one(b_norm))
-        if !stats.solved || res_norm > residual_limit
+        # See solve_dense_shifted!: this guards against breakdown, and cannot
+        # meaningfully verify below sqrt(eps) of the working precision.
+        residual_limit = max(10 * tol, sqrt(eps(one(b_norm)))) * max(b_norm, one(b_norm))
+        if res_norm > residual_limit
+            @warn "GMRES failed to converge" residual=res_norm rhs_norm=b_norm limit=residual_limit
             return false
+        elseif !solved
+            # See solve_dense_shifted!: the explicit residual is the ground
+            # truth and FEAST's outer loop absorbs an inexact inner solve.
+            @debug "GMRES stopped early but the explicit residual is acceptable" residual=res_norm limit=residual_limit
         end
         dest[:, j] .= x_sol
     end
@@ -215,287 +215,29 @@ function solve_shifted_iterative_identity!(dest::AbstractMatrix{CT},
 
     for j in 1:ncols
         b = view(rhs, :, j)
-        x_sol, stats = gmres(op, b;
-                             restart=true,
-                             memory=max(gmres_restart, 2),
-                             rtol=tol,
-                             atol=tol,
-                             itmax=maxiter)
+        x_sol, solved = _feast_gmres(op, b;
+                                     restart=true,
+                                     memory=max(gmres_restart, 2),
+                                     rtol=tol,
+                                     atol=tol,
+                                     itmax=maxiter)
         mul!(residual, op, x_sol)
         @. residual -= b
         res_norm = norm(residual)
         b_norm = norm(b)
-        residual_limit = 10 * tol * max(b_norm, one(b_norm))
-        if !stats.solved || res_norm > residual_limit
+        residual_limit = max(10 * tol, sqrt(eps(one(b_norm)))) * max(b_norm, one(b_norm))
+        if res_norm > residual_limit
+            @warn "GMRES failed to converge" residual=res_norm rhs_norm=b_norm limit=residual_limit
             return false
+        elseif !solved
+            # See solve_dense_shifted!: the explicit residual is the ground
+            # truth and FEAST's outer loop absorbs an inexact inner solve.
+            @debug "GMRES stopped early but the explicit residual is acceptable" residual=res_norm limit=residual_limit
         end
         dest[:, j] .= x_sol
     end
 
     return true
-end
-
-"""
-    _feast_sparse_hermitian(A, B, Emin, Emax, M0, fpm; solver=:direct)
-
-Shared sparse complex Hermitian FEAST implementation. It mirrors the dense
-Hermitian path but uses sparse factorizations or sparse GMRES for the shifted
-systems. Work arrays are kept outside the contour loop to avoid repeated
-allocation during refinement.
-"""
-function _feast_sparse_hermitian(A::SparseMatrixCSC{Complex{T},Int},
-                                 B::Union{SparseMatrixCSC{Complex{T},Int},Nothing},
-                                 Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
-                                 solver::Symbol = :direct,
-                                 solver_tol::Real = 0.0,
-                                 solver_maxiter::Int = 500,
-                                 solver_restart::Int = 30) where T<:Real
-    N = size(A, 1)
-
-    feastdefault!(fpm)
-    check_feast_srci_input(N, M0, Emin, Emax, fpm)
-
-    solver_choice = solver == :iterative ? :gmres : solver
-    solver_choice = solver_choice in (:direct, :gmres) ? solver_choice : :invalid
-    solver_choice == :invalid &&
-        throw(ArgumentError("Unsupported solver option '$solver'. Use :direct, :gmres, or :iterative."))
-    solver_is_direct = solver_choice == :direct
-    solver_is_iterative = !solver_is_direct
-    solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
-        throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Please ensure it is in the environment."))
-    tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
-
-    # Workspace fields are reused for the basis, shifted solves, Ritz vectors,
-    # residuals, and interval reordering scratch across all FEAST loops.
-    workspace = FeastWorkspaceComplex{T}(N, M0)
-    Q_basis = view(workspace.workc, :, 1:M0)
-    _feast_seeded_subspace_complex!(Q_basis)
-    solutions = workspace.q
-    lambda_vec = workspace.lambda
-    res_vec = workspace.res
-
-    zAq = zeros(Complex{T}, M0, M0)
-    zSq = zeros(Complex{T}, M0, M0)
-    Aq_herm = similar(zAq)
-    Sq_herm = similar(zSq)
-    # Always allocate a separate rhs_buffer to avoid aliasing Q_basis
-    # (aliased views are fragile — any future in-place write to one corrupts the other)
-    rhs_buffer = Matrix{Complex{T}}(undef, N, M0)
-    lambda_tmp = similar(lambda_vec)
-    perm = Vector{Int}(undef, M0)
-    solutions_tmp = similar(solutions)
-    residual_vec = zeros(Complex{T}, N)
-    Bq_vec = B === nothing ? nothing : zeros(Complex{T}, N)
-
-    contour = feast_get_custom_contour(T, fpm)
-    contour === nothing && (contour = feast_contour(Emin, Emax, fpm))
-    Zne = contour.Zne
-    Wne = contour.Wne
-    factor_cache = Vector{Union{Nothing, SparseArrays.UMFPACK.UmfpackLU{Complex{T}, Int}}}(undef, length(Zne))
-    fill!(factor_cache, nothing)
-
-    maxloop = fpm[4]
-    eps_tol = feast_tolerance(fpm, T)
-    epsout_val = T(Inf)
-    loop_count = 0
-    info_code = Int(Feast_SUCCESS)
-    M_found = 0
-    active_dim = M0
-
-    # Allocate buffer for accumulated filtered subspace
-    Q_proj = zeros(Complex{T}, N, M0)
-
-    for loop_idx in 0:maxloop
-        # Reset the projected subspace before applying the spectral projector
-        # to the current basis.
-        loop_count = loop_idx
-        fill!(zAq, zero(Complex{T}))
-        fill!(zSq, zero(Complex{T}))
-        fill!(Q_proj, zero(Complex{T}))
-
-        gmres_failed = false
-
-        for e in 1:length(Zne)
-            # Each contour point contributes a shifted solve plus weighted
-            # moment matrices for the reduced eigenproblem.
-            z = Zne[e]
-            weight = 2 * Wne[e]
-            basis_block = view(Q_basis, :, 1:active_dim)
-            rhs_block = view(rhs_buffer, :, 1:active_dim)
-            solutions_block = view(solutions, :, 1:active_dim)
-            qproj_block = view(Q_proj, :, 1:active_dim)
-
-            if B === nothing
-                copyto!(rhs_block, basis_block)
-            else
-                mul!(rhs_block, B, basis_block)
-            end
-
-            if solver_is_direct
-                solver_factor = factor_cache[e]
-                try
-                    if solver_factor === nothing
-                        shifted_matrix = B === nothing ? _feast_sparse_shifted_identity_minus(A, z) : z * B - A
-                        solver_factor = lu(shifted_matrix)
-                        factor_cache[e] = solver_factor
-                    end
-                    ldiv!(solutions_block, solver_factor, rhs_block)
-                catch err
-                    info_code = Int(Feast_ERROR_LAPACK)
-                    @warn "Sparse direct solve failed for shift $z" exception=err
-                    gmres_failed = true
-                    break
-                end
-            else
-                success = if B === nothing
-                    solve_shifted_iterative_identity!(solutions_block, rhs_block, A, z,
-                                                      tol_value, solver_maxiter,
-                                                      solver_restart)
-                else
-                    solve_shifted_iterative!(solutions_block, rhs_block, A, B,
-                                             z, tol_value, solver_maxiter,
-                                             solver_restart)
-                end
-                if !success
-                    info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-                    gmres_failed = true
-                    break
-                end
-            end
-
-            # Accumulate the filtered subspace. The reduced problem is formed
-            # after QR compression to avoid rank-deficient moment pencils when
-            # M0 is larger than the target eigenspace.
-            @. qproj_block += weight * solutions_block
-        end
-
-        if gmres_failed
-            break
-        end
-
-        try
-            rank = _feast_qr_compress!(solutions_tmp, Q_proj, active_dim;
-                                       rank_tol=sqrt(eps(T)))
-            if rank == 0
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-                break
-            end
-
-            q_rank = view(solutions_tmp, :, 1:rank)
-            aq_work = view(rhs_buffer, :, 1:rank)
-            bq_work = view(solutions, :, 1:rank)
-            zAq_rank = view(zAq, 1:rank, 1:rank)
-            zSq_rank = view(zSq, 1:rank, 1:rank)
-            Aq_rank = view(Aq_herm, 1:rank, 1:rank)
-            Sq_rank = view(Sq_herm, 1:rank, 1:rank)
-
-            mul!(aq_work, A, q_rank)
-            mul!(zSq_rank, adjoint(q_rank), aq_work)
-            _feast_hermitian_part!(Sq_rank, zSq_rank)
-
-            if B === nothing
-                fill!(Aq_rank, zero(Complex{T}))
-                for i in 1:rank
-                    Aq_rank[i, i] = one(Complex{T})
-                end
-            else
-                mul!(bq_work, B, q_rank)
-                mul!(zAq_rank, adjoint(q_rank), bq_work)
-                _feast_hermitian_part!(Aq_rank, zAq_rank)
-            end
-
-            # Solve Hermitian generalized eigenproblem: Sq*x = lambda*Aq*x
-            # Eigenvalues are real; eigenvectors are complex.
-            lambda_red = Vector{T}(undef, 0)
-            v_red = Array{Complex{T}}(undef, 0, 0)
-            try
-                F = eigen(Hermitian(Sq_rank), Hermitian(Aq_rank))
-                lambda_red = Vector{T}(F.values)
-                v_red = Matrix{Complex{T}}(F.vectors)
-            catch e
-                if isa(e, PosDefException) || isa(e, LAPACKException)
-                    # Fall back to general complex eigenvalue solver
-                    F = eigen(Sq_rank, Aq_rank)
-                    lambda_red = Vector{T}(real.(F.values))
-                    v_red = Matrix{Complex{T}}(F.vectors)
-                else
-                    rethrow(e)
-                end
-            end
-
-            # Project eigenvectors using the orthonormal filtered subspace.
-            for idx in 1:rank
-                mul!(view(solutions, :, idx), q_rank, view(v_red, :, idx))
-                lambda_vec[idx] = lambda_red[idx]
-            end
-
-            M = _feast_reorder_by_interval!(lambda_vec, solutions, perm,
-                                             lambda_tmp, solutions_tmp,
-                                             Emin, Emax, rank)
-            if M == 0
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-                break
-            end
-
-            # Normalize only eigenvectors inside interval (for residual computation)
-            for j in 1:M
-                vec = view(solutions, :, j)
-                nrm = norm(vec)
-                nrm > 0 && (vec ./= nrm)
-            end
-
-            # Compute residuals only for eigenvalues inside interval
-            max_res = zero(T)
-            for j in 1:M
-                q_col = view(solutions, :, j)
-                mul!(residual_vec, A, q_col)
-                if B === nothing
-                    @. residual_vec = residual_vec - lambda_vec[j] * q_col
-                else
-                    mul!(Bq_vec, B, q_col)
-                    @. residual_vec = residual_vec - lambda_vec[j] * Bq_vec
-                end
-                # Relative residual: normalize by max(|λ|, 1)
-                res_val = norm(residual_vec) / max(abs(lambda_vec[j]), one(T))
-                res_vec[j] = res_val
-                max_res = max(max_res, res_val)
-            end
-
-            epsout_val = max_res
-            M_found = M
-
-            if epsout_val <= eps_tol
-                break
-            end
-
-            if loop_idx == maxloop
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-                break
-            end
-
-            active_dim = rank
-            copyto!(view(Q_basis, :, 1:active_dim),
-                    view(solutions, :, 1:active_dim))
-        catch err
-            info_code = Int(Feast_ERROR_LAPACK)
-            @warn "Reduced eigenvalue problem failed during sparse Hermitian FEAST" exception=err
-            break
-        end
-    end
-
-    workspace.lambda[1:M_found] .= lambda_vec[1:M_found]
-    workspace.res[1:M_found] .= res_vec[1:M_found]
-
-    if M_found == 0
-        info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-    end
-
-    lambda = lambda_vec[1:M_found]
-    q = solutions[:, 1:M_found]
-    res = res_vec[1:M_found]
-
-    return FeastResult{T, Complex{T}}(lambda, q, M_found, res,
-                                      info_code, epsout_val, loop_count)
 end
 
 """
@@ -530,7 +272,7 @@ problems.
     solver_is_direct = solver_choice == :direct
     solver_is_iterative = !solver_is_direct
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
-        throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Please ensure it is in the environment."))
+        throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
 
     workspace = FeastWorkspaceComplex{T}(N, M0)
@@ -557,7 +299,11 @@ problems.
     contour === nothing && (contour = feast_gcontour(Emid, r, fpm))
     Zne = contour.Zne
     Wne = contour.Wne
-    factor_cache = Vector{Union{Nothing, SparseArrays.UMFPACK.UmfpackLU{Complex{T}, Int}}}(undef, length(Zne))
+    # fpm[10] = 1 (default) caches one factorization per contour point;
+    # fpm[10] = 0 keeps a single slot and refactorizes on each visit.
+    store_factors = fpm[10] == 1
+    factor_cache = Vector{Union{Nothing, SparseArrays.UMFPACK.UmfpackLU{Complex{T}, Int}}}(undef,
+                       store_factors ? length(Zne) : 1)
     fill!(factor_cache, nothing)
 
     maxloop = fpm[4]
@@ -584,13 +330,15 @@ problems.
 
             if solver_is_direct
                 try
-                    solver_factor = factor_cache[e]
+                    slot = store_factors ? e : 1
+                    solver_factor = factor_cache[slot]
                     if solver_factor === nothing
                         shifted_matrix = z * B - A
                         solver_factor = lu(shifted_matrix)
-                        factor_cache[e] = solver_factor
+                        factor_cache[slot] = solver_factor
                     end
                     ldiv!(shifted_block, solver_factor, rhs_block)
+                    store_factors || (factor_cache[1] = nothing)
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)
                     @warn "Sparse complex-symmetric direct solve failed for shift $z" exception=err
@@ -720,14 +468,10 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
 
-    complex_A = _convert_sparse_complex(A, Complex{T})
-    complex_B = _convert_sparse_complex(B, Complex{T})
-    complex_result = _feast_sparse_hermitian(complex_A, complex_B,
-                                             Emin, Emax, M0, fpm;
-                                             solver=solver, solver_tol=solver_tol,
-                                             solver_maxiter=solver_maxiter,
-                                             solver_restart=solver_restart)
-    return _complex_to_real_result(complex_result)
+    return _feast_symmetric_real(A, B, Emin, Emax, M0, fpm;
+                                 solver=solver, solver_tol=solver_tol,
+                                 solver_maxiter=solver_maxiter,
+                                 solver_restart=solver_restart)
 end
 
 function feast_scsrgvx!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
@@ -766,7 +510,7 @@ function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     ishermitian(A) || throw(ArgumentError("Matrix A must be Hermitian for feast_hcsrev!"))
 
-    return _feast_sparse_hermitian(A, nothing, Emin, Emax, M0, fpm;
+    return _feast_hermitian_complex(A, nothing, Emin, Emax, M0, fpm;
                                    solver=solver, solver_tol=solver_tol,
                                    solver_maxiter=solver_maxiter,
                                    solver_restart=solver_restart)
@@ -824,7 +568,7 @@ function feast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     ishermitian(A) || throw(ArgumentError("A must be Hermitian for feast_hcsrgv!"))
     ishermitian(B) || throw(ArgumentError("B must be Hermitian positive definite for feast_hcsrgv!"))
 
-    return _feast_sparse_hermitian(A, B, Emin, Emax, M0, fpm;
+    return _feast_hermitian_complex(A, B, Emin, Emax, M0, fpm;
                                    solver=solver, solver_tol=solver_tol,
                                    solver_maxiter=solver_maxiter,
                                    solver_restart=solver_restart)
@@ -896,7 +640,7 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     solver_is_direct = solver_choice == :direct
     solver_is_iterative = !solver_is_direct
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
-        throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Please ensure it is in the environment."))
+        throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
     current_shift = Ref(zero(Complex{T}))
     rhs_iterative = solver_is_iterative ? zeros(Complex{T}, N, M0) : nothing
@@ -917,9 +661,12 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     lambda_complex = Vector{Complex{T}}(undef, M0)
     q_complex = Matrix{Complex{T}}(undef, N, M0)
     
-    # Sparse linear solver workspace
-    sparse_solver = nothing
-    factor_cache = Dict{Complex{T}, SparseArrays.UMFPACK.UmfpackLU{Complex{T}, Int}}()
+    # Sparse linear solver workspace. fpm[10] = 0 keeps a single slot; the cache
+    # is indexed by contour point (fpm[50]) rather than keyed by the complex
+    # shift, so it cannot grow past the contour and float keys never collide.
+    store_factors = fpm[10] == 1
+    factor_cache = Vector{Union{Nothing, SparseArrays.UMFPACK.UmfpackLU{Complex{T}, Int}}}()
+    current_slot = 1
 
     # Persistent RCI state (must be reused across calls in the loop)
     grci_state = FeastGRCIState{T}()
@@ -936,14 +683,17 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
             z = Ze[]
             if solver_is_direct
                 # LU factorization for sparse matrix
+                if isempty(factor_cache)
+                    resize!(factor_cache, store_factors ? max(fpm[51], 1) : 1)
+                    fill!(factor_cache, nothing)
+                end
+                current_slot = store_factors ? clamp(fpm[50], 1, length(factor_cache)) : 1
                 try
-                    sparse_solver = get(factor_cache, z, nothing)
-                    if sparse_solver === nothing
-                        sparse_matrix = z * B - A
-                        sparse_solver = lu(sparse_matrix)
-                        factor_cache[z] = sparse_solver
+                    if factor_cache[current_slot] === nothing
+                        factor_cache[current_slot] = lu(z * B - A)
                     end
-                catch e
+                catch err
+                    @debug "Sparse general shifted factorization failed" shift=z exception=err
                     info[] = Int(Feast_ERROR_LAPACK)
                     break
                 end
@@ -958,12 +708,19 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
             mul!(rhs, B, workc_block)
             
             if solver_is_direct
+                factor = factor_cache[current_slot]
+                if factor === nothing
+                    info[] = Int(Feast_ERROR_INTERNAL)
+                    break
+                end
                 try
-                    ldiv!(workc_block, sparse_solver, rhs)
-                catch e
+                    ldiv!(workc_block, factor, rhs)
+                catch err
+                    @debug "Sparse general shifted solve failed" exception=err
                     info[] = Int(Feast_ERROR_LAPACK)
                     break
                 end
+                store_factors || (factor_cache[1] = nothing)
             else
                 copyto!(rhs_iterative, rhs)
                 success = solve_shifted_iterative!(workc_block, rhs_iterative,
@@ -1316,7 +1073,7 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                              gmres_restart::Int = 20,
                              gmres_maxiter::Int = 200) where T<:Real
     FEAST_KRYLOV_AVAILABLE[] ||
-        throw(ArgumentError("Krylov.jl is required for matrix-free GMRES solves"))
+        throw(ArgumentError("Krylov.jl is required for matrix-free GMRES solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
 
     feastdefault!(fpm)
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
@@ -1383,15 +1140,15 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                 _copyto_complex!(rhs_complex, rhs_real)
 
                 # Note: Krylov.gmres doesn't support initial guess, starts from zero
-                sol, stats = gmres(shifted_operator, rhs_complex;
-                                   rtol = gmres_rtol,
-                                   atol = gmres_atol,
-                                   memory = gmres_restart,
-                                   itmax = gmres_maxiter)
+                sol, solved = _feast_gmres(shifted_operator, rhs_complex;
+                                           rtol = gmres_rtol,
+                                           atol = gmres_atol,
+                                           memory = gmres_restart,
+                                           itmax = gmres_maxiter)
 
-                if !stats.solved
+                if !solved
                     info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-                    @warn "GMRES did not converge for contour point $e, column $j" residual=stats.residuals[end]
+                    @warn "GMRES did not converge for contour point $e, column $j"
                     gmres_failed = true
                     break
                 end
@@ -1423,7 +1180,7 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
         try
             # For half-contour integration, the moment matrices are already real.
             # Use Symmetric wrapper directly - no need for 0.5*(A+A') symmetrization.
-            # IMPORTANT: Solve Sq*v = lambda*Aq*v (consistent with _feast_sparse_hermitian)
+            # IMPORTANT: Solve Sq*v = lambda*Aq*v (consistent with _feast_hermitian_complex)
             # Aq = sum(w * Q' * Y), Sq = sum(w * z * Q' * Y)
             lambda_red = T[]
             v_red = Matrix{T}(undef, 0, 0)
@@ -1548,7 +1305,11 @@ end
 # Standard eigenvalue problem variants (B = I)
 
 function feast_scsrev!(A::SparseMatrixCSC{T,Int},
-                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                       Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
+                       solver::Symbol = :direct,
+                       solver_tol::Real = 0.0,
+                       solver_maxiter::Int = 500,
+                       solver_restart::Int = 30) where T<:Real
     # Feast for sparse real symmetric standard eigenvalue problem
     # Solves: A*q = lambda*q where A is symmetric
     # This is equivalent to feast_scsrgv! with B = I
@@ -1556,10 +1317,10 @@ function feast_scsrev!(A::SparseMatrixCSC{T,Int},
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
 
-    complex_A = _convert_sparse_complex(A, Complex{T})
-    complex_result = _feast_sparse_hermitian(complex_A, nothing,
-                                             Emin, Emax, M0, fpm)
-    return _complex_to_real_result(complex_result)
+    return _feast_symmetric_real(A, nothing, Emin, Emax, M0, fpm;
+                                 solver=solver, solver_tol=solver_tol,
+                                 solver_maxiter=solver_maxiter,
+                                 solver_restart=solver_restart)
 end
 
 function feast_gcsrev!(A::SparseMatrixCSC{Complex{T},Int},

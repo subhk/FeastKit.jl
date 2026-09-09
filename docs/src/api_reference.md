@@ -2,6 +2,11 @@
 
 Complete reference for all FeastKit.jl functions, types, and interfaces.
 
+Blocks that show a bare call with no surrounding setup are **signatures**, not
+runnable snippets: `A`, `B`, `interval` and `fpm` are supplied by you. Blocks
+under an **Examples** heading are executed when these docs are built, so they
+run exactly as shown.
+
 ## Table of Contents
 
 - [Main Interfaces](#main-interfaces)
@@ -43,17 +48,28 @@ feast(A, B, interval; M0=10, fpm=nothing, kwargs...)
 - `FeastResult`: Results structure with eigenvalues and eigenvectors
 
 **Examples:**
-```julia
-# Standard eigenvalue problem
-result = feast(A, (0.5, 1.5), M0=10)
+```@example apifeast
+using FeastKit, LinearAlgebra
 
-# Generalized eigenvalue problem  
-result = feast(A, B, (0.1, 0.8), M0=15)
+n = 100
+A = Matrix(SymTridiagonal(2.0 * ones(n), -1.0 * ones(n - 1)))
+B = Matrix{Float64}(I, n, n)
 
-# With custom parameters
+# Standard eigenvalue problem. Size M0 to the number of eigenvalues the
+# interval holds -- here 2 - 2cos(kπ/(n+1)) puts 7 of them below 0.05.
+result = feast(A, (0.0, 0.05), M0=10)
+
+# Generalized eigenvalue problem
+result = feast(A, B, (0.0, 0.05), M0=10)
+
+# With custom parameters. Always feastinit! before setting entries: on a bare
+# zeros(Int, 64) the zeros read as user-supplied values, not as "unset".
 fpm = zeros(Int, 64)
+feastinit!(fpm)
 fpm[2] = 16  # 16 integration points
-result = feast(A, (0, 1), M0=20, fpm=fpm)
+result = feast(A, (0, 0.05), M0=10, fpm=fpm)
+
+result.info, result.M
 ```
 
 ### feast_general
@@ -157,11 +173,14 @@ LinearOperator{T}(A_mul!, size; kwargs...)
 - `Ac_mul!::Function`: Function for `A†*x` (optional)
 
 **Examples:**
-```julia
+```@example apiop
+using FeastKit, LinearAlgebra
+
+n = 200
+
 # Define matrix-vector multiplication
 function A_mul!(y, x)
     # Tridiagonal: [-1 2 -1] stencil
-    n = length(x)
     y[1] = 2*x[1] - x[2]
     for i in 2:n-1
         y[i] = -x[i-1] + 2*x[i] - x[i+1]
@@ -172,8 +191,30 @@ end
 # Create operator
 A_op = LinearOperator{Float64}(A_mul!, (n, n), issymmetric=true)
 
-# Use with FeastKit
-result = feast(A_op, (0.5, 1.5), M0=10, solver=:cg)
+# Supply the shifted solve: z*I - A is tridiagonal, so a Thomas sweep is exact
+# and O(n). Without `solver=` this falls back to unpreconditioned GMRES.
+function tridiagonal_solve!(Y, z, X)
+    d0 = ComplexF64(z) - 2
+    c = Vector{ComplexF64}(undef, n - 1)
+    d = Vector{ComplexF64}(undef, n)
+    for j in axes(X, 2)
+        c[1] = 1 / d0
+        d[1] = X[1, j] / d0
+        for i in 2:n
+            m = d0 - c[i - 1]
+            i < n && (c[i] = 1 / m)
+            d[i] = (X[i, j] - d[i - 1]) / m
+        end
+        Y[n, j] = d[n]
+        for i in (n - 1):-1:1
+            Y[i, j] = d[i] - c[i] * Y[i + 1, j]
+        end
+    end
+    return Y
+end
+
+result = feast(A_op, (0.0, 0.0025), M0=12, solver=tridiagonal_solve!)
+result.info, result.M
 ```
 
 ```@docs
@@ -274,15 +315,19 @@ feast_contour_expert(Emin, Emax, ne, integration_type=0, ellipse_ratio=100)
 - `ellipse_ratio::Int`: Aspect ratio a/b × 100 (100 = circle)
 
 **Examples:**
-```julia
+```@example apicontour
+using FeastKit
+
 # High-accuracy Gauss-Legendre with 16 points
 contour = feast_contour_expert(-1.0, 1.0, 16, 0, 100)
 
-# Zolotarev integration (optimal for ellipses)  
+# Zolotarev integration (optimal for ellipses)
 contour = feast_contour_expert(0.0, 2.0, 12, 2, 100)
 
-# Flat ellipse (aspect ratio 0.5)
-contour = feast_contour_expert(-1.0, 1.0, 10, 0, 50)
+# Flat ellipse (aspect ratio 0.5). Integer bounds work too.
+contour = feast_contour_expert(-1, 1, 10, 0, 50)
+
+length(contour.Zne)
 ```
 
 ```@docs
@@ -396,11 +441,14 @@ end
 ```
 
 **Access patterns:**
-```julia
-result = feast(A, (0, 1), M0=10)
+```@example apiresult
+using FeastKit, LinearAlgebra
+
+A = Matrix(SymTridiagonal(2.0 * ones(100), -1.0 * ones(99)))
+result = feast(A, (0, 0.05), M0=10)   # interval endpoints may be any Real
 
 eigenvalues = result.lambda[1:result.M]
-eigenvectors = result.q[:, 1:result.M]  
+eigenvectors = result.q[:, 1:result.M]
 success = (result.info == 0)
 ```
 
@@ -444,7 +492,31 @@ abstract type MatrixFreeOperator{T} end
 
 ### RCI State Types
 
-Explicit state objects for Reverse Communication Interface (RCI) kernels. These must be created once before the RCI loop and reused across all iterations.
+Explicit state objects for Reverse Communication Interface (RCI) kernels. These must be created once before the RCI loop and reused across all iterations — the
+kernel keeps the contour, the trial subspace, and the outstanding sub-phase in
+them. Passing a fresh state mid-loop now raises an `ArgumentError` instead of
+silently restarting and returning `M = 0`.
+
+#### Jobs a caller must handle
+
+One refinement loop of `feast_srci!` / `feast_hrci!` issues:
+
+1. `Feast_RCI_FACTORIZE` / `Feast_RCI_SOLVE`, once per contour point — factorize
+   `Ze*B - A` and solve it against `B * work`.
+2. `Feast_RCI_MULT_A` then `Feast_RCI_MULT_B` — multiply `q[:, 1:mode[]]` to
+   build the reduced Rayleigh–Ritz pencil.
+3. `Feast_RCI_MULT_A` then `Feast_RCI_MULT_B` again — this time on the Ritz
+   vectors, so the kernel can form the true generalized residual
+   `‖A q - λ B q‖`.
+4. `Feast_RCI_DONE`.
+
+`Feast_RCI_MULT_B` is required. Handling only `MULT_A` computes `‖A q - λ q‖`,
+which is wrong for any problem with `B ≠ I`. The kernel tracks which of the two
+`MULT_A`/`MULT_B` pairs is outstanding, so a caller simply multiplies the first
+`mode[]` columns of `q` every time.
+
+On exit, `info` is `Feast_SUCCESS` only when `epsout` met the tolerance;
+exhausting `fpm[4]` refinement loops reports `Feast_ERROR_NO_CONVERGENCE`.
 
 The `ifeast_srci!`, `ifeast_hrci!`, and `ifeast_grci!` entry points expose
 IFEAST-compatible RCI names. They are solver-neutral wrappers around the base
@@ -512,6 +584,8 @@ Print summary of FeastKit results.
 
 ```julia
 feast_summary(result::FeastResult)
+feast_summary(result::FeastGeneralResult)
+feast_summary(io::IO, result)            # write to any IO instead of stdout
 ```
 
 ### eigvals_feast
@@ -570,7 +644,7 @@ FeastKit functions return status codes in `result.info`:
 
 **Error handling:**
 ```julia
-result = feast(A, interval)
+result = feast(A, interval)   # A and interval are yours
 
 if result.info != 0
     error_name = ["Feast_SUCCESS", "Feast_ERROR_N", "Feast_ERROR_M0", 
@@ -590,7 +664,7 @@ The `fpm` parameter array controls FeastKit behavior:
 
 | Index | Parameter | Default | Description |
 |-------|-----------|---------|-------------|
-| `fpm[1]` | Print level | 1 | 0=silent, 1=summary, 2=detailed |
+| `fpm[1]` | Print level | 0 | 0=silent, 1=summary, negative=write to file |
 | `fpm[2]` | Integration points | 8 | Number of contour points |
 | `fpm[3]` | Tolerance exponent | 12 | Convergence: 10^(-fpm[3]) |
 | `fpm[4]` | Max iterations | 20 | Maximum refinement loops |
@@ -599,16 +673,22 @@ The `fpm` parameter array controls FeastKit behavior:
 | `fpm[18]` | Ellipse ratio | 100 | Aspect ratio × 100 |
 
 **Setting parameters:**
-```julia
+```@example apifpm
+using FeastKit, LinearAlgebra
+
+A = Matrix(SymTridiagonal(2.0 * ones(100), -1.0 * ones(99)))
+interval = (0.0, 0.05)
+
 fpm = zeros(Int, 64)
 feastinit!(fpm)
 
-fpm[1] = 2      # Detailed output
-fpm[2] = 16     # 16 integration points  
+fpm[1] = 1      # Summary output (0, 1, or negative for a file -- 2 is rejected)
+fpm[2] = 16     # 16 integration points
 fpm[3] = 14     # High precision (10^-14)
 fpm[16] = 2     # Zolotarev integration
 
 result = feast(A, interval, M0=10, fpm=fpm)
+result.info, result.M
 ```
 
 ---
@@ -636,7 +716,7 @@ result = feast(A, interval, M0=10, fpm=fpm)
 
 | Problem Type | Recommended Solver | Options |
 |--------------|-------------------|---------|
-| Symmetric positive definite | `:cg` | `rtol=1e-8` |
+| Symmetric positive definite | `:gmres` | `rtol=1e-8` |
 | Symmetric indefinite | `:gmres` | `restart=30` |
 | General non-symmetric | `:gmres` | `restart=50, rtol=1e-6` |
 | Well-conditioned | `:bicgstab` | `l=2` |

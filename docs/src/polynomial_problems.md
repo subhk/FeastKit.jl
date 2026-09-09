@@ -119,15 +119,17 @@ result.epsout  # Residual
 For real symmetric or complex Hermitian coefficient matrices:
 
 ```julia
-# Symmetric coefficient matrices
-K = Symmetric(randn(n, n))
-C = Symmetric(randn(n, n))
-M = Symmetric(randn(n, n) + 5I)
+# Symmetric coefficient matrices. The drivers dispatch on Vector{Matrix{T}},
+# so materialize the Symmetric wrappers.
+K = Matrix(Symmetric(randn(n, n)))
+C = Matrix(Symmetric(randn(n, n)))
+M = Matrix(Symmetric(randn(n, n) + 5I))
 
 coeffs = [K, C, M]
 
-# Use symmetric solver
-result = feast_sypev!(coeffs, Emin, Emax, M0, fpm)
+# Use symmetric solver. Even with symmetric coefficients the search region is
+# a disc in the complex plane, because a quadratic in λ has complex roots.
+result = feast_sypev!(coeffs, 2, center, radius, M0, fpm)
 ```
 
 ### Real Symmetric with Real Eigenvalues
@@ -137,14 +139,14 @@ When M, C, K are real symmetric and eigenvalues are real:
 ```julia
 using FeastKit
 
-# Underdamped system (real eigenvalues on interval)
-K = Symmetric(randn(n, n) + 10I)
+# Undamped system: with C = 0 the eigenvalues come in ± pairs on the real axis
+K = Matrix(Symmetric(randn(n, n) + 10I))
 C = zeros(n, n)  # No damping
-M = Symmetric(randn(n, n) + 5I)
+M = Matrix(Symmetric(randn(n, n) + 5I))
 
-# Real interval search
-Emin, Emax = 0.1, 2.0
-result = feast_sypev!([K, C, M], Emin, Emax, M0, fpm)
+# A disc covering the positive real eigenvalues. Centre it away from the
+# origin so it does not enclose a root and its negative at the same time.
+result = feast_sypev!([K, C, M], 2, 1.05 + 0.0im, 0.95, M0, fpm)
 ```
 
 ### General Complex Problems
@@ -158,7 +160,7 @@ A1 = randn(ComplexF64, n, n)
 A2 = randn(ComplexF64, n, n)
 
 # Circular contour search
-result = feast_gepev!([A0, A1, A2], center, radius, M0, fpm)
+result = feast_gepev!([A0, A1, A2], 2, center, radius, M0, fpm)
 ```
 
 ### Sparse Polynomial Problems
@@ -174,7 +176,7 @@ C = sprandn(n, n, 0.01)
 M = sprandn(n, n, 0.01) + 5I
 
 # Sparse solver
-result = feast_scsrpev!([K, C, M], Emin, Emax, M0, fpm)
+result = feast_scsrpev!([K, C, M], 2, center, radius, M0, fpm)
 ```
 
 ---
@@ -199,8 +201,10 @@ K_c = Complex.(Matrix(K))
 M_c = Complex.(Matrix(M))
 C_c = Complex.(Matrix(C))
 
-# Find eigenvalues near origin
-result = feast_polynomial([K_c, C_c, M_c], 0.0+0.0im, 3.0, M0=30)
+# The quadratic λ²+0.1kλ+k = 0 puts every eigenvalue on |λ| = √k with k in
+# [2, 6], so there is nothing near the origin at all and radius 3 would enclose
+# all 2n = 200 of them. Target a small disc on that ring instead.
+result = feast_polynomial([K_c, C_c, M_c], -0.15+2.0im, 0.08, M0=18)
 
 # Analyze results
 for i in 1:min(5, result.M)
@@ -230,8 +234,10 @@ G = G - G'  # Make skew-symmetric
 # Convert to complex
 coeffs = [Complex.(K), Complex.(G), Complex.(M)]
 
-# Eigenvalues are purely imaginary for undamped gyroscopic systems
-result = feast_polynomial(coeffs, 0.0+0.0im, 5.0, M0=40)
+# Eigenvalues are (nearly) imaginary for undamped gyroscopic systems and spread
+# over |λ| up to ~14, so pick a disc on the imaginary axis rather than one large
+# enough to swallow the whole spectrum.
+result = feast_polynomial(coeffs, 0.0+1.0im, 0.3, M0=20)
 
 println("Gyroscopic eigenvalues (should be imaginary):")
 for i in 1:min(5, result.M)
@@ -261,7 +267,7 @@ M_c = sparse(Complex.(M))
 zero_mat = sparse(zeros(ComplexF64, n, n))
 
 # Find propagating wavenumbers
-result = feast_hcsrpev!([K_c, zero_mat, M_c], 0.0, 50.0, 20, fpm)
+result = feast_hcsrpev!([K_c, zero_mat, M_c], 2, 25.0 + 0.0im, 25.0, 20, fpm)
 
 println("Propagating wavenumbers:")
 for i in 1:result.M
@@ -459,23 +465,27 @@ end
 
 ### Main Functions
 
+A polynomial eigenvalue problem is always searched over a **disc in the complex
+plane**, never a real interval: every driver takes a complex `center` and a real
+`radius`, and every one takes the degree `degree` explicitly.
+
 ```julia
-# High-level interface
+# High-level interface (keyword arguments)
 feast_polynomial(coeffs, center, radius; M0=10, fpm=nothing)
 
-# Symmetric polynomial (real interval)
-feast_sypev!(coeffs, Emin, Emax, M0, fpm)
+# Dense drivers (positional; `degree` is coeffs length - 1)
+feast_sypev!(coeffs, degree, center, radius, M0, fpm)   # real coefficients
+feast_hepev!(coeffs, degree, center, radius, M0, fpm)   # complex coefficients
+feast_gepev!(coeffs, degree, center, radius, M0, fpm)   # complex coefficients
 
-# Hermitian polynomial (real interval)
-feast_hepev!(coeffs, Emin, Emax, M0, fpm)
+# Sparse drivers
+feast_scsrpev!(coeffs, degree, center, radius, M0, fpm)  # real coefficients
+feast_hcsrpev!(coeffs, degree, center, radius, M0, fpm)  # complex coefficients
+feast_gcsrpev!(coeffs, degree, center, radius, M0, fpm)  # complex coefficients
 
-# General polynomial (circular contour)
-feast_gepev!(coeffs, center, radius, M0, fpm)
-
-# Sparse variants
-feast_scsrpev!(coeffs, Emin, Emax, M0, fpm)
-feast_hcsrpev!(coeffs, Emin, Emax, M0, fpm)
-feast_gcsrpev!(coeffs, center, radius, M0, fpm)
+# Moment-based drivers
+feast_srcipev!(coeffs, degree, center, radius, M0, fpm)  # real coefficients
+feast_grcipev!(coeffs, degree, center, radius, M0, fpm)  # complex coefficients
 
 # IFEAST-compatible precision aliases
 difeast_srcipev!(coeffs, degree, center, radius, M0, fpm)
@@ -484,19 +494,85 @@ difeast_scsrpev!(coeffs, degree, center, radius, M0, fpm)
 zifeast_gcsrpev!(coeffs, degree, center, radius, M0, fpm)
 ```
 
-### RCI Interface
-
-For custom implementations:
+Every driver above has an `x`-suffixed twin taking an explicit contour as two
+extra trailing arguments, `Zne` and `Wne`:
 
 ```julia
-# Symmetric polynomial RCI
-feast_srcipev!(ijob, N, work, workc, Aq, Sq, fpm, coeffs,
-               Emin, Emax, M0, lambda, q, res)
-
-# General polynomial RCI
-feast_grcipev!(ijob, N, work, workc, Aq, Sq, fpm, coeffs,
-               center, radius, M0, lambda, q, res)
+feast_gepevx!(coeffs, degree, center, radius, M0, fpm, Zne, Wne)
+feast_scsrpevx!(coeffs, degree, center, radius, M0, fpm, Zne, Wne)
 ```
+
+The `*pev!` and `*csrpev!` drivers linearize the polynomial into a companion
+pencil of size `degree * N` and hand it to the general solver. The
+`feast_srcipev!` / `feast_grcipev!` pair instead works directly on the
+polynomial through its contour moments, so it never forms the larger pencil --
+at the cost of needing a contour that is not symmetric about the origin (see
+*Choosing a contour* below).
+
+### RCI Interface
+
+`feast_srcipev!`, `feast_grcipev!` and their `x` twins are each **two** methods.
+Passing the coefficient vector first calls the driver shown above; passing an
+`ijob` reference first calls the reverse-communication kernel, which returns to
+you for each factorization, solve and multiply:
+
+```julia
+feast_grcipev!(ijob, degree, N, Ze, work, workc, Aq, Bq, fpm, epsout, loop,
+               center, radius, M0, lambda, q, mode, res, info; state)
+
+feast_grcipevx!(ijob, degree, N, Ze, work, workc, Aq, Bq, fpm, epsout, loop,
+                center, radius, M0, lambda, q, mode, res, info, Zne, Wne; state)
+```
+
+`state` is a `FeastPolyRCIState{T}` and must be the same object for every call
+in one RCI loop. The kernel emits `Feast_RCI_FACTORIZE`, `Feast_RCI_SOLVE`,
+`Feast_RCI_MULT_A` and `Feast_RCI_DONE`; on `MULT_A` write `P(lambda[j]) * q[:, j]`
+into `workc[:, j]` for `j = 1:mode[]`.
+
+### Choosing a contour
+
+`feast_srcipev!` and `feast_grcipev!` recover eigenvalues from the contour
+moments `A0 = ∮ P(z)⁻¹ dz` and `A1 = ∮ z P(z)⁻¹ dz`. A disc placed so that it
+encloses a root and its negative in equal measure makes their residues cancel:
+`A0` vanishes, the reduced pencil is singular, and nothing is found. Offset the
+disc instead.
+
+```@example poly-contour
+using FeastKit, LinearAlgebra
+
+# P(λ) = λ²I - diag(1, 4, 9), so the spectrum is ±1, ±2, ±3.
+coeffs = [Matrix(Diagonal([-1.0, -4.0, -9.0])), zeros(3, 3),
+          Matrix{Float64}(I, 3, 3)]
+
+fpm = zeros(Int, 64)
+feastinit!(fpm)
+fpm[8] = 32     # full-contour integration points
+fpm[16] = 1     # trapezoidal, the accurate rule on a circle
+
+# A disc holding 2 and 3 but neither -2 nor -3.
+good = feast_srcipev!(coeffs, 2, 2.5 + 0.0im, 1.0, 3, copy(fpm))
+sort(real.(good.lambda[1:good.M]))
+```
+
+Centred on the origin the same disc holds every root together with its
+negative, and the method has nothing to work with:
+
+```@example poly-contour
+bad = feast_srcipev!(coeffs, 2, 0.0 + 0.0im, 4.0, 3, copy(fpm))
+bad.M   # 0
+```
+
+The linearizing drivers (`feast_gepev!`, `feast_scsrpev!`, …) build a companion
+pencil instead of contour moments and are not subject to this restriction.
+
+`M0` may exceed the number of eigenvalues inside the contour — which is the
+normal case, since the count is what you are trying to find out. The kernel
+truncates the moment `S0 = U Σ Wᴴ` at its numerical rank before forming the
+reduced matrix, so the extra width costs work but not accuracy.
+
+Accuracy is governed by how well the quadrature resolves the contour integral
+rather than by refinement loops. If the residual is too large, add contour
+points (`fpm[8]`) before raising the loop count (`fpm[4]`).
 
 ### Parameters
 

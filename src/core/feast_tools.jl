@@ -209,12 +209,24 @@ function zolotarev_point(n::Int, k::Int)
     return xe, we
 end
 
-function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:Real
-    # Ensure fpm parameters are initialized
-    # If fpm[2] is still -111 (uninitialized), apply defaults first
-    # NOTE: This should only happen if feastdefault! wasn't called by the caller
-    if fpm[2] == FEAST_UNINITIALIZED || fpm[2] <= 0
-        @debug "feast_contour calling feastdefault! because fpm[2]=$(fpm[2])"
+# Integer or mixed bounds are natural to type -- feast_contour_expert(-2, 2, 16)
+# used to die with InexactError deep inside, on `T(0.01)`. Promote first: the
+# contour is complex-valued regardless, so there is nothing to gain from an
+# integer element type.
+function feast_contour(Emin::Real, Emax::Real, fpm::Vector{Int})
+    T = float(promote_type(typeof(Emin), typeof(Emax)))
+    return feast_contour(T(Emin), T(Emax), fpm)
+end
+
+function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:AbstractFloat
+    # Resolve defaults if ANY parameter this builder reads is still the
+    # -111 sentinel, not just the point count. Guarding on fpm[2] alone meant
+    # `feastinit!(fpm); fpm[2] = 12` left fpm[18] (ellipse aspect ratio, in
+    # percent) at -111, which mirrors the contour, reverses its orientation and
+    # flips the rational filter to -1 inside.
+    if fpm[2] == FEAST_UNINITIALIZED || fpm[2] <= 0 ||
+       fpm[16] == FEAST_UNINITIALIZED || fpm[18] == FEAST_UNINITIALIZED
+        @debug "feast_contour calling feastdefault!" fpm2=fpm[2] fpm16=fpm[16] fpm18=fpm[18]
         feastdefault!(fpm)
     end
 
@@ -281,9 +293,12 @@ function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:Real
     return FeastContour{T}(Zne, Wne)
 end
 
-function feast_gcontour(Emid::Complex{T}, r::T, fpm::Vector{Int}) where T<:Real
-    # Ensure fpm parameters are initialized
-    if fpm[8] == FEAST_UNINITIALIZED || fpm[8] <= 0
+function feast_gcontour(Emid::Complex{T}, r::T, fpm::Vector{Int}) where T<:AbstractFloat
+    # Same sentinel resolution as feast_contour: fpm[8] alone is not enough,
+    # this builder also reads fpm[16], fpm[18] and the rotation fpm[19].
+    if fpm[8] == FEAST_UNINITIALIZED || fpm[8] <= 0 ||
+       fpm[16] == FEAST_UNINITIALIZED || fpm[18] == FEAST_UNINITIALIZED ||
+       fpm[19] == FEAST_UNINITIALIZED
         feastdefault!(fpm)
     end
 
@@ -368,9 +383,15 @@ function feast_gcontour(Emid::Complex{T}, r::T, fpm::Vector{Int}) where T<:Real
     return FeastContour{T}(Zne, Wne)
 end
 
-# Overload for real Emid (convenience function)
-function feast_gcontour(Emid::T, r::T, fpm::Vector{Int}) where T<:Real
-    return feast_gcontour(Complex{T}(Emid, zero(T)), r, fpm)
+# Convenience overloads: a real center, and integer or mixed-precision inputs.
+function feast_gcontour(Emid::Real, r::Real, fpm::Vector{Int})
+    T = float(promote_type(typeof(Emid), typeof(r)))
+    return feast_gcontour(Complex{T}(Emid, zero(T)), T(r), fpm)
+end
+
+function feast_gcontour(Emid::Complex, r::Real, fpm::Vector{Int})
+    T = float(promote_type(real(typeof(Emid)), typeof(r)))
+    return feast_gcontour(Complex{T}(Emid), T(r), fpm)
 end
 
 function feast_customcontour(Zne::Vector{Complex{T}},
@@ -381,15 +402,19 @@ function feast_customcontour(Zne::Vector{Complex{T}},
     # fpm[15] is for contour schemes (two-sided vs one-sided), not custom contour flag
     # We leave fpm[29] unchanged since this function returns a contour directly
 
-    # Compute weights using trapezoidal rule
+    # Trapezoidal weights for the Cauchy integral (1/2πi) ∮ f(z) dz over the
+    # closed polygon through Zne. The arc length element at node i is the
+    # central difference (Z[i+1] - Z[i-1])/2, and the 1/(2πi) prefactor is what
+    # makes the resulting rational filter evaluate to ~1 inside the contour --
+    # dividing by 2*ne instead left the filter scaled by roughly ne/(2πi).
     Wne = Vector{Complex{T}}(undef, ne)
+    denom = 4 * T(π) * im
 
     for i in 1:ne
         i_prev = i == 1 ? ne : i - 1
         i_next = i == ne ? 1 : i + 1
 
-        # Trapezoidal rule weight
-        Wne[i] = (Zne[i_next] - Zne[i_prev]) / (2 * ne)
+        Wne[i] = (Zne[i_next] - Zne[i_prev]) / denom
     end
 
     return FeastContour{T}(Zne, Wne)
@@ -411,9 +436,16 @@ Generate Feast integration contour with expert-level control matching original F
 # Returns
 - `FeastContour` with integration nodes and weights
 """
-function feast_contour_expert(Emin::T, Emax::T, ne::Int,
+function feast_contour_expert(Emin::Real, Emax::Real, ne::Int,
                             integration_type::Int=0,
-                            ellipse_ratio::Int=100) where T<:Real
+                            ellipse_ratio::Int=100)
+    T = float(promote_type(typeof(Emin), typeof(Emax)))
+    return _feast_contour_expert(T(Emin), T(Emax), ne, integration_type, ellipse_ratio)
+end
+
+function _feast_contour_expert(Emin::T, Emax::T, ne::Int,
+                               integration_type::Int,
+                               ellipse_ratio::Int) where T<:AbstractFloat
     if ne <= 0
         throw(ArgumentError("Number of integration points ne must be positive, got $ne"))
     end
@@ -478,10 +510,13 @@ For eigenvalues outside, it returns ≈0.
 # Returns
 - Vector of rational function values
 """
-function feast_rationalx(Zne::Vector{Complex{T}},
-                         Wne::Vector{Complex{T}},
-                         lambda::Vector{T}) where T<:Real
+function feast_rationalx(Zne::AbstractVector{Complex{T}},
+                         Wne::AbstractVector{Complex{T}},
+                         lambda::AbstractVector{<:Real}) where T<:Real
     ne = length(Zne)
+    ne == length(Wne) ||
+        throw(ArgumentError("Zne and Wne must have the same length; got $(ne) and $(length(Wne)). " *
+                            "The argument order is (Zne, Wne, lambda)."))
     M = length(lambda)
     f = zeros(T, M)
 
@@ -511,7 +546,7 @@ Direct translation of dfeast_rational from Fortran.
 # Returns
 - Vector of rational function values
 """
-function feast_rational(lambda::Vector{T}, Emin::T, Emax::T,
+function feast_rational(lambda::AbstractVector{T}, Emin::T, Emax::T,
                         fpm::Vector{Int}) where T<:Real
     # Generate contour (matches dfeast_rational calling zfeast_contour)
     contour = feast_contour(Emin, Emax, fpm)
@@ -534,6 +569,11 @@ end
 Compute rational function values for complex eigenvalues using custom contour.
 Direct translation of zfeast_grationalx from Fortran.
 
+`lambda` keeps the same element type as the nodes on purpose: there is a second
+method taking `(lambda, Zne, Wne)` in the opposite order, and when every
+argument is a complex vector the two are told apart only by how tightly this
+one binds its type parameters.
+
 # Arguments
 - `Zne`: Integration nodes (full contour)
 - `Wne`: Integration weights (full contour)
@@ -542,10 +582,13 @@ Direct translation of zfeast_grationalx from Fortran.
 # Returns
 - Vector of complex rational function values
 """
-function feast_grationalx(Zne::Vector{Complex{T}},
-                          Wne::Vector{Complex{T}},
-                          lambda::Vector{Complex{T}}) where T<:Real
+function feast_grationalx(Zne::AbstractVector{Complex{T}},
+                          Wne::AbstractVector{Complex{T}},
+                          lambda::AbstractVector{Complex{T}}) where T<:Real
     ne = length(Zne)
+    ne == length(Wne) ||
+        throw(ArgumentError("Zne and Wne must have the same length; got $(ne) and $(length(Wne)). " *
+                            "The argument order is (Zne, Wne, lambda)."))
     M = length(lambda)
     f = Vector{Complex{T}}(undef, M)
 
@@ -576,7 +619,7 @@ Direct translation of zfeast_grational from Fortran.
 # Returns
 - Vector of complex rational function values
 """
-function feast_grational(lambda::Vector{Complex{T}}, Emid::Complex{T},
+function feast_grational(lambda::AbstractVector{Complex{T}}, Emid::Complex{T},
                          r::T, fpm::Vector{Int}) where T<:Real
     # Generate contour (matches zfeast_grational calling zfeast_gcontour)
     contour = feast_gcontour(Emid, r, fpm)
@@ -586,7 +629,7 @@ function feast_grational(lambda::Vector{Complex{T}}, Emid::Complex{T},
 end
 
 # Convenience overloads for type flexibility
-function feast_rationalx(lambda::Vector{T},
+function feast_rationalx(lambda::AbstractVector{T},
                          Zne::AbstractVector{Complex{TZ}},
                          Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
     ne = length(Zne)
@@ -598,7 +641,7 @@ function feast_rationalx(lambda::Vector{T},
         Vector{base}(lambda))
 end
 
-function feast_grationalx(lambda::Vector{Complex{T}},
+function feast_grationalx(lambda::AbstractVector{Complex{T}},
                           Zne::AbstractVector{Complex{TZ}},
                           Wne::AbstractVector{Complex{TW}}) where {T<:Real, TZ<:Real, TW<:Real}
     ne = length(Zne)

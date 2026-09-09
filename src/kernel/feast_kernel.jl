@@ -4,6 +4,30 @@
 # storage-specific work for each ijob request: factorize a shifted system, solve
 # it, multiply by A/B, and then re-enter the kernel with the same state object.
 
+# FEAST's contract is that the trial subspace is wider than the number of
+# eigenvalues in the search region. When every column of the converged subspace
+# turns out to be an in-region Ritz pair, the region held at least M0 of them
+# and there is no way to tell whether more were missed -- so the answer cannot
+# be certified, however small its residual. Report that as `Feast_ERROR_M0`
+# ("subspace too small") rather than as success or plain non-convergence, which
+# is what Fortran FEAST does and what lets a caller retry with a larger M0.
+@inline function _feast_exit_info(converged::Bool, M::Int, M0::Int, N::Int)
+    # M0 == N is the exception: the trial subspace already spans the whole
+    # space, so a full count is complete by construction and cannot be hiding
+    # anything, however many eigenvalues the region holds.
+    M >= M0 && M0 < N && return Int(Feast_ERROR_M0)
+    return converged ? Int(Feast_SUCCESS) : Int(Feast_ERROR_NO_CONVERGENCE)
+end
+
+# Real symmetric / Hermitian FEAST reverse-communication kernel.
+#
+# One refinement loop issues, in order:
+#   FACTORIZE/SOLVE  ne times  -- apply the contour resolvent to the trial subspace
+#   MULT_A, MULT_B             -- build the reduced pencil on the compressed basis
+#   MULT_A, MULT_B             -- evaluate residuals of the Ritz pairs
+# `state` carries the contour, the trial subspace, and which of the two
+# MULT_A/MULT_B pairs is outstanding, so it must be the same object for every
+# call in one loop.
 @views function feast_srci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                             work::Matrix{T}, workc::Matrix{Complex{T}},
                             Aq::Matrix{T}, Sq::Matrix{T}, fpm::Vector{Int},
@@ -20,16 +44,22 @@
 
         if N <= 0
             info[] = Int(Feast_ERROR_N)
+            mode[] = 0
+            ijob[] = Int(Feast_RCI_DONE)
             return
         end
 
         if M0 <= 0 || M0 > N
             info[] = Int(Feast_ERROR_M0)
+            mode[] = 0
+            ijob[] = Int(Feast_RCI_DONE)
             return
         end
 
         if Emin >= Emax
             info[] = Int(Feast_ERROR_EMIN_EMAX)
+            mode[] = 0
+            ijob[] = Int(Feast_RCI_DONE)
             return
         end
 
@@ -45,6 +75,10 @@
         state.Wne = copy(contour.Wne)
         state.ne = length(contour.Zne)
         state.e = 1
+        state.phase = FEAST_PHASE_IDLE
+        state.rank = 0
+        state.M = 0
+        state.active = M0
         state.initialized = true
 
         # Store state in fpm array
@@ -84,73 +118,64 @@
 
         state.Q0 = copy(work[:, 1:M0])
         state.Q_proj = zeros(Complex{T}, N, M0)
-        state.zAq = zeros(Complex{T}, M0, M0)
-        state.zSq = zeros(Complex{T}, M0, M0)
+        state.Qb = Matrix{T}(undef, N, M0)
+        state.AQ = Matrix{T}(undef, N, M0)
         state.perm = Vector{Int}(undef, M0)
         state.q_tmp = Matrix{T}(undef, N, M0)
+        state.lambda_tmp = Vector{T}(undef, M0)
         state.residual = Vector{T}(undef, N)
-        state.moment = Matrix{Complex{T}}(undef, M0, M0)
 
         Ze[] = contour.Zne[1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
         return
     end
 
+    if ijob[] == Int(Feast_RCI_DONE)
+        state.initialized = false
+        state.phase = FEAST_PHASE_IDLE
+        return
+    end
+
+    # Every job other than init continues a loop that init started. A fresh
+    # state object here means the caller forgot to thread the same `state`
+    # through the loop, which used to fail silently with M = 0.
+    if !state.initialized
+        throw(ArgumentError(
+            "feast_srci! called with ijob=$(ijob[]) on an uninitialized state. " *
+            "Pass the same `state=FeastSRCIState{T}()` object to every call in " *
+            "one RCI loop, and start the loop with ijob[] = -1."))
+    end
+
     if ijob[] == Int(Feast_RCI_FACTORIZE)
         # After the caller factorizes Ze*B - A, feed the current trial subspace
         # into work and request the shifted solve.
         ijob[] = Int(Feast_RCI_SOLVE)
-        Q0 = state.Q0
-        copyto!(view(work, :, 1:size(Q0, 2)), Q0)
+        active = state.active
+        copyto!(view(work, :, 1:active), view(state.Q0, :, 1:active))
+        # Columns past the active block are stale from an earlier loop; zero
+        # them so a caller that solves all M0 right-hand sides cannot trip over
+        # leftover Inf/NaN.
+        active < M0 && fill!(view(work, :, (active + 1):M0), zero(T))
         return
     end
 
     if ijob[] == Int(Feast_RCI_SOLVE)
-        if !state.initialized
-            contour = feast_get_custom_contour(T, fpm)
-            if contour === nothing
-                contour = feast_contour(Emin, Emax, fpm)
-            end
-            state.Zne = copy(contour.Zne)
-            state.Wne = copy(contour.Wne)
-            state.ne = length(contour.Zne)
-            state.e = 1
-            state.initialized = true
-        end
         Zne = state.Zne
         Wne = state.Wne
         e = state.e
         ne = state.ne
-
-        Q0 = state.Q0
-        M_current = size(Q0, 2)
+        active = state.active
 
         Q_proj = state.Q_proj
-        zAq = state.zAq
-        zSq = state.zSq
 
-        # Reset accumulators at start of each contour sweep. Every point adds a
-        # weighted resolvent contribution to the spectral projector.
+        # Reset the accumulator at the start of each contour sweep. Every point
+        # adds a weighted resolvent contribution to the spectral projector.
         if e == 1
             fill!(Q_proj, zero(Complex{T}))
-            fill!(zAq, zero(Complex{T}))
-            fill!(zSq, zero(Complex{T}))
         end
 
         weight = 2 * Wne[e]  # Account for conjugate half-contour
-
-        # Accumulate filtered subspace (spectral projector applied to Q0)
-        Q_proj[:, 1:M_current] .+= weight .* workc[:, 1:M_current]
-
-        # Accumulate moment matrices in complex (take real() only after full contour)
-        moment = view(state.moment, 1:M_current, 1:M_current)
-        mul!(moment, adjoint(view(Q0, :, 1:M_current)),
-             view(workc, :, 1:M_current))
-        @inbounds for j in 1:M_current, i in 1:M_current
-            weighted = weight * moment[i, j]
-            zAq[i, j] += weighted
-            zSq[i, j] += Zne[e] * weighted
-        end
+        Q_proj[:, 1:active] .+= weight .* workc[:, 1:active]
 
         fpm[50] = e + 1  # Store incremented counter in fpm
         state.e = e + 1
@@ -159,137 +184,199 @@
             Ze[] = Zne[e+1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return
-        else
-            fpm[50] = 1  # Reset for next refinement loop
-            state.e = 1
+        end
 
-            # Extract real part after full contour summation
-            # (imaginary parts cancel by conjugate symmetry of the half-contour)
-            Aq_block = view(Aq, 1:M_current, 1:M_current)
-            Sq_block = view(Sq, 1:M_current, 1:M_current)
-            _feast_copy_real!(Aq_block, view(zAq, 1:M_current, 1:M_current))
-            _feast_copy_real!(Sq_block, view(zSq, 1:M_current, 1:M_current))
+        fpm[50] = 1  # Reset for next refinement loop
+        state.e = 1
 
+        # The omitted conjugate half of the contour contributes the conjugate of
+        # what was accumulated, so the full projector is the real part.
+        Q_proj_real = view(state.q_tmp, :, 1:active)
+        @inbounds for j in 1:active, i in 1:N
+            Q_proj_real[i, j] = real(Q_proj[i, j])
+        end
+
+        # Rank-compress before Rayleigh-Ritz. Without this an M0 larger than the
+        # number of eigenvalues in the interval yields a rank-deficient pencil
+        # and spurious Ritz pairs.
+        rank = _feast_qr_compress!(state.Qb, state.q_tmp, active;
+                                   rank_tol=sqrt(eps(T)))
+        if rank == 0
+            info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+            ijob[] = Int(Feast_RCI_DONE)
+            fpm[53] = 0
+            state.initialized = false
+            return
+        end
+        state.rank = rank
+
+        # Hand the orthonormal basis to the caller for A*Qb, then B*Qb.
+        copyto!(view(q, :, 1:rank), view(state.Qb, :, 1:rank))
+        state.phase = FEAST_PHASE_PROJECT_A
+        mode[] = rank
+        ijob[] = Int(Feast_RCI_MULT_A)
+        return
+    end
+
+    if ijob[] == Int(Feast_RCI_MULT_A)
+        rank = state.rank
+
+        if state.phase == FEAST_PHASE_PROJECT_A
+            # work holds A*Qb: form the reduced stiffness block Qb' A Qb.
+            Aq_block = view(Aq, 1:rank, 1:rank)
+            mul!(Aq_block, transpose(view(state.Qb, :, 1:rank)),
+                 view(work, :, 1:rank))
+            _feast_symmetric_part!(Aq_block)
+
+            copyto!(view(q, :, 1:rank), view(state.Qb, :, 1:rank))
+            state.phase = FEAST_PHASE_PROJECT_B
+            mode[] = rank
+            ijob[] = Int(Feast_RCI_MULT_B)
+            return
+        end
+
+        if state.phase == FEAST_PHASE_RESIDUAL_A
+            # work holds A*q for the current Ritz vectors; stash it while the
+            # caller computes B*q.
+            M = state.M
+            copyto!(view(state.AQ, :, 1:M), view(work, :, 1:M))
+            state.phase = FEAST_PHASE_RESIDUAL_B
+            mode[] = M
+            ijob[] = Int(Feast_RCI_MULT_B)
+            return
+        end
+
+        throw(ArgumentError("feast_srci!: MULT_A received in unexpected phase $(state.phase)"))
+    end
+
+    if ijob[] == Int(Feast_RCI_MULT_B)
+        if state.phase == FEAST_PHASE_PROJECT_B
+            rank = state.rank
+            Aq_block = view(Aq, 1:rank, 1:rank)
+            Sq_block = view(Sq, 1:rank, 1:rank)
+
+            # work holds B*Qb: form the reduced mass block Qb' B Qb.
+            mul!(Sq_block, transpose(view(state.Qb, :, 1:rank)),
+                 view(work, :, 1:rank))
+            _feast_symmetric_part!(Sq_block)
+
+            local lambda_red, v_red
             try
-                # Solve generalized eigenvalue problem: Sq*v = lambda*Aq*v
-                F = eigen(Sq_block, Aq_block)
-                lambda_scratch = view(res, 1:M_current)
-                _feast_copy_real!(view(lambda, 1:M_current),
-                                  view(F.values, 1:M_current))
-                _feast_copy_real!(Aq_block,
-                                  view(F.vectors, 1:M_current, 1:M_current))
-
-                # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q0
-                Q_proj_real = view(state.q_tmp, :, 1:M_current)
-                @inbounds for j in 1:M_current, i in 1:N
-                    Q_proj_real[i, j] = real(Q_proj[i, j])
-                end
-                mul!(view(q, :, 1:M_current), Q_proj_real, Aq_block)
-
-                # Reorder: put eigenvalues inside the interval first
-                M = 0
-                perm = state.perm
-                for i in 1:M_current
-                    if feast_inside_contour(lambda[i], Emin, Emax)
-                        M += 1
-                        perm[M] = i
+                # Symmetric-definite reduced pencil Aq*v = lambda*Sq*v.
+                F = eigen(Symmetric(Aq_block), Symmetric(Sq_block))
+                lambda_red = F.values
+                v_red = F.vectors
+            catch err
+                if err isa PosDefException || err isa LinearAlgebra.LAPACKException ||
+                   err isa SingularException
+                    @debug "Symmetric-definite reduced pencil failed; using the general solver" exception=err
+                    try
+                        F = eigen(Aq_block, Sq_block)
+                        lambda_red = real.(F.values)
+                        v_red = real.(F.vectors)
+                    catch err2
+                        @debug "Reduced eigenproblem failed" exception=err2
+                        info[] = Int(Feast_ERROR_LAPACK)
+                        ijob[] = Int(Feast_RCI_DONE)
+                        fpm[53] = 0
+                        state.initialized = false
+                        return
                     end
-                end
-                outside_position = M
-                for i in 1:M_current
-                    if !feast_inside_contour(lambda[i], Emin, Emax)
-                        outside_position += 1
-                        perm[outside_position] = i
-                    end
-                end
-
-                copyto!(lambda_scratch, view(lambda, 1:M_current))
-                copyto!(view(state.q_tmp, :, 1:M_current),
-                        view(q, :, 1:M_current))
-                for new_idx in 1:M_current
-                    old_idx = perm[new_idx]
-                    lambda[new_idx] = lambda_scratch[old_idx]
-                    copyto!(view(q, :, new_idx),
-                            view(state.q_tmp, :, old_idx))
-                end
-
-                fpm[52] = M  # Store M in fpm
-                state.M = M
-
-                if M == 0
-                    info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                else
+                    @debug "Reduced eigenproblem failed" exception=err
+                    info[] = Int(Feast_ERROR_LAPACK)
                     ijob[] = Int(Feast_RCI_DONE)
-                    fpm[53] = 0  # Clear initialization flag
+                    fpm[53] = 0
                     state.initialized = false
                     return
                 end
+            end
 
-                # Request caller to compute A * q[:, 1:M] and store result in work[:, 1:M].
-                # The residual will be computed as ||work[:,j] - lambda[j]*q[:,j]||.
-                ijob[] = Int(Feast_RCI_MULT_A)
-                mode[] = M
+            # Ritz vectors on the orthonormal basis, normalized so the residual
+            # below is a genuine relative quantity.
+            mul!(view(q, :, 1:rank), view(state.Qb, :, 1:rank), v_red)
+            copyto!(view(lambda, 1:rank), view(lambda_red, 1:rank))
+            for j in 1:rank
+                nrm = norm(view(q, :, j))
+                nrm > 0 && (view(q, :, j) ./= nrm)
+            end
+
+            M = _feast_reorder_by_interval!(lambda, q, state.perm,
+                                            state.lambda_tmp, state.q_tmp,
+                                            Emin, Emax, rank)
+            fpm[52] = M
+            state.M = M
+
+            if M == 0
+                info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                ijob[] = Int(Feast_RCI_DONE)
+                fpm[53] = 0
+                state.initialized = false
                 return
-            catch err
-                info[] = Int(Feast_ERROR_LAPACK)
+            end
+
+            state.phase = FEAST_PHASE_RESIDUAL_A
+            mode[] = M
+            ijob[] = Int(Feast_RCI_MULT_A)
+            return
+        end
+
+        if state.phase == FEAST_PHASE_RESIDUAL_B
+            # state.AQ holds A*q and work holds B*q for the same Ritz vectors,
+            # so the residual is the true generalized one.
+            M = state.M
+            residual = state.residual
+            AQ = state.AQ
+            for j in 1:M
+                @inbounds for i in 1:N
+                    residual[i] = AQ[i, j] - lambda[j] * work[i, j]
+                end
+                qnorm = norm(view(q, :, j))
+                denom = max(abs(lambda[j]), one(T)) * max(qnorm, eps(T))
+                res[j] = norm(residual) / denom
+            end
+            epsout[] = maximum(res[1:M])
+            state.phase = FEAST_PHASE_IDLE
+
+            eps_tolerance = feast_tolerance(fpm, T)
+            maxloop = fpm[4]
+            converged = epsout[] <= eps_tolerance
+
+            if converged || loop[] >= maxloop
+                feast_sort!(lambda, q, res, M)
+                mode[] = M
+                # Running out of refinement loops is not success: report it so
+                # callers can distinguish a converged answer from a truncated one.
+                info[] = _feast_exit_info(converged, M, M0, N)
                 ijob[] = Int(Feast_RCI_DONE)
                 fpm[53] = 0  # Clear initialization flag
                 state.initialized = false
                 return
             end
-        end
-    end
 
-    if ijob[] == Int(Feast_RCI_MULT_A)
-        # Caller must have computed A * q[:, 1:M] into work[:, 1:M]
-        M = fpm[52]  # Get M from fpm
-
-        residual = state.residual
-        for j in 1:M
-            # Relative residual: ||Ax - λx|| / max(|λ|, 1) to avoid scale dependence
-            @inbounds for i in 1:N
-                residual[i] = work[i, j] - lambda[j] * q[i, j]
-            end
-            res[j] = norm(residual) / max(abs(lambda[j]), one(T))
-        end
-        epsout[] = maximum(res[1:M])
-
-        eps_tolerance = feast_tolerance(fpm, T)
-        maxloop = fpm[4]
-
-        if epsout[] <= eps_tolerance || loop[] >= maxloop
-            feast_sort!(lambda, q, res, M)
-            mode[] = M
-            ijob[] = Int(Feast_RCI_DONE)
-            fpm[53] = 0  # Clear initialization flag
-            state.initialized = false
-            return
-        else
             loop[] += 1
             fill!(Aq, zero(T))
             fill!(Sq, zero(T))
-            # Use full subspace (M0 columns) for next iteration
-            copyto!(view(work, :, 1:M0), view(q, :, 1:M0))
+
+            # Restart from the Ritz vectors spanning the compressed subspace.
+            state.active = state.rank
+            copyto!(view(state.Q0, :, 1:state.rank), view(q, :, 1:state.rank))
 
             state.e = 1
             fpm[50] = 1  # Reset integration point counter
-
-            copyto!(state.Q0, view(work, :, 1:M0))
             Ze[] = state.Zne[1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return
         end
-    end
 
-    if ijob[] == Int(Feast_RCI_DONE)
-        state.initialized = false
-        return
+        throw(ArgumentError("feast_srci!: MULT_B received in unexpected phase $(state.phase)"))
     end
 
     state.initialized = false
     error("FEAST RCI kernel: Invalid job code ijob=$(ijob[]). " *
           "Expected: -1 (init), $(Int(Feast_RCI_FACTORIZE)) (factorize), " *
           "$(Int(Feast_RCI_SOLVE)) (solve), $(Int(Feast_RCI_MULT_A)) (mult_a), " *
-          "or $(Int(Feast_RCI_DONE)) (done)")
+          "$(Int(Feast_RCI_MULT_B)) (mult_b), or $(Int(Feast_RCI_DONE)) (done)")
 end
 
 
@@ -394,6 +481,10 @@ function ifeast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                        Emid, r, M0, lambda, q, mode, res, info; state=state)
 end
 
+# Complex Hermitian FEAST reverse-communication kernel. Same protocol as
+# `feast_srci!`: the contour sweep is followed by MULT_A/MULT_B to build the
+# reduced pencil and a second MULT_A/MULT_B to evaluate residuals. Results of
+# the multiply requests go into `workc`, which is complex.
 @views function feast_hrci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
                             work::Matrix{T}, workc::Matrix{Complex{T}},
                             zAq::Matrix{Complex{T}}, zSq::Matrix{Complex{T}},
@@ -405,22 +496,24 @@ end
 
     if ijob[] == -1
         feastdefault!(fpm)
-        state.initialized = true
 
         info[] = Int(Feast_SUCCESS)
         if N <= 0
             info[] = Int(Feast_ERROR_N)
-            state.initialized = false
+            mode[] = 0
+            ijob[] = Int(Feast_RCI_DONE)
             return
         end
         if M0 <= 0 || M0 > N
             info[] = Int(Feast_ERROR_M0)
-            state.initialized = false
+            mode[] = 0
+            ijob[] = Int(Feast_RCI_DONE)
             return
         end
         if Emin >= Emax
             info[] = Int(Feast_ERROR_EMIN_EMAX)
-            state.initialized = false
+            mode[] = 0
+            ijob[] = Int(Feast_RCI_DONE)
             return
         end
 
@@ -436,6 +529,15 @@ end
         state.maxloop = fpm[4]
         state.e = 1
         state.M = 0
+        state.rank = 0
+        state.active = M0
+        state.phase = FEAST_PHASE_IDLE
+        state.initialized = true
+
+        fpm[50] = 1
+        fpm[51] = length(contour.Zne)
+        fpm[52] = 0
+        fpm[53] = 1
 
         loop[] = 0
 
@@ -464,199 +566,234 @@ end
             _feast_seeded_subspace_complex!(view(workc, :, 1:M0))
         end
 
-        # Save initial subspace for moment accumulation
+        # Save initial subspace for the contour sweep
         state.Q0 = copy(workc[:, 1:M0])
         state.Q_proj = zeros(Complex{T}, N, M0)
+        state.Qb = Matrix{Complex{T}}(undef, N, M0)
+        state.AQ = Matrix{Complex{T}}(undef, N, M0)
         state.perm = Vector{Int}(undef, M0)
         state.q_tmp = Matrix{Complex{T}}(undef, N, M0)
+        state.lambda_tmp = Vector{T}(undef, M0)
         state.residual = Vector{Complex{T}}(undef, N)
-        state.moment = Matrix{Complex{T}}(undef, M0, M0)
 
         Ze[] = state.Zne[1]
         ijob[] = Int(Feast_RCI_FACTORIZE)
         return
     end
 
+    if ijob[] == Int(Feast_RCI_DONE)
+        state.initialized = false
+        state.phase = FEAST_PHASE_IDLE
+        return
+    end
+
+    if !state.initialized
+        throw(ArgumentError(
+            "feast_hrci! called with ijob=$(ijob[]) on an uninitialized state. " *
+            "Pass the same `state=FeastHRCIState{T}()` object to every call in " *
+            "one RCI loop, and start the loop with ijob[] = -1."))
+    end
+
     if ijob[] == Int(Feast_RCI_FACTORIZE)
         ijob[] = Int(Feast_RCI_SOLVE)
-        Q0 = state.Q0
-        M_current = size(Q0, 2)
-        copyto!(view(workc, :, 1:M_current), Q0)
+        active = state.active
+        copyto!(view(workc, :, 1:active), view(state.Q0, :, 1:active))
+        active < M0 && fill!(view(workc, :, (active + 1):M0), zero(Complex{T}))
         return
     end
 
     if ijob[] == Int(Feast_RCI_SOLVE)
-        if !state.initialized
-            contour = feast_get_custom_contour(T, fpm)
-            if contour === nothing
-                contour = feast_contour(Emin, Emax, fpm)
-            end
-            state.Zne = copy(contour.Zne)
-            state.Wne = copy(contour.Wne)
-            state.ne = length(contour.Zne)
-            state.e = 1
-            state.initialized = true
-        end
-
         e = state.e
         ne = state.ne
         Zne = state.Zne
         Wne = state.Wne
-
-        # Use saved initial subspace Q0 and current solution in workc
-        Q0 = state.Q0
-        M_current = size(Q0, 2)
+        active = state.active
 
         Q_proj = state.Q_proj
-
-        # Reset Q_proj at start of new contour loop
         if e == 1
             fill!(Q_proj, zero(Complex{T}))
         end
 
         weight = 2 * Wne[e]
+        Q_proj[:, 1:active] .+= weight .* workc[:, 1:active]
 
-        # Accumulate filtered subspace (spectral projector applied to Q0).
-        # The dotted broadcast fuses into the destination view without a temp.
-        Q_proj[:, 1:M_current] .+= weight .* workc[:, 1:M_current]
-
-        # Accumulate moments Q0' * Y in place. mul! writes into preallocated
-        # scratch, then a fused loop folds the weighted contributions into the
-        # complex accumulators — no per-contour-point M×M matrix is allocated.
-        moment = view(state.moment, 1:M_current, 1:M_current)
-        mul!(moment, adjoint(view(Q0, :, 1:M_current)),
-             view(workc, :, 1:M_current))
-        zweight = weight * Zne[e]
-        @inbounds for j in 1:M_current, i in 1:M_current
-            m = moment[i, j]
-            zAq[i, j] += weight * m
-            zSq[i, j] += zweight * m
-        end
-
+        fpm[50] = e + 1
         state.e = e + 1
 
         if e < ne
             Ze[] = Zne[e+1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return
-        else
-            state.e = 1
-            try
-                M_current = size(state.Q0, 2)
-
-                # Solve reduced generalized eigenproblem: zSq*v = lambda*zAq*v.
-                # eigen allocates F internally (unavoidable); the surrounding
-                # real.() and matmul-result allocations are removed below.
-                F = eigen(view(zSq, 1:M_current, 1:M_current),
-                          view(zAq, 1:M_current, 1:M_current))
-                v_red = F.vectors
-
-                # Eigenvalues are real for Hermitian pencils; copy real parts in
-                # place instead of allocating via real.(F.values).
-                _feast_copy_real!(view(lambda, 1:M_current),
-                                  view(F.values, 1:M_current))
-
-                # Project ALL eigenvectors using the FILTERED subspace (Q_proj),
-                # not original Q0. Q_proj stays complex for Hermitian problems
-                # since their eigenvectors are genuinely complex. mul! writes
-                # straight into q without a temporary product matrix.
-                mul!(view(q, :, 1:M_current),
-                     view(state.Q_proj, :, 1:M_current), v_red)
-
-                # Reorder: in-interval eigenpairs to the front. One membership
-                # test per eigenvalue; outside pairs fill in from the back.
-                M = 0
-                perm = state.perm
-                tail = M_current
-                @inbounds for i in 1:M_current
-                    if feast_inside_contour(lambda[i], Emin, Emax)
-                        M += 1
-                        perm[M] = i
-                    else
-                        perm[tail] = i
-                        tail -= 1
-                    end
-                end
-
-                lambda_scratch = view(res, 1:M_current)
-                copyto!(lambda_scratch, view(lambda, 1:M_current))
-                copyto!(view(state.q_tmp, :, 1:M_current),
-                        view(q, :, 1:M_current))
-                for new_idx in 1:M_current
-                    old_idx = perm[new_idx]
-                    lambda[new_idx] = lambda_scratch[old_idx]
-                    copyto!(view(q, :, new_idx),
-                            view(state.q_tmp, :, old_idx))
-                end
-
-                state.M = M
-
-                if M == 0
-                    info[] = Int(Feast_ERROR_NO_CONVERGENCE)
-                    ijob[] = Int(Feast_RCI_DONE)
-                    state.initialized = false
-                    return
-                end
-
-                # Request caller to compute A * q[:, 1:M] and store result in workc[:, 1:M].
-                # The residual will be computed as ||workc[:,j] - lambda[j]*q[:,j]||.
-                ijob[] = Int(Feast_RCI_MULT_A)
-                mode[] = M
-                return
-            catch err
-                info[] = Int(Feast_ERROR_LAPACK)
-                ijob[] = Int(Feast_RCI_DONE)
-                state.initialized = false
-                return
-            end
         end
+
+        fpm[50] = 1
+        state.e = 1
+
+        # Hermitian eigenvectors are genuinely complex, so unlike the real
+        # kernel the filtered subspace stays complex here.
+        rank = _feast_qr_compress!(state.Qb, state.Q_proj, active;
+                                   rank_tol=sqrt(eps(T)))
+        if rank == 0
+            info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+            ijob[] = Int(Feast_RCI_DONE)
+            fpm[53] = 0
+            state.initialized = false
+            return
+        end
+        state.rank = rank
+
+        copyto!(view(q, :, 1:rank), view(state.Qb, :, 1:rank))
+        state.phase = FEAST_PHASE_PROJECT_A
+        mode[] = rank
+        ijob[] = Int(Feast_RCI_MULT_A)
+        return
     end
 
     if ijob[] == Int(Feast_RCI_MULT_A)
-        # Caller must have computed A * q[:, 1:M] into workc[:, 1:M]
-        M = state.M
-        residual = state.residual
-        for j in 1:M
-            # Relative residual: ||Ax - λx|| / max(|λ|, 1)
-            @inbounds for i in 1:N
-                residual[i] = workc[i, j] - lambda[j] * q[i, j]
-            end
-            res[j] = norm(residual) / max(abs(lambda[j]), one(T))
-        end
-        epsout[] = maximum(res[1:M])
-        eps = state.eps
-        maxloop = state.maxloop
+        rank = state.rank
 
-        if epsout[] <= eps || loop[] >= maxloop
-            feast_sort!(lambda, q, res, M)
-            mode[] = M
-            ijob[] = Int(Feast_RCI_DONE)
-            state.initialized = false
+        if state.phase == FEAST_PHASE_PROJECT_A
+            zAq_block = view(zAq, 1:rank, 1:rank)
+            mul!(zAq_block, adjoint(view(state.Qb, :, 1:rank)),
+                 view(workc, :, 1:rank))
+            _feast_hermitian_part!(zAq_block)
+
+            copyto!(view(q, :, 1:rank), view(state.Qb, :, 1:rank))
+            state.phase = FEAST_PHASE_PROJECT_B
+            mode[] = rank
+            ijob[] = Int(Feast_RCI_MULT_B)
             return
-        else
+        end
+
+        if state.phase == FEAST_PHASE_RESIDUAL_A
+            M = state.M
+            copyto!(view(state.AQ, :, 1:M), view(workc, :, 1:M))
+            state.phase = FEAST_PHASE_RESIDUAL_B
+            mode[] = M
+            ijob[] = Int(Feast_RCI_MULT_B)
+            return
+        end
+
+        throw(ArgumentError("feast_hrci!: MULT_A received in unexpected phase $(state.phase)"))
+    end
+
+    if ijob[] == Int(Feast_RCI_MULT_B)
+        if state.phase == FEAST_PHASE_PROJECT_B
+            rank = state.rank
+            zAq_block = view(zAq, 1:rank, 1:rank)
+            zSq_block = view(zSq, 1:rank, 1:rank)
+
+            mul!(zSq_block, adjoint(view(state.Qb, :, 1:rank)),
+                 view(workc, :, 1:rank))
+            _feast_hermitian_part!(zSq_block)
+
+            local lambda_red, v_red
+            try
+                F = eigen(Hermitian(zAq_block), Hermitian(zSq_block))
+                lambda_red = F.values
+                v_red = F.vectors
+            catch err
+                if err isa PosDefException || err isa LinearAlgebra.LAPACKException ||
+                   err isa SingularException
+                    @debug "Hermitian-definite reduced pencil failed; using the general solver" exception=err
+                    try
+                        F = eigen(zAq_block, zSq_block)
+                        lambda_red = real.(F.values)
+                        v_red = F.vectors
+                    catch err2
+                        @debug "Reduced eigenproblem failed" exception=err2
+                        info[] = Int(Feast_ERROR_LAPACK)
+                        ijob[] = Int(Feast_RCI_DONE)
+                        fpm[53] = 0
+                        state.initialized = false
+                        return
+                    end
+                else
+                    @debug "Reduced eigenproblem failed" exception=err
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    ijob[] = Int(Feast_RCI_DONE)
+                    fpm[53] = 0
+                    state.initialized = false
+                    return
+                end
+            end
+
+            mul!(view(q, :, 1:rank), view(state.Qb, :, 1:rank), v_red)
+            copyto!(view(lambda, 1:rank), view(lambda_red, 1:rank))
+            for j in 1:rank
+                nrm = norm(view(q, :, j))
+                nrm > 0 && (view(q, :, j) ./= nrm)
+            end
+
+            M = _feast_reorder_by_interval!(lambda, q, state.perm,
+                                            state.lambda_tmp, state.q_tmp,
+                                            Emin, Emax, rank)
+            fpm[52] = M
+            state.M = M
+
+            if M == 0
+                info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                ijob[] = Int(Feast_RCI_DONE)
+                fpm[53] = 0
+                state.initialized = false
+                return
+            end
+
+            state.phase = FEAST_PHASE_RESIDUAL_A
+            mode[] = M
+            ijob[] = Int(Feast_RCI_MULT_A)
+            return
+        end
+
+        if state.phase == FEAST_PHASE_RESIDUAL_B
+            M = state.M
+            residual = state.residual
+            AQ = state.AQ
+            for j in 1:M
+                @inbounds for i in 1:N
+                    residual[i] = AQ[i, j] - lambda[j] * workc[i, j]
+                end
+                qnorm = norm(view(q, :, j))
+                denom = max(abs(lambda[j]), one(T)) * max(qnorm, eps(T))
+                res[j] = norm(residual) / denom
+            end
+            epsout[] = maximum(res[1:M])
+            state.phase = FEAST_PHASE_IDLE
+
+            converged = epsout[] <= state.eps
+
+            if converged || loop[] >= state.maxloop
+                feast_sort!(lambda, q, res, M)
+                mode[] = M
+                info[] = _feast_exit_info(converged, M, M0, N)
+                ijob[] = Int(Feast_RCI_DONE)
+                fpm[53] = 0
+                state.initialized = false
+                return
+            end
+
             loop[] += 1
             fill!(zAq, zero(Complex{T}))
             fill!(zSq, zero(Complex{T}))
-            # Use full subspace (M0 columns) for next iteration
-            copyto!(view(workc, :, 1:M0), view(q, :, 1:M0))
-            # Update Q0 for next refinement iteration with full subspace
-            copyto!(state.Q0, view(q, :, 1:M0))
+
+            state.active = state.rank
+            copyto!(view(state.Q0, :, 1:state.rank), view(q, :, 1:state.rank))
+
+            state.e = 1
+            fpm[50] = 1
             Ze[] = state.Zne[1]
             ijob[] = Int(Feast_RCI_FACTORIZE)
             return
         end
-    end
 
-    if ijob[] == Int(Feast_RCI_DONE)
-        state.initialized = false
-        return
+        throw(ArgumentError("feast_hrci!: MULT_B received in unexpected phase $(state.phase)"))
     end
 
     state.initialized = false
     error("FEAST RCI kernel (Hermitian): Invalid job code ijob=$(ijob[]). " *
           "Expected: -1 (init), $(Int(Feast_RCI_FACTORIZE)) (factorize), " *
           "$(Int(Feast_RCI_SOLVE)) (solve), $(Int(Feast_RCI_MULT_A)) (mult_a), " *
-          "or $(Int(Feast_RCI_DONE)) (done)")
+          "$(Int(Feast_RCI_MULT_B)) (mult_b), or $(Int(Feast_RCI_DONE)) (done)")
 end
 
 @views function feast_grci!(ijob::Ref{Int}, N::Int, Ze::Ref{Complex{T}},
@@ -684,16 +821,22 @@ end
 
         if N <= 0
             info[] = Int(Feast_ERROR_N)
+            mode[] = 0
+            ijob[] = Int(Feast_RCI_DONE)
             return
         end
 
         if M0 <= 0 || M0 > N
             info[] = Int(Feast_ERROR_M0)
+            mode[] = 0
+            ijob[] = Int(Feast_RCI_DONE)
             return
         end
 
         if r <= 0
             info[] = Int(Feast_ERROR_EMID_R)
+            mode[] = 0
+            ijob[] = Int(Feast_RCI_DONE)
             return
         end
 
@@ -747,7 +890,12 @@ end
         state.Q0 = copy(workc[:, 1:M0])
         state.perm = Vector{Int}(undef, M0)
         state.workc_tmp = Matrix{Complex{T}}(undef, N, M0)
+        state.Qb = Matrix{Complex{T}}(undef, N, M0)
+        state.AQ = Matrix{Complex{T}}(undef, N, M0)
+        state.rank = M0
+        state.active = M0
         state.residual = Vector{Complex{T}}(undef, N)
+        state.phase = FEAST_PHASE_IDLE
         state.initialized = true
 
         Ze[] = contour.Zne[1]
@@ -755,13 +903,26 @@ end
         return
     end
 
+    if ijob[] == Int(Feast_RCI_DONE)
+        state.initialized = false
+        state.phase = FEAST_PHASE_IDLE
+        return
+    end
+
+    if !state.initialized
+        throw(ArgumentError(
+            "feast_grci! called with ijob=$(ijob[]) on an uninitialized state. " *
+            "Pass the same `state=FeastGRCIState{T}()` object to every call in " *
+            "one RCI loop, and start the loop with ijob[] = -1."))
+    end
+
     # Main Feast iteration loop for general (non-Hermitian) eigenvalue problems
     if ijob[] == Int(Feast_RCI_FACTORIZE)
         # User should factorize (Ze*B - A) for general matrices
         ijob[] = Int(Feast_RCI_SOLVE)
-        Q0 = state.Q0
-        M_current = size(Q0, 2)
-        workc[:, 1:M_current] = Q0
+        active = state.active
+        copyto!(view(workc, :, 1:active), view(state.Q0, :, 1:active))
+        active < M0 && fill!(view(workc, :, (active + 1):M0), zero(Complex{T}))
         return
     end
 
@@ -773,9 +934,10 @@ end
         # Use cached contour from state (set during init and refinement loop reset)
         Zne = state.Zne
         Wne = state.Wne
+        active = state.active
 
         # Accumulate subspace vectors Q
-        for j in 1:M0
+        for j in 1:active
             for i in 1:N
                 q[i, j] += Wne[e] * workc[i, j]
             end
@@ -792,40 +954,58 @@ end
             # All integration points processed
             fpm[50] = 1  # Reset for next refinement loop
 
+            # Rank-compress the filtered subspace. Without this an M0 larger
+            # than the number of eigenvalues inside the contour leaves the
+            # reduced pencil rank deficient, which produces spurious Ritz pairs
+            # and stalls refinement -- the symmetric and Hermitian kernels have
+            # always compressed here.
+            rank = _feast_qr_compress!(state.Qb, q, state.active; rank_tol=sqrt(eps(T)))
+            if rank == 0
+                info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                ijob[] = Int(Feast_RCI_DONE)
+                fpm[53] = 0
+                state.initialized = false
+                return
+            end
+            state.rank = rank
+            copyto!(view(q, :, 1:rank), view(state.Qb, :, 1:rank))
+            rank < state.active && fill!(view(q, :, (rank + 1):state.active), zero(Complex{T}))
+
             # Ask user to compute work = B*Q
             fill!(work, zero(T))
             ijob[] = Int(Feast_RCI_MULT_B)
-            mode[] = M0
+            mode[] = rank
             return
         end
     end
 
-    if ijob[] == Int(Feast_RCI_MULT_B)
+    if ijob[] == Int(Feast_RCI_MULT_B) && state.phase == FEAST_PHASE_IDLE
         # User has computed workc = B*Q
         # Form zBq = Q^H * (B*Q) = Q^H * workc
-        mul!(view(Sq, 1:M0, 1:M0),
-             adjoint(view(q, :, 1:M0)),
-             view(workc, :, 1:M0))
+        rank = state.rank
+        mul!(view(Sq, 1:rank, 1:rank),
+             adjoint(view(q, :, 1:rank)),
+             view(workc, :, 1:rank))
 
         # Now ask user to compute work = A*Q
         fill!(workc, zero(Complex{T}))
         ijob[] = Int(Feast_RCI_MULT_A)
-        mode[] = M0
-        state.mult_a_for_projection = true  # Next MULT_A is for forming zAq
+        mode[] = rank
+        state.phase = FEAST_PHASE_PROJECT_A  # Next MULT_A is for forming zAq
         return
     end
 
     if ijob[] == Int(Feast_RCI_MULT_A)
-        if state.mult_a_for_projection
+        if state.phase == FEAST_PHASE_PROJECT_A
             # Computing zAq = Q^H * A * Q
-            mul!(view(Aq, 1:M0, 1:M0),
-                 adjoint(view(q, :, 1:M0)),
-                 view(workc, :, 1:M0))
-            state.mult_a_for_projection = false
+            rank = state.rank
+            mul!(view(Aq, 1:rank, 1:rank),
+                 adjoint(view(q, :, 1:rank)),
+                 view(workc, :, 1:rank))
 
             # Now solve reduced eigenvalue problem: zAq*v = lambda*zBq*v
             try
-                F = eigen(Aq, Sq)
+                F = eigen(view(Aq, 1:rank, 1:rank), view(Sq, 1:rank, 1:rank))
                 lambda_red = F.values
                 v_red = F.vectors
 
@@ -834,8 +1014,8 @@ end
                 # back. One ellipse membership test per eigenvalue (was two).
                 M = 0
                 perm = state.perm
-                tail = M0
-                for i in 1:M0
+                tail = rank
+                for i in 1:rank
                     if feast_inside_gcontour(lambda_red[i], Emid, r; fpm=fpm)
                         M += 1
                         perm[M] = i
@@ -856,12 +1036,12 @@ end
                     return
                 end
 
-                # Project all M0 eigenvectors to maintain the full subspace:
-                # workc = q * v_red via BLAS (replaces an O(N·M0²) scalar loop).
-                mul!(view(workc, :, 1:M0), view(q, :, 1:M0), v_red)
+                # Project the rank compressed basis onto the Ritz vectors:
+                # workc = q * v_red via BLAS (replaces an O(N·rank²) scalar loop).
+                mul!(view(workc, :, 1:rank), view(q, :, 1:rank), v_red)
 
-                copyto!(state.workc_tmp, view(workc, :, 1:M0))
-                for new_idx in 1:M0
+                copyto!(view(state.workc_tmp, :, 1:rank), view(workc, :, 1:rank))
+                for new_idx in 1:rank
                     old_idx = perm[new_idx]
                     lambda[new_idx] = lambda_red[old_idx]
                     copyto!(view(workc, :, new_idx),
@@ -869,7 +1049,7 @@ end
                 end
 
                 # Normalize eigenvectors
-                for idx in 1:M0
+                for idx in 1:rank
                     q_norm_sq = zero(T)
                     @inbounds for k in 1:N
                         q_norm_sq += abs2(workc[k, idx])
@@ -883,78 +1063,100 @@ end
                     end
                 end
 
-                # Copy all M0 back to q for next iteration
-                copyto!(view(q, :, 1:M0), view(workc, :, 1:M0))
+                # Copy the Ritz vectors back to q for the next iteration
+                copyto!(view(q, :, 1:rank), view(workc, :, 1:rank))
 
-                # Now compute residuals: need A*q_new
+                # Now compute residuals: need A*q_new, then B*q_new
                 fill!(workc, zero(Complex{T}))
                 ijob[] = Int(Feast_RCI_MULT_A)
                 mode[] = M
-                state.mult_a_for_projection = false  # Next MULT_A is for residual
+                state.phase = FEAST_PHASE_RESIDUAL_A
                 return
 
-            catch e
+            catch err
+                @debug "Reduced eigenproblem failed in feast_grci!" exception=err
                 info[] = Int(Feast_ERROR_LAPACK)
                 ijob[] = Int(Feast_RCI_DONE)
                 fpm[53] = 0
                 state.initialized = false
                 return
             end
-        else
-            # Computing residuals
+        elseif state.phase == FEAST_PHASE_RESIDUAL_A
+            # workc holds A*q; stash it while the caller computes B*q so the
+            # residual can be the generalized one rather than ||Aq - lambda q||.
             M = fpm[52]
-
-            residual = state.residual
-            for j in 1:M
-                @inbounds for i in 1:N
-                    residual[i] = workc[i, j] - lambda[j] * q[i, j]
-                end
-                # Relative residual: ||Ax - λx|| / max(|λ|, 1)
-                res[j] = norm(residual) / max(abs(lambda[j]), one(T))
-            end
-
-            max_res = zero(T)
-            @inbounds for j in 1:M
-                max_res = max(max_res, res[j])
-            end
-            epsout[] = max_res
-
-            eps_tolerance = feast_tolerance(fpm, T)
-            maxloop = fpm[4]
-
-            if epsout[] <= eps_tolerance || loop[] >= maxloop
-                feast_sort_general!(lambda, q, res, M)
-                mode[] = M
-                ijob[] = Int(Feast_RCI_DONE)
-                fpm[53] = 0
-                state.initialized = false
-                return
-            else
-                # Start new refinement loop
-                loop[] += 1
-
-                copyto!(state.Q0, view(q, :, 1:M0))
-
-                fill!(Aq, zero(Complex{T}))
-                fill!(Sq, zero(Complex{T}))
-                fill!(q, zero(Complex{T}))
-
-                copyto!(view(workc, :, 1:M0), state.Q0)
-
-                # Re-cache contour for next refinement loop
-                contour = feast_get_custom_contour(T, fpm)
-                if contour === nothing
-                    contour = feast_gcontour(Emid, r, fpm)
-                end
-                state.Zne = copy(contour.Zne)
-                state.Wne = copy(contour.Wne)
-                fpm[50] = 1
-
-                Ze[] = contour.Zne[1]
-                ijob[] = Int(Feast_RCI_FACTORIZE)
-                return
-            end
+            copyto!(view(state.AQ, :, 1:M), view(workc, :, 1:M))
+            fill!(workc, zero(Complex{T}))
+            state.phase = FEAST_PHASE_RESIDUAL_B
+            mode[] = M
+            ijob[] = Int(Feast_RCI_MULT_B)
+            return
+        else
+            throw(ArgumentError("feast_grci!: MULT_A received in unexpected phase $(state.phase)"))
         end
+    end
+
+    if ijob[] == Int(Feast_RCI_MULT_B) && state.phase == FEAST_PHASE_RESIDUAL_B
+        # state.AQ holds A*q and workc holds B*q for the same Ritz vectors.
+        M = fpm[52]
+        state.phase = FEAST_PHASE_IDLE
+
+        residual = state.residual
+        AQ = state.AQ
+        for j in 1:M
+            @inbounds for i in 1:N
+                residual[i] = AQ[i, j] - lambda[j] * workc[i, j]
+            end
+            qnorm = norm(view(q, :, j))
+            denom = max(abs(lambda[j]), one(T)) * max(qnorm, eps(T))
+            res[j] = norm(residual) / denom
+        end
+
+        max_res = zero(T)
+        @inbounds for j in 1:M
+            max_res = max(max_res, res[j])
+        end
+        epsout[] = max_res
+
+        eps_tolerance = feast_tolerance(fpm, T)
+        maxloop = fpm[4]
+        converged = epsout[] <= eps_tolerance
+
+        if converged || loop[] >= maxloop
+            feast_sort_general!(lambda, q, res, M)
+            mode[] = M
+            info[] = _feast_exit_info(converged, M, M0, N)
+            ijob[] = Int(Feast_RCI_DONE)
+            fpm[53] = 0
+            state.initialized = false
+            return
+        end
+
+        # Start new refinement loop from the compressed Ritz basis.
+        loop[] += 1
+
+        rank = state.rank
+        copyto!(view(state.Q0, :, 1:rank), view(q, :, 1:rank))
+        state.active = rank
+
+        fill!(Aq, zero(Complex{T}))
+        fill!(Sq, zero(Complex{T}))
+        fill!(q, zero(Complex{T}))
+
+        copyto!(view(workc, :, 1:rank), view(state.Q0, :, 1:rank))
+
+        # Re-cache contour for next refinement loop
+        contour = feast_get_custom_contour(T, fpm)
+        if contour === nothing
+            contour = feast_gcontour(Emid, r, fpm)
+        end
+        state.Zne = copy(contour.Zne)
+        state.Wne = copy(contour.Wne)
+        fpm[50] = 1
+
+        Ze[] = contour.Zne[1]
+        ijob[] = Int(Feast_RCI_FACTORIZE)
+        return
     end
 
     # Safety check: if we reach here, ijob has an invalid value
@@ -985,14 +1187,66 @@ end
 
 function _ensure_poly_rci_state!(state::FeastPolyRCIState{T}, N::Int,
                                  M0::Int) where T<:Real
-    if size(state.moment) != (M0, M0)
-        state.moment = Matrix{Complex{T}}(undef, M0, M0)
+    if size(state.S0) != (N, M0)
+        state.S0 = zeros(Complex{T}, N, M0)
+        state.S1 = zeros(Complex{T}, N, M0)
+        state.basis = Matrix{Complex{T}}(undef, N, M0)
     end
     if length(state.residual) != N
         state.residual = Vector{Complex{T}}(undef, N)
     end
+    state.rank = 0
     state.initialized = true
     return state
+end
+
+"""
+    _feast_beyn_reduce!(state, rank_tol)
+
+Beyn's reduction of the contour moments held in `state`. Truncates
+`S0 = U Σ Wᴴ` at `rank_tol` (relative to the leading singular value) and returns
+`(k, B)` where `k` is the detected rank and `B = Uₖᴴ S1 Wₖ Σₖ⁻¹` is the `k x k`
+matrix whose eigenvalues are the eigenvalues of `P` inside the contour. The
+leading `k` columns of `state.basis` hold `Uₖ`, so an eigenvector `s` of `B`
+lifts to the eigenvector `Uₖ s` of `P`.
+
+Returns `(0, nothing)` when the moments are numerically zero, which is what a
+contour enclosing a root together with its negative produces: the two residues
+cancel and there is nothing to recover.
+"""
+function _feast_beyn_reduce!(state::FeastPolyRCIState{T}, rank_tol::T) where T<:Real
+    S0 = state.S0
+    S1 = state.S1
+    F = svd(S0)
+    sigma = F.S
+    isempty(sigma) && return 0, nothing
+
+    scale = sigma[1]
+    scale > zero(T) || return 0, nothing
+    threshold = max(rank_tol, eps(T) * maximum(size(S0))) * scale
+    cand = 0
+    @inbounds for value in sigma
+        value > threshold || break
+        cand += 1
+    end
+    cand == 0 && return 0, nothing
+
+    k = cand
+
+    Uk = view(F.U, :, 1:k)
+    Wk = view(F.V, :, 1:k)
+    copyto!(view(state.basis, :, 1:k), Uk)
+    state.rank = k
+
+    # B = Ukᴴ S1 Wk Σk⁻¹
+    B = (Uk' * S1) * Wk
+    @inbounds for j in 1:k
+        inv_sigma = inv(sigma[j])
+        for i in 1:k
+            B[i, j] *= inv_sigma
+        end
+    end
+    return k, B
 end
 
 function feast_grcipevx!(ijob::Ref{Int}, dmax::Int, N::Int, Ze::Ref{Complex{T}},
@@ -1085,21 +1339,29 @@ end
 
         if dmax < 1
             info[] = Int(Feast_ERROR_INTERNAL)
+            mode[] = 0
+            ijob[] = Int(Feast_RCI_DONE)
             return
         end
 
         if N <= 0
             info[] = Int(Feast_ERROR_N)
+            mode[] = 0
+            ijob[] = Int(Feast_RCI_DONE)
             return
         end
 
         if M0 <= 0
             info[] = Int(Feast_ERROR_M0)
+            mode[] = 0
+            ijob[] = Int(Feast_RCI_DONE)
             return
         end
 
         if r <= zero(T)
             info[] = Int(Feast_ERROR_EMID_R)
+            mode[] = 0
+            ijob[] = Int(Feast_RCI_DONE)
             return
         end
 
@@ -1156,15 +1418,20 @@ end
             _ensure_poly_rci_state!(state, N, M0)
         end
 
-        moment = state.moment
-        mul!(moment, adjoint(view(work, :, 1:M0)), view(workc, :, 1:M0))
+        # Accumulate Beyn's moments at full width. workc holds P(z_e)⁻¹ Q.
+        S0 = state.S0
+        S1 = state.S1
+        if e == 1
+            fill!(S0, zero(Complex{T}))
+            fill!(S1, zero(Complex{T}))
+        end
         weight = Wne[e]
         zweight = weight * Zne[e]
         @inbounds for col in 1:M0
-            for row in 1:M0
-                moment_val = moment[row, col]
-                Aq[row, col] += weight * moment_val
-                Bq[row, col] += zweight * moment_val
+            for row in 1:N
+                val = workc[row, col]
+                S0[row, col] += weight * val
+                S1[row, col] += zweight * val
             end
         end
 
@@ -1177,18 +1444,42 @@ end
 
         fpm[50] = 1  # Reset for next refinement loop
         try
-            F = eigen(view(Aq, 1:M0, 1:M0), view(Bq, 1:M0, 1:M0))
+            # Truncate S0 at its numerical rank before forming the reduced
+            # matrix. The projected M0 x M0 form this replaced was singular
+            # whenever M0 exceeded the number of eigenvalues inside the
+            # contour, which put the residual on a floor that extra contour
+            # points made worse rather than better.
+            k, B_red = _feast_beyn_reduce!(state, eps(T))
+            if k == 0
+                info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                mode[] = 0
+                ijob[] = Int(Feast_RCI_DONE)
+                fpm[52] = 0
+                fpm[53] = 0
+                state.initialized = false
+                return
+            end
+
+            # Keep the reduced matrix visible to callers that inspect the RCI
+            # workspace. Bq is unused by this kernel now that the moments live
+            # in the state object at full width.
+            copyto!(view(Aq, 1:k, 1:k), B_red)
+
+            F = eigen(B_red)
             lambda_red = F.values
             v_red = F.vectors
 
             M = 0
-            work_basis = view(work, :, 1:M0)
-            for i in 1:M0
+            basis = view(state.basis, :, 1:k)
+            for i in 1:k
                 if feast_inside_gcontour(lambda_red[i], Emid, r; fpm=fpm)
                     M += 1
                     lambda[M] = lambda_red[i]
                     q_col = view(q, :, M)
-                    mul!(q_col, work_basis, view(v_red, :, i))
+                    # Beyn lifts an eigenvector of the reduced matrix back with
+                    # the truncated left singular basis, not with the raw trial
+                    # block.
+                    mul!(q_col, basis, view(v_red, :, i))
                     q_norm_sq = zero(T)
                     @inbounds for row in 1:N
                         q_norm_sq += abs2(q[row, M])
@@ -1205,7 +1496,9 @@ end
 
             if M == 0
                 info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                mode[] = 0
                 ijob[] = Int(Feast_RCI_DONE)
+                fpm[52] = 0
                 fpm[53] = 0  # Clear initialization flag
                 state.initialized = false
                 return
@@ -1216,6 +1509,7 @@ end
             ijob[] = Int(Feast_RCI_MULT_A)
             return
         catch err
+            @debug "Polynomial reduced eigenproblem failed" exception=err
             info[] = Int(Feast_ERROR_LAPACK)
             ijob[] = Int(Feast_RCI_DONE)
             fpm[53] = 0  # Clear initialization flag
@@ -1230,23 +1524,28 @@ end
         if !state.initialized
             _ensure_poly_rci_state!(state, N, M0)
         end
-        residual = state.residual
         for j in 1:M
-            @inbounds for row in 1:N
-                residual[row] = workc[row, j] - lambda[j] * q[row, j]
-            end
-            # Relative residual: normalize by max(|λ|, 1)
-            res[j] = norm(residual) / max(abs(lambda[j]), one(T))
+            # The caller writes P(lambda_j) * q_j into workc, so the polynomial
+            # residual is that column's norm -- there is no separate lambda*q
+            # term to subtract, unlike the linear kernels.
+            qnorm = norm(view(q, :, j))
+            denom = max(abs(lambda[j]), one(T)) * max(qnorm, eps(T))
+            res[j] = norm(view(workc, :, j)) / denom
             max_res = max(max_res, res[j])
         end
         epsout[] = max_res
 
         eps_tolerance = feast_tolerance(fpm, T)
         maxloop = max(1, fpm[4])
+        converged = epsout[] <= eps_tolerance
 
-        if epsout[] <= eps_tolerance || loop[] >= maxloop
+        if converged || loop[] >= maxloop
             feast_sort_general!(lambda, q, res, M)
             mode[] = M
+            # Not _feast_exit_info: M0 here is the width of Beyn's probe block,
+            # not a FEAST trial subspace, and the rank truncation already reports
+            # the count. M == M0 carries no 'subspace too small' meaning.
+            info[] = converged ? Int(Feast_SUCCESS) : Int(Feast_ERROR_NO_CONVERGENCE)
             ijob[] = Int(Feast_RCI_DONE)
             fpm[53] = 0  # Clear initialization flag
             state.initialized = false

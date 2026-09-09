@@ -21,31 +21,28 @@ FeastKit.jl requires Julia 1.6 or later. Install Julia from [julialang.org](http
 
 ### Installing FeastKit.jl
 
-```julia
-# Start Julia and enter package mode with ]
+This is a REPL session, not a script — `]` switches to package mode and
+backspace returns to Julia mode.
+
+```julia-repl
 julia> ]
 
-# Install FeastKit.jl
 pkg> add FeastKit
 
-# Or for the development version:
-pkg> add https://github.com/your-repo/FeastKit.jl.git
+pkg> add https://github.com/subhk/FeastKit.jl.git   # development version
 
-# Return to Julia mode
-pkg> <backspace>
-
-# Load the package
 julia> using FeastKit
 ```
 
 ### Verify Installation
 
-```julia
+```@example verify
 using FeastKit, LinearAlgebra
 
-# Create a small test problem
+# Create a small test problem. Its eigenvalues are 1 and 3, so this interval
+# has to reach past 3 to contain both.
 A = [2.0 -1.0; -1.0 2.0]
-result = feast(A, (0.5, 2.5))
+result = feast(A, (0.5, 3.5))
 
 println("Installation successful! Found $(result.M) eigenvalues.")
 ```
@@ -60,7 +57,7 @@ Expected output: `Installation successful! Found 2 eigenvalues.`
 
 Let's solve a classic eigenvalue problem step by step:
 
-```julia
+```@example first
 using FeastKit, LinearAlgebra
 
 # Step 1: Create a matrix
@@ -70,31 +67,39 @@ A = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))
 
 println("Created $(n)×$(n) tridiagonal matrix")
 println("Matrix A has eigenvalues between $(2-2) and $(2+2)")
+
+# Exact eigenvalues, so we can say up front how many are in any interval
+exact(k) = 2 - 2cos(k * π / (n + 1))
 ```
 
-```julia
+```@example first
 # Step 2: Define search interval
-# We want eigenvalues between 0.5 and 1.5
-Emin, Emax = 0.5, 1.5
+# This matrix's eigenvalues are 2 - 2cos(kπ/(n+1)). Near λ = 1 they are spaced
+# about 0.06 apart, so this window holds 6 of them -- comfortably under the
+# M0 = 10 we ask for below. Choosing an interval without checking how many
+# eigenvalues it contains is the most common way to make FEAST fail to
+# converge: M0 must be at least that count.
+Emin, Emax = 0.8094, 1.1846
 
 println("Searching for eigenvalues in [$Emin, $Emax]")
 ```
 
-```julia
+```@example first
 # Step 3: Run FeastKit
 # M0 = maximum number of eigenvalues to find
 result = feast(A, (Emin, Emax), M0=10)
 
 println("FeastKit completed:")
 println("  Status: $(result.info == 0 ? "Success" : "Error")")
+println("  Expected: $(count(k -> Emin <= exact(k) <= Emax, 1:n)) eigenvalues")
 println("  Found: $(result.M) eigenvalues")
 println("  Iterations: $(result.loop)")
 ```
 
-```julia
+```@example first
 # Step 4: Examine results
 if result.M > 0
-    println("\\nEigenvalues found:")
+    println("\nEigenvalues found:")
     for i in 1:result.M
         println("  λ[$i] = $(result.lambda[i])")
     end
@@ -138,8 +143,10 @@ using FeastKit, SparseArrays
 n = 10000
 A = spdiagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))
 
-# Find the 10 smallest eigenvalues  
-result = feast(A, (0.001, 0.1), M0=10)
+# Find the 10 smallest eigenvalues. They are 2 - 2cos(kπ/(n+1)), so λ₁₀ is
+# about 9.9e-6 -- an interval like (0.001, 0.1) would sit *above* all ten and
+# still contain ~900 others.
+result = feast(A, (0.0, 1.04e-5), M0=12)
 println("Smallest eigenvalues: $(result.lambda[1:result.M])")
 ```
 
@@ -194,7 +201,7 @@ n = 1_000_000  # Very large!
 A_op = LinearOperator{Float64}(A_multiply!, (n, n), issymmetric=true)
 
 # Solve exactly the same way
-result = feast(A_op, (Emin, Emax), M0=10, solver=:cg)
+result = feast(A_op, (Emin, Emax), M0=10, solver=:gmres)
 ```
 
 ### Pattern 4: Complex Eigenvalues
@@ -283,12 +290,23 @@ println("Orthogonality error: $orthogonality_error")
 **Problem**: You need the 10 eigenvalues closest to 5.0
 
 ```julia
-using FeastKit
+using FeastKit, LinearAlgebra
 
-# Strategy: Search in a small interval around 5.0
+# A matrix whose spectrum straddles 5.0
+n = 200
+W = Matrix(Diagonal(range(0.0, 10.0; length=n)))
+
+# Strategy: widen a narrow interval around 5.0 until it holds 10 eigenvalues,
+# keeping M0 at least that large -- M0 below the count means FEAST cannot
+# converge, whatever the tolerance.
 center = 5.0
 width = 0.1
-result = feast(A, (center - width, center + width), M0=15)
+inside(w) = count(λ -> center - w <= λ <= center + w, diag(W))
+while inside(width) < 10
+    width *= 1.5
+end
+
+result = feast(W, (center - width, center + width), M0 = 2 * inside(width))
 
 if result.M >= 10
     closest_10 = result.lambda[1:10]
@@ -353,7 +371,7 @@ A_op = LinearOperator{Float64}(matvec!, (n, n), issymmetric=true)
 
 # Use appropriate iterative solver
 result = feast(A_op, (Emin, Emax), M0=10,
-              solver=:cg,  # or :gmres, :bicgstab
+              solver=:gmres,  # or :bicgstab
               solver_opts=(rtol=1e-6, maxiter=1000))
 
 # Monitor memory usage
@@ -397,7 +415,7 @@ result = feast(A, B, (Emin, Emax), M0=10)
 
 # Matrix-free
 A_op = LinearOperator{Float64}(matvec!, (n,n), issymmetric=true)
-result = feast(A_op, (Emin, Emax), M0=10, solver=:cg)
+result = feast(A_op, (Emin, Emax), M0=10, solver=:gmres)
 
 # Complex eigenvalues
 result = feast_general(A, B, center, radius, M0=10)

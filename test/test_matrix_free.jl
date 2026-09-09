@@ -156,11 +156,14 @@ end
             end
         end
         
-        result = feast(A_op, B_op, interval, M0=8, 
+        # The interval holds exactly 8 eigenvalues, so M0 must exceed 8: with
+        # M0 = 8 the trial subspace is saturated and FEAST cannot certify that
+        # a ninth was not missed, which it now reports as Feast_ERROR_M0.
+        result = feast(A_op, B_op, interval, M0=12,
                       solver=mock_iterative_solver, tol=1e-8)
-        
+
         @test result.info == 0
-        @test result.M > 0
+        @test result.M == 8
         
         # Verify eigenvalues are in the correct range
         for i in 1:result.M

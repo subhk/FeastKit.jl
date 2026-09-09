@@ -23,7 +23,12 @@ FeastKit supports three parallel backends:
 |---------|----------|-------|-------------|
 | **Threading** | Single node, shared memory | `julia --threads=N` | Up to ~16 cores |
 | **Distributed** | Multi-process Julia | `addprocs(N)` | Multiple nodes |
-| **MPI** | HPC clusters | MPI installation | 1000s of cores |
+| **MPI** | HPC clusters | MPI installation + `using MPI` | 1000s of cores |
+
+MPI is a weak dependency provided by the `FeastKitMPIExt` package extension:
+`using MPI` alongside `using FeastKit` is what gives `mpi_feast` and the other
+`mpi_feast_*` drivers their methods. Threading and `Distributed` need no extra
+packages. Iterative (IFEAST) solves additionally need `using Krylov`.
 
 High-level production support is intentionally narrower than the lower-level
 interfaces:
@@ -31,7 +36,7 @@ interfaces:
 | Backend | Supported high-level problems | Fallback behavior |
 |---------|--------------------------------|-------------------|
 | `:serial` | Real symmetric, complex Hermitian, and general problems | None |
-| `:threads` | Sparse real symmetric standard/generalized problems | Explicit requests throw on unsupported inputs |
+| `:threads` | Dense **and** sparse real symmetric standard/generalized problems | Explicit requests throw on unsupported inputs |
 | `:distributed` | Sparse real symmetric standard/generalized problems with workers | Explicit requests throw if workers are missing |
 | `:mpi` | Real symmetric standard/generalized plus dense/sparse complex Hermitian/general problems with an MPI communicator | Explicit requests throw if MPI is unavailable or storage is unsupported |
 | `:auto` | Best available supported backend | Falls back to serial when needed |
@@ -111,23 +116,28 @@ julia
 
 ### Usage
 
+Run this in a session started with more than one thread (see above);
+`backend=:threads` throws in a single-threaded session rather than pretending to
+parallelise.
+
 ```julia
-using FeastKit, LinearAlgebra
+using FeastKit, LinearAlgebra, SparseArrays
 
 # Create test problem
 n = 5000
 A = SymTridiagonal(2.0*ones(n), -ones(n-1))
 B = Matrix(1.0I, n, n)
 
-# Threaded computation. The threaded high-level backend currently supports
-# sparse real symmetric problems. Explicit backend requests throw if the
-# backend cannot run the problem.
+# The eigenvalues are 2 - 2cos(kπ/(n+1)): (0.5, 1.5) would hold 948 of them,
+# far more than M0. Bracket the ten smallest.
+interval = (0.0, 4.15e-5)
+
 A_sparse = sparse(A)
 B_sparse = sparse(B)
-result = feast(A_sparse, B_sparse, (0.5, 1.5), M0=20, backend=:threads)
+result = feast(A_sparse, B_sparse, interval, M0=20, backend=:threads)
 
 # Use automatic selection when serial fallback is acceptable.
-result = feast(A_sparse, B_sparse, (0.5, 1.5), M0=20, backend=:auto)
+result = feast(A_sparse, B_sparse, interval, M0=20, backend=:auto)
 
 println("Found $(result.M) eigenvalues using $(Threads.nthreads()) threads")
 ```
@@ -139,7 +149,8 @@ For more control, use the parallel RCI (Reverse Communication Interface):
 ```julia
 using FeastKit
 
-# Create parallel state
+# ne = contour points, M0 = subspace size, N = matrix size; work/workc/Aq/Sq,
+# lambda/q/res are the caller-owned RCI buffers (see `FeastWorkspaceReal`).
 state = ParallelFeastState{Float64}(ne, M0, use_parallel=true, use_threads=true)
 
 # RCI loop
@@ -183,10 +194,13 @@ println("Number of workers: $(nworkers())")
 
 ### Usage
 
+Add workers first (see above); `backend=:distributed` throws when there are
+none rather than silently running serial.
+
 ```julia
 using Distributed
 @everywhere using FeastKit
-using LinearAlgebra
+using LinearAlgebra, SparseArrays
 
 # Create problem on main process
 n = 10000
@@ -205,9 +219,11 @@ println("Found $(result.M) eigenvalues using $(nworkers()) workers")
 FeastKit distributes contour points across workers:
 
 ```julia
-# Show distribution
+# Show distribution. The worker/thread count comes from the session, so the
+# only argument is the number of contour points; `use_threads` picks which
+# layout to report.
 using FeastKit
-pfeast_show_distribution(16, nworkers())
+pfeast_show_distribution(16; use_threads=false)
 # Worker 1: points 1-4
 # Worker 2: points 5-8
 # Worker 3: points 9-12
@@ -397,11 +413,20 @@ MPI.Finalize()
 
 The number of integration points should match or exceed your worker count:
 
+Needs workers, as above.
+
 ```julia
+using FeastKit, Distributed, SparseArrays, LinearAlgebra
+
+n = 2000
+A = spdiagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))
+B = sparse(1.0I, n, n)
+interval = (0.0, 2.5e-5)   # the ten smallest eigenvalues
+
 # Rule of thumb: points = 2 × workers
 fpm = zeros(Int, 64)
 feastinit!(fpm)
-fpm[2] = 2 * nworkers()  # Set integration points
+fpm[2] = max(2 * nworkers(), 8)  # Set integration points
 
 result = feast(A, B, interval, M0=20, fpm=fpm, backend=:distributed)
 ```
@@ -411,10 +436,15 @@ result = feast(A, B, interval, M0=20, fpm=fpm, backend=:distributed)
 Compare parallel performance:
 
 ```julia
-using FeastKit
+using FeastKit, SparseArrays, LinearAlgebra
 
-# Compare backends
-feast_parallel_comparison(A, B, interval, M0=20)
+n = 2000
+A = spdiagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))
+B = sparse(1.0I, n, n)
+interval = (0.0, 2.5e-5)
+
+# Compare backends (M0 is positional here)
+feast_parallel_comparison(A, B, interval, 20)
 
 # Detailed benchmarks
 pfeast_rci_benchmark(A, B, interval, M0, compare_serial=true)
@@ -501,12 +531,15 @@ MPI.install_mpiexecjl()
 2. **Increase problem size**: Small problems have too much communication overhead
 3. **Use matrix-free**: For very large problems, matrix-free with parallel linear solvers scales better
 
-```julia
-# Monitor parallel efficiency
-@time result_serial = feast(A, B, interval, M0=20, backend=:serial)
-@time result_parallel = feast(A, B, interval, M0=20, backend=:threads)
+Needs a multi-threaded session.
 
-speedup = result_serial.time / result_parallel.time
+```julia
+# Monitor parallel efficiency. FeastResult has no timing field, so measure the
+# calls themselves rather than reading `result.time`.
+t_serial   = @elapsed result_serial   = feast(A, B, interval, M0=20, backend=:serial)
+t_parallel = @elapsed result_parallel = feast(A, B, interval, M0=20, backend=:threads)
+
+speedup = t_serial / t_parallel
 efficiency = speedup / Threads.nthreads()
 println("Speedup: $(speedup)x, Efficiency: $(efficiency * 100)%")
 ```
@@ -516,6 +549,8 @@ println("Speedup: $(speedup)x, Efficiency: $(efficiency * 100)%")
 ## API Reference
 
 ### High-Level Functions
+
+Signature catalogue -- `A`, `B`, `interval`, `M0` and the RCI buffers are yours:
 
 ```julia
 # Automatic backend selection
@@ -550,7 +585,7 @@ feast_parallel_info()
 mpi_available()
 
 # Distribution helpers
-pfeast_show_distribution(ne, nworkers)
+pfeast_show_distribution(ne; use_threads=true)
 determine_parallel_backend(parallel, comm)
 ```
 

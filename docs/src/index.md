@@ -43,17 +43,20 @@ Pkg.add(url="https://github.com/subhk/FeastKit.jl")
 
 ### Your First FeastKit Calculation
 
-```julia
+```@example quickstart
 using FeastKit, LinearAlgebra
 
 # Create a test matrix (1000x1000 tridiagonal)
 n = 1000
 A = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))
 
-# Find eigenvalues between 0.5 and 1.5
-result = feast(A, (0.5, 1.5), M0=10)
+# Find eigenvalues near λ = 1. The eigenvalues here are 2 - 2cos(kπ/(n+1)),
+# spaced about 3e-3 apart near λ = 1, so this window holds 8 of them. M0 must
+# be at least the number of eigenvalues in the interval, or FEAST cannot
+# converge and returns info = 5.
+result = feast(A, (0.9801, 1.0182), M0=10)
 
-println("Found $(result.M) eigenvalues:")
+println("Found $(result.M) eigenvalues:")   # 8
 println(result.lambda[1:result.M])
 ```
 
@@ -63,7 +66,7 @@ println(result.lambda[1:result.M])
 
 For very large problems, use matrix-free operations:
 
-```julia
+```@example quickstart
 # Define matrix-vector multiplication (no explicit matrix needed!)
 function A_mul!(y, x)
     n = length(x)
@@ -77,8 +80,35 @@ end
 # Create matrix-free operator
 A_op = LinearOperator{Float64}(A_mul!, (n, n), issymmetric=true)
 
+# Supply the shifted solve too. Without a `solver=`, FEAST falls back to
+# unpreconditioned GMRES, which stalls when the contour hugs a dense stretch of
+# the spectrum. Here z*I - A is tridiagonal, so one O(n) Thomas sweep per
+# right-hand side is both exact and fast -- that is the real payoff of the
+# matrix-free interface.
+function tridiagonal_solve!(Y, z, X)
+    d0 = ComplexF64(z) - 2          # diagonal of z*I - A
+    c = Vector{ComplexF64}(undef, n - 1)
+    d = Vector{ComplexF64}(undef, n)
+    for j in axes(X, 2)
+        c[1] = 1 / d0
+        d[1] = X[1, j] / d0
+        for i in 2:n
+            m = d0 - c[i - 1]
+            i < n && (c[i] = 1 / m)
+            d[i] = (X[i, j] - d[i - 1]) / m
+        end
+        Y[n, j] = d[n]
+        for i in (n - 1):-1:1
+            Y[i, j] = d[i] - c[i] * Y[i + 1, j]
+        end
+    end
+    return Y
+end
+
 # Solve the same way!
-result = feast(A_op, (0.5, 1.5), M0=10)
+result = feast(A_op, (0.9801, 1.0182), M0=10, solver=tridiagonal_solve!)
+
+println("Found $(result.M) eigenvalues, info = $(result.info)")
 ```
 
 ---
@@ -87,7 +117,7 @@ result = feast(A_op, (0.5, 1.5), M0=10)
 
 ### Dense Matrix Eigenvalues
 
-```julia
+```@example dense
 using FeastKit, LinearAlgebra
 
 # Create a random symmetric matrix
@@ -106,40 +136,53 @@ end
 
 ### Sparse Matrix Problems
 
-```julia
-using FeastKit, SparseArrays
+```@example sparse
+using FeastKit, SparseArrays, LinearAlgebra
 
 # Large sparse symmetric matrix
-n = 10000
+n = 5000
 A = sprand(n, n, 0.001)  # 0.1% density
 A = A + A' + 5*I         # Make symmetric positive definite
 
-# Find largest eigenvalues
-result = feast(A, (4.8, 5.2), M0=8)
+# Bracket the top of the spectrum, which is well separated from the bulk near
+# 5. Estimate it first rather than guessing an interval width.
+function power_iteration_max(S, N)
+    v = randn(N)
+    for _ in 1:100
+        v = S * v
+        v ./= norm(v)
+    end
+    return dot(v, S * v)
+end
+λ_max = power_iteration_max(A, n)
 
-println("Largest eigenvalues: $(result.lambda[1:result.M])")
+result = feast(A, (λ_max - 0.1, λ_max + 0.1), M0=8)
+
+println("Largest eigenvalue: $(result.lambda[1:result.M])")
 ```
 
 ### Generalized Eigenvalue Problem
 
-```julia
-using FeastKit
+```@example generalized
+using FeastKit, LinearAlgebra
 
 # Create matrices A and B
 n = 1000
 A = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))
 B = SymTridiagonal(3.0 * ones(n), -0.5 * ones(n-1))
 
-# Solve A*x = λ*B*x
-result = feast(A, B, (0.1, 0.8), M0=15)
+# Solve A*x = λ*B*x. The pencil's spectrum runs from ~0 to 1 across 1000
+# eigenvalues, so target the low end rather than a broad slice: (0.1, 0.8)
+# would contain 461 of them and no M0 of 15 could resolve that.
+result = feast(A, B, (0.0, 0.00032), M0=15)
 
-println("Generalized eigenvalues: $(result.lambda[1:result.M])")
+println("Generalized eigenvalues: $(result.lambda[1:result.M])")   # 8
 ```
 
 ### Complex Non-Hermitian Problems
 
-```julia
-using FeastKit
+```@example general
+using FeastKit, LinearAlgebra
 
 # Non-symmetric matrix with complex eigenvalues
 n = 200

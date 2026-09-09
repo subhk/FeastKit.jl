@@ -4,6 +4,9 @@ using LinearAlgebra
 using SparseArrays
 using Distributed
 using Random
+# Krylov is a weak dependency: loading it here activates FeastKitKrylovExt so
+# the iterative (IFEAST / solver=:gmres) paths below are exercised.
+using Krylov
 
 @testset "FeastKit.jl" begin
     
@@ -134,14 +137,19 @@ using Random
         fpm[1] = 0  # No output for testing
         
         if get(ENV, "FEAST_RUN_LONG_TESTS", "false") == "true"
-            # Exercise the high-level driver only when explicitly requested.
-            try
-                result = feast(A, (0.5, 2.5), M0=4, fpm=fpm, parallel=:serial)
-                @test result.info >= 0  # Should not crash
-                @test result.M >= 0     # Should find some eigenvalues
-            catch e
-                @test isa(e, ArgumentError) || isa(e, ErrorException) || isa(e, UndefVarError)
-                # Implementation is incomplete, so errors are expected
+            # The high-level driver has to produce the right answer, not merely
+            # avoid crashing. Swallowing every exception here is what let the
+            # entry point go unexercised.
+            reference = eigvals(Symmetric(A))
+            inside = filter(lambda -> 0.5 <= lambda <= 2.5, reference)
+            result = feast(A, (0.5, 2.5), M0=4, fpm=fpm, parallel=:serial)
+            @test result.info == 0
+            @test result.M == length(inside)
+            @test isapprox(sort(result.lambda[1:result.M]), sort(inside); atol=1e-8)
+            for j in 1:result.M
+                q = result.q[:, j]
+                @test isapprox(norm(q), 1.0; atol=1e-8)
+                @test norm(A * q - result.lambda[j] * q) / norm(q) < 1e-8
             end
         else
             @info "Skipping high-level feast() smoke run (set FEAST_RUN_LONG_TESTS=true to enable)"
@@ -986,6 +994,7 @@ using Random
             fpm_poly[4] = 8
             fpm_poly[8] = 16
 
+            # P(λ) = λ²I - diag(1, 4, 9), so the spectrum is ±1, ±2, ±3.
             A0 = Matrix(Diagonal([-1.0, -4.0, -9.0]))
             A1 = zeros(n, n)
             A2 = Matrix{Float64}(I, n, n)
@@ -994,22 +1003,41 @@ using Random
             center = 0.0 + 0.0im
             radius = 4.0
 
-            generic_real = feast_srcipev!(coeffs_real, 2, center, radius, n, copy(fpm_poly))
-            alias_real = FeastKit.difeast_srcipev!(coeffs_real, 2, center, radius, n, copy(fpm_poly))
+            # The moment-based RCI kernel needs a contour that is not symmetric
+            # about the origin. Enclosing ±k in equal measure makes the residues
+            # of the two cancel, A0 vanishes, and the reduced pencil is singular
+            # -- every routine then returns M = 0 and an alias-vs-generic
+            # comparison holds trivially. Target 2 and 3 instead, and assert the
+            # values, so this block fails if the kernel regresses.
+            rci_fpm = copy(fpm_poly)
+            rci_fpm[8] = 32
+            rci_fpm[16] = 1     # trapezoidal, the accurate rule on a circle
+            rci_center, rci_radius = 2.5 + 0.0im, 1.0
+            rci_expected = [2.0, 3.0]
+
+            generic_real = feast_srcipev!(coeffs_real, 2, rci_center, rci_radius, n, copy(rci_fpm))
+            @test generic_real.info == 0
+            @test generic_real.M == 2
+            @test isapprox(sort(real.(generic_real.lambda)), rci_expected; atol=1e-8)
+
+            alias_real = FeastKit.difeast_srcipev!(coeffs_real, 2, rci_center, rci_radius, n, copy(rci_fpm))
             @test alias_real.info == generic_real.info
             @test alias_real.M == generic_real.M
             @test isapprox(sort(real.(alias_real.lambda)), sort(real.(generic_real.lambda)); atol=1e-10)
 
-            contour = feast_gcontour(center, radius, copy(fpm_poly))
-            alias_real_x = FeastKit.difeast_srcipevx!(coeffs_real, 2, center, radius,
-                                                      n, copy(fpm_poly),
+            contour = feast_gcontour(rci_center, rci_radius, copy(rci_fpm))
+            alias_real_x = FeastKit.difeast_srcipevx!(coeffs_real, 2, rci_center, rci_radius,
+                                                      n, copy(rci_fpm),
                                                       contour.Zne, contour.Wne)
             @test alias_real_x.info == generic_real.info
             @test isapprox(sort(real.(alias_real_x.lambda)), sort(real.(generic_real.lambda)); atol=1e-10)
 
-            generic_complex = feast_grcipev!(coeffs_complex, 2, center, radius, n, copy(fpm_poly))
-            alias_complex = FeastKit.zifeast_grcipev!(coeffs_complex, 2, center, radius,
-                                                      n, copy(fpm_poly))
+            generic_complex = feast_grcipev!(coeffs_complex, 2, rci_center, rci_radius, n, copy(rci_fpm))
+            @test generic_complex.M == 2
+            @test isapprox(sort(real.(generic_complex.lambda)), rci_expected; atol=1e-8)
+
+            alias_complex = FeastKit.zifeast_grcipev!(coeffs_complex, 2, rci_center, rci_radius,
+                                                      n, copy(rci_fpm))
             @test alias_complex.info == generic_complex.info
             @test alias_complex.M == generic_complex.M
             @test isapprox(sort(real.(alias_complex.lambda)), sort(real.(generic_complex.lambda)); atol=1e-10)
@@ -1205,13 +1233,13 @@ using Random
                 A = diagm(0 => 2*ones(n), 1 => -ones(n-1), -1 => -ones(n-1))
                 B = Matrix{Float64}(I, n, n)
 
-                try
-                    if Threads.nthreads() > 1
-                        result = feast(A, B, (0.5, 2.5), M0=5, parallel=:threads)
-                        @test isa(result, FeastResult)
-                    end
-                catch e
-                    @test isa(e, ArgumentError) || isa(e, ErrorException) || isa(e, UndefVarError)
+                if Threads.nthreads() > 1
+                    reference = eigvals(Symmetric(A))
+                    inside = filter(lambda -> 0.5 <= lambda <= 2.5, reference)
+                    result = feast(A, B, (0.5, 2.5), M0=5, parallel=:threads)
+                    @test isa(result, FeastResult)
+                    @test result.M == length(inside)
+                    @test isapprox(sort(result.lambda[1:result.M]), sort(inside); atol=1e-7)
                 end
             else
                 @info "Parallel execution tests disabled (set FEASTKIT_TEST_PARALLEL=true to enable)"
@@ -1258,16 +1286,18 @@ using Random
                     fpm[1] = 0
                     fpm[2] = 4
 
-                    try
-                        result_serial = feast(A, (0.5, 1.5), M0=6, fpm=copy(fpm), parallel=:serial)
-                        result_parallel = feast(A, (0.5, 1.5), M0=6, fpm=copy(fpm), parallel=:threads)
-                        if result_serial.M > 0 && result_parallel.M > 0
-                            @test result_serial.M >= 0
-                            @test result_parallel.M >= 0
-                        end
-                    catch e
-                        @test isa(e, ArgumentError) || isa(e, ErrorException) || isa(e, UndefVarError)
-                    end
+                    # The threaded backend must match serial, and both must
+                    # match a dense reference. `M >= 0` asserted nothing.
+                    reference = eigvals(Symmetric(A))
+                    inside = filter(lambda -> 0.5 <= lambda <= 1.5, reference)
+                    result_serial = feast(A, (0.5, 1.5), M0=6, fpm=copy(fpm), parallel=:serial)
+                    result_parallel = feast(A, (0.5, 1.5), M0=6, fpm=copy(fpm), parallel=:threads)
+                    @test result_serial.M == length(inside)
+                    @test result_parallel.M == result_serial.M
+                    @test isapprox(sort(result_serial.lambda[1:result_serial.M]),
+                                   sort(inside); atol=1e-7)
+                    @test isapprox(sort(result_parallel.lambda[1:result_parallel.M]),
+                                   sort(result_serial.lambda[1:result_serial.M]); atol=1e-7)
                 else
                     @info "Skipping (only 1 thread available)"
                 end
@@ -1308,6 +1338,7 @@ using Random
     end
 end
 
+include("test_eigen_correctness.jl")
 include("test_matrix_free.jl")
 include("test_allocation_helpers.jl")
 include("test_backend_api.jl")

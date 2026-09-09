@@ -30,16 +30,21 @@ When to use FeastKit:
 
 ## 2) Installation and Verification
 
-```julia
-# In Julia REPL (press ] to enter Pkg mode)
+Install from the REPL (`]` enters package mode):
+
+```julia-repl
 pkg> add FeastKit
+```
 
-# Back to Julia mode
-julia> using FeastKit, LinearAlgebra
+Then verify:
 
-# Quick verification
+```@example zfverify
+using FeastKit, LinearAlgebra
+
+# Eigenvalues are 1 and 3; both lie in the interval. M0 is the size of the
+# trial subspace and can never exceed the matrix dimension.
 a = [2.0 -1.0; -1.0 2.0]
-res = feast(a, (0.1, 5.0), M0=4)
+res = feast(a, (0.1, 5.0), M0=2)
 @info "FeastKit OK" M=res.M info=res.info lambda=res.lambda[1:res.M]
 ```
 
@@ -51,15 +56,17 @@ Expected: `info == 0` and two eigenvalues found near 1 and 3.
 
 Simple tridiagonal Laplacian (dense or sparse):
 
-```julia
+```@example zf
 using FeastKit, LinearAlgebra, SparseArrays
 
 # 1D Laplacian on n points
 n = 200
 A = spdiagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))
 
-# Target low end of spectrum
-Emin, Emax = 0.0, 0.2
+# Target the low end of the spectrum. The eigenvalues are 2 - 2cos(kπ/(n+1));
+# (0.0, 0.2) would hold 28 of them, more than M0, and FEAST would return
+# info = 5. Bracket the ten smallest instead.
+Emin, Emax = 0.0, 0.02438
 res = feast(A, (Emin, Emax), M0=16)
 
 @assert res.info == 0
@@ -77,14 +84,16 @@ Tips:
 
 Common in structural dynamics and PDEs:
 
-```julia
+```@example zfgen
 using FeastKit, LinearAlgebra, SparseArrays
 
 n = 1000
 K = spdiagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))  # stiffness
 M = spdiagm(0 => ones(n))                                        # mass
 
-res = feast(K, M, (0.0, 0.5), M0=20)
+# M = I here, so the spectrum is again 2 - 2cos(kπ/(n+1)): (0.0, 0.5) would
+# contain 230 eigenvalues. Take the ten smallest.
+res = feast(K, M, (0.0, 0.000985), M0=20)
 @info "Generalized" info=res.info M=res.M
 ```
 
@@ -94,7 +103,7 @@ res = feast(K, M, (0.0, 0.5), M0=20)
 
 When storing A is infeasible, supply y = A*x as a function:
 
-```julia
+```@example zfmf
 using FeastKit
 
 function lap1d_matvec!(y, x)
@@ -106,16 +115,44 @@ function lap1d_matvec!(y, x)
     y[n] = -x[n-1] + 2x[n]
 end
 
-n = 200_000
+n = 20_000
 Aop = LinearOperator{Float64}(lap1d_matvec!, (n, n), issymmetric=true)
-res = feast(Aop, (0.0, 0.2), M0=12)  # internally uses iterative solves
+
+# Supply the shifted solve too. (z*I - A) is tridiagonal, so one O(n) Thomas
+# sweep per right-hand side beats any Krylov method here -- and this is the
+# real payoff of the matrix-free interface: FEAST never needs the matrix, only
+# your fastest way to apply it and to invert z*B - A.
+function tridiagonal_solve!(Y, z, X)
+    d0 = ComplexF64(z) - 2          # diagonal of z*I - A
+    c = Vector{ComplexF64}(undef, n - 1)
+    d = Vector{ComplexF64}(undef, n)
+    for j in axes(X, 2)
+        c[1] = 1 / d0
+        d[1] = X[1, j] / d0
+        for i in 2:n
+            m = d0 - c[i - 1]
+            i < n && (c[i] = 1 / m)
+            d[i] = (X[i, j] - d[i - 1]) / m
+        end
+        Y[n, j] = d[n]
+        for i in (n - 1):-1:1
+            Y[i, j] = d[i] - c[i] * Y[i + 1, j]
+        end
+    end
+    return Y
+end
+
+# Ten smallest eigenvalues: lambda_10 = 2 - 2cos(10π/(n+1)) ≈ 2.5e-6.
+res = feast(Aop, (0.0, 2.6e-6), M0=16, solver=tridiagonal_solve!)
 @info "Matrix-free" info=res.info M=res.M
 ```
 
 Notes:
 
 - Use efficient BLAS/threading inside `matvec!` for speed.
-- You can choose iterative solvers and tolerances via kwargs if exposed in your version.
+- Without a `solver=`, FEAST falls back to unpreconditioned GMRES. That struggles
+  when the contour hugs a dense part of the spectrum, so supply a structured
+  solve when you have one.
 
 ---
 
@@ -123,13 +160,18 @@ Notes:
 
 Search in a circular region of the complex plane:
 
-```julia
-using FeastKit
+```@example zfgeneral
+using FeastKit, LinearAlgebra
 
-A = [2.0  5.0; -3.0  1.0]  # non-symmetric
+# Use a fresh name: `A` from section 3 is still the symmetric matrix the later
+# sections use.
+G = [2.0  5.0; -3.0  1.0]  # non-symmetric
 I2 = Matrix{Float64}(I, 2, 2)
 center, radius = 1.0 + 1.0im, 3.0
-res = feast_general(A, I2, center, radius, M0=8)
+
+# Eigenvalues are 1.5 ± 3.8406i. Only 1.5 + 3.8406i lies inside this circle,
+# and M0 can never exceed the matrix size.
+res = feast_general(G, I2, center, radius, M0=2)
 @info "Complex region" info=res.info M=res.M λ=res.lambda[1:res.M]
 ```
 
@@ -147,7 +189,7 @@ fpm[2] = 16    # integration points (8–32 typical)
 fpm[3] = 12    # tolerance exponent (target ~ 1e-12)
 fpm[4] = 30    # max refinement loops
 
-res = feast(A, (Emin, Emax), M0=20, fpm=fpm)
+res = feast(A, (Emin, Emax), M0=20, fpm=fpm)   # A and the interval from section 3
 ```
 
 Expert controls (see docs for details):
@@ -162,7 +204,7 @@ Expert controls (see docs for details):
 
 Check that the interval contains eigenvalues:
 
-```julia
+```@example zfvalidate
 using FeastKit, LinearAlgebra
 
 A = diagm(0 => [1.0, 2.0, 3.0, 4.0])

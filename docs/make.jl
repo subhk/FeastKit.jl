@@ -2,11 +2,17 @@
 
 using Documenter
 using FeastKit
+# Loading Krylov activates FeastKitKrylovExt so the iterative `@example` blocks
+# in the guides run rather than erroring.
+using Krylov
 
 makedocs(
     sitename = "FeastKit.jl",
     modules = [FeastKit],
     checkdocs = :exports,
+    # `@example` blocks are executed at build time, so a doc example that stops
+    # working now fails the build instead of silently rotting on the site.
+    warnonly = [:missing_docs],
     authors = "FeastKit.jl Contributors",
     repo = Remotes.GitHub("subhk", "FeastKit.jl"),
     doctest = false,

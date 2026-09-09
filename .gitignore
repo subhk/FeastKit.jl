@@ -28,3 +28,7 @@ LocalPreferences.toml
 JuliaLocalPreferences.toml
 # Documenter build output
 docs-build/
+
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store

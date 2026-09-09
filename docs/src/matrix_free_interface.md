@@ -70,7 +70,7 @@ end
 A_op = LinearOperator{Float64}(laplacian_1d!, (n, n), issymmetric=true)
 
 # Solve eigenvalue problem
-result = feast(A_op, (0.1, 1.0), M0=10, solver=:cg)
+result = feast(A_op, (0.1, 1.0), M0=10, solver=:gmres)
 
 println("Found $(result.M) eigenvalues")
 println("Eigenvalues: $(result.lambda[1:result.M])")
@@ -105,8 +105,8 @@ FeastKit requires solving linear systems `(z*B - A)*Y = X` for various values of
 result = feast(A_op, B_op, interval, solver=:gmres, 
               solver_opts=(rtol=1e-6, restart=30, maxiter=1000))
 
-# Use CG (for symmetric positive definite systems)
-result = feast(A_op, B_op, interval, solver=:cg,
+# Use BiCGSTAB
+result = feast(A_op, B_op, interval, solver=:bicgstab,
               solver_opts=(rtol=1e-8, maxiter=500))
 
 # Use BiCGSTAB(l) 
@@ -217,7 +217,7 @@ A_op = LinearOperator{Float64}(laplacian_2d!, (n, n),
 # Find smallest eigenvalues
 λ_min_approx = 2π^2 * (1/nx^2 + 1/ny^2)
 result = feast(A_op, (0.5*λ_min_approx, 2.0*λ_min_approx), 
-              M0=20, solver=:cg)
+              M0=20, solver=:gmres)
 
 println("Found $(result.M) eigenvalues:")
 for i in 1:result.M
@@ -242,12 +242,12 @@ A_mul!(y, x) = mul!(y, A_sparse, x)
 A_op = LinearOperator{Float64}(A_mul!, (n, n), issymmetric=true, isposdef=true)
 
 # Find largest eigenvalues
-result = feast(A_op, (4.8, 5.2), M0=8, solver=:cg)
+result = feast(A_op, (4.8, 5.2), M0=8, solver=:gmres)
 ```
 
 ## Performance Tips
 
-1. **Choose appropriate solver**: Use `:cg` for symmetric positive definite systems, `:gmres` for general problems.
+1. **Choose appropriate solver**: `:gmres` is the default and works for every problem; `:bicgstab` uses less memory per iteration. `:cg` is *not* usable with FEAST — even for a symmetric positive definite `A`, the shifted system `z*B - A` is complex and indefinite at every contour point, so FEAST rejects it.
 
 2. **Tune solver parameters**: Adjust `rtol`, `maxiter`, and `restart` based on your problem.
 

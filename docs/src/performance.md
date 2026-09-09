@@ -102,7 +102,7 @@ function A_mult!(y, x)
 end
 
 A_op = LinearOperator{Float64}(A_mult!, (n, n), issymmetric=true)
-result = feast(A_op, interval, solver=:cg)
+result = feast(A_op, interval, solver=:gmres)
 ```
 
 #### Strategy 2: Adaptive Subspace Sizing
@@ -195,7 +195,7 @@ The linear solver dominates computational cost. Choose wisely:
 ```julia
 function benchmark_solvers(A_op, B_op, interval)
     solvers = [
-        (:cg, "Conjugate Gradient", (rtol=1e-8, maxiter=1000)),
+        # :cg is unusable here: z*B - A is complex and indefinite.
         (:gmres, "GMRES", (rtol=1e-8, restart=30, maxiter=1000)),
         (:bicgstab, "BiCGSTAB", (rtol=1e-8, l=2, maxiter=1000))
     ]
@@ -424,7 +424,7 @@ function feast_benchmark_suite()
             ("Matrix-Free", () -> begin
                 A_mult!(y, x) = mul!(y, A, x)
                 A_op = LinearOperator{Float64}(A_mult!, (n, n), issymmetric=true)
-                feast(A_op, interval, M0=10, solver=:cg)
+                feast(A_op, interval, M0=10, solver=:gmres)
             end)
         ]
         
@@ -455,12 +455,12 @@ function feast_benchmark_suite()
     println("\n" * "="^60)
     println("BENCHMARK SUMMARY")  
     println("="^60)
-    @printf("%-12s %-12s %-12s %-12s\\n", "Size", "Dense (s)", "Sparse (s)", "Matrix-Free (s)")
+    @printf("%-12s %-12s %-12s %-12s\n", "Size", "Dense (s)", "Sparse (s)", "Matrix-Free (s)")
     println("-"^60)
     
     for (size_name, size_results) in results
         times = Dict(name => time for (name, time) in size_results)
-        @printf("%-12s %-12.3f %-12.3f %-12.3f\\n", 
+        @printf("%-12s %-12.3f %-12.3f %-12.3f\n",
                 size_name, 
                 get(times, "Dense", Inf),
                 get(times, "Sparse", Inf), 
@@ -476,25 +476,32 @@ results = feast_benchmark_suite()
 
 ### Profiling FeastKit Performance
 
+`Profile` ships with Julia; the interactive viewer
+[ProfileView.jl](https://github.com/timholy/ProfileView.jl) is a separate
+package and is not a FeastKit dependency.
+
 ```julia
-using Profile, ProfileView
+using Profile
 
 function profile_feast(A, interval)
     println("Profiling FeastKit Performance")
-    
+
     # Profile a typical FeastKit run
     @profile result = feast(A, interval, M0=20)
-    
+
     # Show profile results
     Profile.print()
-    
-    # Interactive profile view (if ProfileView.jl is available)
-    try
-        ProfileView.view()
-    catch
+
+    # Interactive flame graph, when ProfileView is installed. `using` cannot be
+    # guarded by try/catch -- Julia hoists it out of the block when lowering --
+    # so test for the package explicitly.
+    if Base.find_package("ProfileView") === nothing
         println("Install ProfileView.jl for interactive profiling")
+    else
+        @eval using ProfileView
+        @eval ProfileView.view()
     end
-    
+
     return result
 end
 

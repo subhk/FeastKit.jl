@@ -171,6 +171,7 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
             return
             
         catch e
+            @debug "Parallel RCI reduced eigenproblem failed" exception=e
             state.info = Int(Feast_ERROR_LAPACK)
             state.ijob = Int(Feast_RCI_DONE)
             return

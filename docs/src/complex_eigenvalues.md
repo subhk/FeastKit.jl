@@ -68,7 +68,7 @@ where C is the circular contour.
 
 ### Simple Example
 
-```julia
+```@example cx
 using FeastKit, LinearAlgebra
 
 # Create a non-symmetric matrix
@@ -122,8 +122,11 @@ result = feast_general(A, B, 0.0+0.0im, 1.0, M0=10)
 # Eigenvalues near (2 + 3i)
 result = feast_general(A, B, 2.0+3.0im, 0.5, M0=10)
 
-# Large search region
-result = feast_general(A, B, 0.0+0.0im, 10.0, M0=50)
+# Wider search region -- note that M0 has to grow with the number of
+# eigenvalues the region contains, not just with the radius. For the 100x100
+# Ginibre matrix above, radius 10 already encloses almost the whole spectrum,
+# which no practical M0 can resolve in one solve. Sweep it in pieces instead.
+result = feast_general(A, B, 0.0+0.0im, 3.0, M0=30)
 ```
 
 ### Choosing Center and Radius
@@ -143,10 +146,17 @@ centers, radii = gershgorin_bounds(A)
 ```
 
 **Strategy 2: Use sparse eigenvalue solver for initial estimate**
+
+Requires a separate package — [Arpack.jl](https://github.com/JuliaLinearAlgebra/Arpack.jl)
+or [KrylovKit.jl](https://github.com/Jutho/KrylovKit.jl); neither is a FeastKit
+dependency.
+
 ```julia
-using Arpack  # or other iterative solver
-λ_approx = eigs(A, nev=5)[1]  # Get a few eigenvalues
-# Center search around these
+using Arpack
+
+λ_approx, _ = eigs(A; nev=5, which=:LM)   # a few extremal eigenvalues
+center = sum(λ_approx) / length(λ_approx) # centre the contour on them
+radius = maximum(abs.(λ_approx .- center)) * 1.1
 ```
 
 **Strategy 3: Physical knowledge**
@@ -159,16 +169,16 @@ using Arpack  # or other iterative solver
 
 ### Example 1: Convection-Diffusion Operator
 
-```julia
-using FeastKit, SparseArrays
+```@example cxcd
+using FeastKit, SparseArrays, LinearAlgebra
 
 # 1D convection-diffusion: -εu'' + cu' = λu
 # Non-symmetric due to convection term
 
-n = 500
-ε = 0.01
-c = 1.0
-h = 1.0 / (n + 1)
+n = 200
+ε = 0.1      # Diffusion. Very small ε (large mesh Péclet number c*h/(2ε))
+c = 1.0      # Convection. makes this operator so non-normal that even a dense
+h = 1.0 / (n + 1)   # eigensolver loses accuracy -- keep the cell Péclet modest.
 
 # Discretization (non-symmetric)
 diag_main = 2ε/h^2 * ones(n)
@@ -179,8 +189,10 @@ A = spdiagm(-1 => diag_lower, 0 => diag_main, 1 => diag_upper)
 A = Complex.(A)
 B = sparse(Complex{Float64}(1.0)I, n, n)
 
-# Find eigenvalues near the origin
-result = feast_general(A, B, 0.0+0.0im, 50.0, M0=20)
+# The spectrum sits on 2ε/h² ± 2√(bc) and runs from ~3.5 up to ~1.6e4, so a
+# circle at the origin encloses nothing at all. Centre it on the low end,
+# and give M0 headroom over the 8 eigenvalues the disc contains.
+result = feast_general(A, B, 34.5+0.0im, 37.7, M0=20)
 
 println("Convection-diffusion eigenvalues:")
 for i in 1:min(5, result.M)
@@ -230,7 +242,8 @@ A = (A + transpose(A)) / 2  # Symmetric, not Hermitian!
 B = Matrix{ComplexF64}(I, n, n)
 
 # Eigenvalues are complex (not necessarily real)
-result = feast_general(A, B, 0.0+0.0im, 5.0, M0=20)
+# Radius 5 would enclose ~49 of the 200 eigenvalues; radius 1.5 encloses 4.
+result = feast_general(A, B, 0.0+0.0im, 1.5, M0=10)
 
 println("Complex symmetric eigenvalues:")
 for i in 1:min(5, result.M)
@@ -256,7 +269,9 @@ K = rand(ComplexF64, n, n); K = K'K + I  # Stiffness
 A_lin = [zeros(n,n) I; -K -C]
 B_lin = [I zeros(n,n); zeros(n,n) M]
 
-result = feast_general(A_lin, B_lin, 0.0+0.0im, 3.0, M0=30)
+# The linearized pencil has 2n = 100 eigenvalues clustered inside |λ| ≲ 3, so
+# radius 3 would enclose ~92 of them. Take a small disc and size M0 to it.
+result = feast_general(A_lin, B_lin, 0.0+0.0im, 0.3, M0=12)
 
 println("Quadratic eigenvalue problem:")
 println("Found $(result.M) eigenvalues")
@@ -334,7 +349,10 @@ result = feast_gcsrgv!(A, B, center, radius, M0, fpm)
 **Solutions**:
 1. Check if eigenvalues exist in the region
 ```julia
-# Compute a few eigenvalues with dense solver
+# Compute a reference spectrum with a dense solver. Only do this for small A:
+# Matrix(A) is dense and eigvals is O(n^3), so at n = 10⁴ this allocates ~1.6 GB
+# per matrix and will not finish.
+@assert size(A, 1) <= 2000 "densify only for small problems"
 λ_all = eigvals(Matrix(A), Matrix(B))
 in_region = [λ for λ in λ_all if abs(λ - center) < radius]
 println("Expected eigenvalues: $(length(in_region))")
@@ -367,7 +385,8 @@ fpm[4] = 50  # More refinement iterations
 
 3. Check matrix conditioning
 ```julia
-κ = cond(A - center*B)
+# cond has no sparse method; densify the (small) shifted matrix explicitly.
+κ = cond(Array(A - center*B))
 println("Condition number: $κ")
 # High condition number → numerical difficulties
 ```

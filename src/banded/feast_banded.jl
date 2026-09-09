@@ -37,7 +37,7 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
     solver_is_direct = solver_choice == :direct
     solver_is_iterative = !solver_is_direct
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
-        throw(ArgumentError("Krylov.jl is required for iterative banded FEAST solves."))
+        throw(ArgumentError("Krylov.jl is required for iterative banded FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
 
     # Initialize workspace
@@ -55,15 +55,19 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
     kl = max(kla, klb)
     ku = kl
     ldab = 2 * kl + ku + 1
+    store_factors = fpm[10] == 1
     banded_factor_cache = Matrix{Complex{T}}[]
     banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, 0)
     banded_factorized = falses(0)
     if solver_is_direct
         contour = feast_get_custom_contour(T, fpm)
         contour === nothing && (contour = feast_contour(Emin, Emax, fpm))
-        banded_factor_cache = [Matrix{Complex{T}}(undef, ldab, N) for _ in eachindex(contour.Zne)]
-        banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, length(contour.Zne))
-        banded_factorized = falses(length(contour.Zne))
+        # fpm[10] = 0 keeps a single band-factor slot instead of one per
+        # contour point, at the cost of refactorizing on every visit.
+        nslots = store_factors ? length(contour.Zne) : 1
+        banded_factor_cache = [Matrix{Complex{T}}(undef, ldab, N) for _ in 1:nslots]
+        banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, nslots)
+        banded_factorized = falses(nslots)
     end
     factorized = false
     current_factor_idx = 0
@@ -84,7 +88,21 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
     # Persistent RCI state (must be reused across calls in the loop)
     srci_state = FeastSRCIState{T}()
 
+    # Bound on the jobs one solve can legitimately request: per refinement loop
+    # the kernel issues ne factorize/solve pairs plus four multiplies. The guard
+    # only exists so a malformed state machine cannot spin forever.
+    max_rci_iterations = max(fpm[2], 1) * 4 * (fpm[4] + 2) + 64
+    rci_iterations = 0
+    completed = false
+
     while true
+        rci_iterations += 1
+        if rci_iterations > max_rci_iterations
+            info[] = Int(Feast_ERROR_INTERNAL)
+            @warn "Banded FEAST RCI loop exceeded its job budget" max_rci_iterations
+            break
+        end
+
         # Call Feast RCI kernel
         feast_srci!(ijob, N, Ze, workspace.work, workspace.workc,
                     workspace.Aq, workspace.Sq, fpm, epsout, loop,
@@ -95,7 +113,8 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
             factorized = false
             z = Ze[]
             if solver_is_direct
-                factor_idx = fpm[50]
+                factor_idx = store_factors ? fpm[50] : 1
+                store_factors || (banded_factorized[1] = false)
                 if !(1 <= factor_idx <= length(banded_factor_cache))
                     info[] = Int(Feast_ERROR_INTERNAL)
                     break
@@ -108,7 +127,7 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
                         _, banded_ipiv = LinearAlgebra.LAPACK.gbtrf!(kl, ku, N,
                                                                      shifted_factor)
                         banded_ipiv_cache[factor_idx] = banded_ipiv
-                        banded_factorized[factor_idx] = true
+                        banded_factorized[factor_idx] = store_factors
                     end
                     current_factor_idx = factor_idx
                     factorized = true
@@ -166,18 +185,27 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
                 symmetric_banded_matvec!(view(workspace.work, :, col), A, kla, view(workspace.q, :, col))
             end
 
+        elseif ijob[] == Int(Feast_RCI_MULT_B)
+            M = mode[]
+            for col in 1:M
+                symmetric_banded_matvec!(view(workspace.work, :, col), B, klb, view(workspace.q, :, col))
+            end
+
         elseif ijob[] == Int(Feast_RCI_DONE)
+            completed = true
             break
         else
             # Unexpected ijob value - error out to prevent infinite loop
             error("Unexpected FEAST RCI job code: ijob=$(ijob[]). Expected one of: " *
                   "FACTORIZE($(Int(Feast_RCI_FACTORIZE))), SOLVE($(Int(Feast_RCI_SOLVE))), " *
-                  "MULT_A($(Int(Feast_RCI_MULT_A))), DONE($(Int(Feast_RCI_DONE)))")
+                  "MULT_A($(Int(Feast_RCI_MULT_A))), MULT_B($(Int(Feast_RCI_MULT_B))), " *
+                  "DONE($(Int(Feast_RCI_DONE)))")
         end
     end
 
-    # Extract results
-    M = mode[]
+    # Bailing out early leaves mode[] pointing at the last outstanding request,
+    # not at a converged eigenpair count.
+    M = completed ? mode[] : 0
     lambda = workspace.lambda[1:M]
     q = workspace.q[:, 1:M]
     res = workspace.res[1:M]
@@ -583,7 +611,7 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
     solver_is_direct = solver_choice == :direct
     solver_is_iterative = !solver_is_direct
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
-        throw(ArgumentError("Krylov.jl is required for iterative banded FEAST solves."))
+        throw(ArgumentError("Krylov.jl is required for iterative banded FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
 
     B_is_identity = B === nothing
@@ -627,13 +655,17 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
     contour === nothing && (contour = feast_contour(Emin, Emax, fpm))
     Zne = contour.Zne
     Wne = contour.Wne
+    store_factors = fpm[10] == 1
     banded_factor_cache = Matrix{Complex{T}}[]
     banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, 0)
     banded_factorized = falses(0)
     if solver_is_direct
-        banded_factor_cache = [Matrix{Complex{T}}(undef, ldab, N) for _ in eachindex(Zne)]
-        banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, length(Zne))
-        banded_factorized = falses(length(Zne))
+        # fpm[10] = 0 keeps a single band-factor slot instead of one per
+        # contour point, at the cost of refactorizing on every visit.
+        nslots = store_factors ? length(Zne) : 1
+        banded_factor_cache = [Matrix{Complex{T}}(undef, ldab, N) for _ in 1:nslots]
+        banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, nslots)
+        banded_factorized = falses(nslots)
     end
 
     maxloop = fpm[4]
@@ -671,17 +703,18 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
             copyto!(solutions_block, rhs_block)
             if solver_is_direct
                 try
-                    shifted_factor = banded_factor_cache[idx]
-                    if !banded_factorized[idx]
+                    slot = store_factors ? idx : 1
+                    shifted_factor = banded_factor_cache[slot]
+                    if !banded_factorized[slot]
                         fill_shifted_hermitian_banded!(shifted_factor, A, B, ka,
                                                        kb, kl, z)
                         _, banded_ipiv = LinearAlgebra.LAPACK.gbtrf!(kl, ku, N,
                                                                      shifted_factor)
-                        banded_ipiv_cache[idx] = banded_ipiv
-                        banded_factorized[idx] = true
+                        banded_ipiv_cache[slot] = banded_ipiv
+                        banded_factorized[slot] = store_factors
                     end
                     LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, N, shifted_factor,
-                                                banded_ipiv_cache[idx],
+                                                banded_ipiv_cache[slot],
                                                 solutions_block)
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)
@@ -856,7 +889,7 @@ required for complex-symmetric pencils.
     solver_is_direct = solver_choice == :direct
     solver_is_iterative = !solver_is_direct
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
-        throw(ArgumentError("Krylov.jl is required for iterative banded FEAST solves."))
+        throw(ArgumentError("Krylov.jl is required for iterative banded FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
 
     B_is_identity = B === nothing
@@ -899,13 +932,17 @@ required for complex-symmetric pencils.
     contour === nothing && (contour = feast_gcontour(Emid, r, fpm))
     Zne = contour.Zne
     Wne = contour.Wne
+    store_factors = fpm[10] == 1
     banded_factor_cache = Matrix{Complex{T}}[]
     banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, 0)
     banded_factorized = falses(0)
     if solver_is_direct
-        banded_factor_cache = [Matrix{Complex{T}}(undef, ldab, N) for _ in eachindex(Zne)]
-        banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, length(Zne))
-        banded_factorized = falses(length(Zne))
+        # fpm[10] = 0 keeps a single band-factor slot instead of one per
+        # contour point, at the cost of refactorizing on every visit.
+        nslots = store_factors ? length(Zne) : 1
+        banded_factor_cache = [Matrix{Complex{T}}(undef, ldab, N) for _ in 1:nslots]
+        banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, nslots)
+        banded_factorized = falses(nslots)
     end
 
     maxloop = fpm[4]
@@ -941,17 +978,18 @@ required for complex-symmetric pencils.
             copyto!(shifted_block, rhs_block)
             if solver_is_direct
                 try
-                    shifted_factor = banded_factor_cache[e]
-                    if !banded_factorized[e]
+                    slot = store_factors ? e : 1
+                    shifted_factor = banded_factor_cache[slot]
+                    if !banded_factorized[slot]
                         fill_shifted_complex_symmetric_banded!(shifted_factor, A, B,
                                                                ka, kb, kl, z)
                         _, banded_ipiv = LinearAlgebra.LAPACK.gbtrf!(kl, ku, N,
                                                                      shifted_factor)
-                        banded_ipiv_cache[e] = banded_ipiv
-                        banded_factorized[e] = true
+                        banded_ipiv_cache[slot] = banded_ipiv
+                        banded_factorized[slot] = store_factors
                     end
                     LinearAlgebra.LAPACK.gbtrs!('N', kl, ku, N, shifted_factor,
-                                                banded_ipiv_cache[e], shifted_block)
+                                                banded_ipiv_cache[slot], shifted_block)
                 catch err
                     info_code = Int(Feast_ERROR_LAPACK)
                     @warn "Complex-symmetric banded direct solve failed for shift $z" exception=err
@@ -1111,7 +1149,7 @@ to the dense GMRES path used by the existing dense general solver.
     solver_is_direct = solver_choice == :direct
     solver_is_iterative = !solver_is_direct
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
-        throw(ArgumentError("Krylov.jl is required for iterative banded FEAST solves."))
+        throw(ArgumentError("Krylov.jl is required for iterative banded FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
 
     B_is_identity = B === nothing
@@ -1132,13 +1170,17 @@ to the dense GMRES path used by the existing dense general solver.
     ldab = 2 * kl + ku + 1
     contour = feast_get_custom_contour(T, fpm)
     contour === nothing && (contour = feast_gcontour(Emid, r, fpm))
+    store_factors = fpm[10] == 1
     banded_factor_cache = Matrix{Complex{T}}[]
     banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, 0)
     banded_factorized = falses(0)
     if solver_is_direct
-        banded_factor_cache = [Matrix{Complex{T}}(undef, ldab, N) for _ in eachindex(contour.Zne)]
-        banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, length(contour.Zne))
-        banded_factorized = falses(length(contour.Zne))
+        # fpm[10] = 0 keeps a single band-factor slot instead of one per
+        # contour point, at the cost of refactorizing on every visit.
+        nslots = store_factors ? length(contour.Zne) : 1
+        banded_factor_cache = [Matrix{Complex{T}}(undef, ldab, N) for _ in 1:nslots]
+        banded_ipiv_cache = Vector{Vector{LinearAlgebra.BlasInt}}(undef, nslots)
+        banded_factorized = falses(nslots)
     end
     factorized = false
     current_factor_idx = 0
@@ -1177,7 +1219,8 @@ to the dense GMRES path used by the existing dense general solver.
         if ijob[] == Int(Feast_RCI_FACTORIZE)
             factorized = false
             if solver_is_direct
-                factor_idx = fpm[50]
+                factor_idx = store_factors ? fpm[50] : 1
+                store_factors || (banded_factorized[1] = false)
                 if !(1 <= factor_idx <= length(banded_factor_cache))
                     info[] = Int(Feast_ERROR_INTERNAL)
                     break
@@ -1190,7 +1233,7 @@ to the dense GMRES path used by the existing dense general solver.
                         _, banded_ipiv = LinearAlgebra.LAPACK.gbtrf!(kl, ku, N,
                                                                      shifted_factor)
                         banded_ipiv_cache[factor_idx] = banded_ipiv
-                        banded_factorized[factor_idx] = true
+                        banded_factorized[factor_idx] = store_factors
                     end
                     current_factor_idx = factor_idx
                     factorized = true

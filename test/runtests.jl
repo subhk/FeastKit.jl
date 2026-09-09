@@ -1169,6 +1169,7 @@ using Krylov
         # Test complex contour
         @test feast_inside_gcontour(1.0+1.0im, 1.0+1.0im, 2.0) == true
         @test feast_inside_gcontour(5.0+5.0im, 1.0+1.0im, 2.0) == false
+        @test feast_inside_gcontour(1.0, 1.0+0.0im, 2.0) == true
     end
     
     @testset "Memory estimation" begin

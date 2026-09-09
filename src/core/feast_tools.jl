@@ -690,6 +690,11 @@ function feast_inside_gcontour(lambda::Complex{T}, Emid::Complex{T}, r::T;
     return x * x + y * y <= one(T)
 end
 
+function feast_inside_gcontour(lambda::T, Emid::Complex{T}, r::T;
+                               fpm::Union{Vector{Int},Nothing} = nothing) where T<:Real
+    return feast_inside_gcontour(Complex{T}(lambda), Emid, r; fpm=fpm)
+end
+
 # Sort eigenvalues and eigenvectors
 function feast_sort!(lambda::Vector{T}, q::Matrix{VT}, 
                     res::Vector{T}, M::Int) where {T<:Real, VT}

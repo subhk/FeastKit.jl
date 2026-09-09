@@ -37,7 +37,6 @@ jobs:
       - name: Run tests
         env:
           JULIA_NUM_THREADS: '2'
-          JULIA_DEBUG: FeastKit
           # Without these the high-level feast() smoke run and the whole
           # parallel-support block were skipped on every CI run.
           FEAST_RUN_LONG_TESTS: 'true'

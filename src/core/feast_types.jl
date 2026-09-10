@@ -182,13 +182,14 @@ mutable struct FeastHRCIState{T<:Real}
     q_tmp::Matrix{Complex{T}}
     lambda_tmp::Vector{T}
     residual::Vector{Complex{T}}
+    checked_subspace::Bool
 
     function FeastHRCIState{T}() where T<:Real
         new{T}(false, Complex{T}[], Complex{T}[], 0, 1,
                Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
                Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
                FEAST_PHASE_IDLE, 0, 0, 0, zero(T), 0, Int[],
-               Matrix{Complex{T}}(undef, 0, 0), T[], Complex{T}[])
+               Matrix{Complex{T}}(undef, 0, 0), T[], Complex{T}[], false)
     end
 end
 
@@ -210,13 +211,14 @@ mutable struct FeastGRCIState{T<:Real}
     rank::Int                   # Numerical rank of the filtered subspace
     active::Int                 # Columns of Q0 currently in use
     residual::Vector{Complex{T}}
+    checked_subspace::Bool
 
     function FeastGRCIState{T}() where T<:Real
         new{T}(false, Matrix{Complex{T}}(undef, 0, 0), FEAST_PHASE_IDLE,
                Complex{T}[], Complex{T}[], Int[],
                Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
                Matrix{Complex{T}}(undef, 0, 0), 0, 0,
-               Complex{T}[])
+               Complex{T}[], false)
     end
 end
 

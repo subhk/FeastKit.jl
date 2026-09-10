@@ -10,6 +10,7 @@ module FeastKitKrylovExt
 
 using FeastKit
 using Krylov
+using LinearAlgebra: I
 
 import FeastKit: _feast_gmres, _feast_gmres_workspace, _feast_gmres!,
                  _feast_gmres_solution, _feast_bicgstab, FEAST_KRYLOV_AVAILABLE
@@ -41,16 +42,20 @@ _feast_gmres_workspace(N::Int, ::Type{CT}; memory::Int = 20) where {CT} =
     Krylov.GmresWorkspace(N, N, Vector{CT}; memory = memory)
 
 function _feast_gmres!(workspace, op, b; restart::Bool = true,
-                       rtol = 1e-8, atol = 1e-8, itmax::Int = 200)
+                       rtol = 1e-8, atol = 1e-8, itmax::Int = 200,
+                       preconditioner = nothing)
     Krylov.gmres!(workspace, op, b; restart = restart, rtol = rtol,
-                  atol = atol, itmax = itmax)
+                  atol = atol, itmax = itmax,
+                  M = preconditioner === nothing ? I : preconditioner)
     return workspace.stats.solved
 end
 
 _feast_gmres_solution(workspace) = workspace.x
 
-function _feast_bicgstab(op, b; rtol = 1e-8, atol = 1e-8, itmax::Int = 200)
-    x, stats = Krylov.bicgstab(op, b; rtol = rtol, atol = atol, itmax = itmax)
+function _feast_bicgstab(op, b; rtol = 1e-8, atol = 1e-8, itmax::Int = 200,
+                        preconditioner = nothing)
+    x, stats = Krylov.bicgstab(op, b; rtol = rtol, atol = atol, itmax = itmax,
+                              M = preconditioner === nothing ? I : preconditioner)
     return x, stats.solved
 end
 

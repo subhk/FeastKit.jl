@@ -283,7 +283,18 @@ create_iterative_solver(A_op, B_op, solver_type=:gmres; kwargs...)
 - `rtol::Float64=1e-6`: Relative tolerance
 - `maxiter::Int=1000`: Maximum iterations  
 - `restart::Int=30`: GMRES restart parameter
-- `preconditioner`: Preconditioner (optional)
+- `preconditioner`: Optional left inverse-action operator. It must support
+  `mul!(y, P, x)` on complex vectors, applying an approximate inverse rather
+  than the matrix to be inverted. `nothing` disables preconditioning.
+
+Both GMRES and BiCGSTAB use this operator. Their inner absolute tolerance is
+zero; `rtol` is relative to the initial (preconditioned, when applicable)
+residual, preserving the tolerance under uniform pencil scaling.
+Each shifted system and its right-hand side are scaled together by the RHS
+norm to avoid absolute breakdown thresholds on tiny pencils; the inverse-action
+preconditioner is scaled consistently. Zero right-hand sides return zero.
+If BiCGSTAB breaks down and produces a nonfinite solution, that right-hand
+side is retried with GMRES using the same preconditioner and tolerances.
 
 ---
 
@@ -680,10 +691,10 @@ The `fpm` parameter array controls FeastKit behavior:
 | `fpm[16]` | Integration type | 0 | 0=Gauss, 1=Trapezoidal, 2=Zolotarev |
 | `fpm[18]` | Ellipse ratio | 100 | Aspect ratio × 100 |
 
-With `fpm[5]=1`, the real-symmetric RCI kernel uses the supplied initial
-subspace first. Before accepting converged pairs with unused subspace capacity,
-it retains those pairs and fills the remaining columns with deterministic random
-probes for a verification sweep. This helps recover enclosed eigendirections
+With `fpm[5]=1`, the real-symmetric, complex-Hermitian, and general RCI kernels
+use the supplied initial subspace first. Before accepting converged pairs with
+unused subspace capacity, they retain those pairs and fill the remaining columns
+with deterministic random probes for a verification sweep. This helps recover enclosed eigendirections
 absent from the initial guess. The sweep counts toward `fpm[4]`; exhausting that
 budget before verification/refinement finishes reports non-convergence, not
 success. As with a random initial subspace, this is not a certified eigenvalue

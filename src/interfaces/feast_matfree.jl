@@ -680,6 +680,12 @@ so the linear solver must handle complex arithmetic.
 - `rtol`: Relative tolerance for convergence (default: 1e-6)
 - `maxiter`: Maximum iterations (default: 1000)
 - `restart`: GMRES restart parameter (default: 30)
+- `preconditioner`: Optional left inverse-action operator, applied with
+  `mul!(y, preconditioner, x)` on complex vectors (default: no preconditioning).
+
+The inner stopping criterion is relative to the initial residual (`atol=0`),
+so rescaling both matrices does not turn small nonzero right-hand sides into
+accepted zero solutions.
 
 # Returns
 - Function `(Y, z, X) -> solve (z*B - A) * Y = X`
@@ -695,8 +701,22 @@ function create_iterative_solver(A_op::MatrixFreeOperator{T},
     FEAST_KRYLOV_AVAILABLE[] ||
         throw(ArgumentError("create_iterative_solver needs Krylov.jl. Run `using Krylov` to load the FeastKitKrylovExt extension."))
 
+    # Validate before any zero-RHS shortcut; unsupported solvers must never
+    # appear to work just because a particular trial column is zero.
+    if solver_type == :cg
+        throw(ArgumentError("CG solver cannot be used with FEAST: " *
+                            "the shifted system (z*B - A) is not SPD for complex z. " *
+                            "Use :gmres or :bicgstab instead."))
+    elseif solver_type ∉ (:gmres, :bicgstab)
+        throw(ArgumentError("Unsupported solver type: $solver_type. " *
+                            "Use :gmres or :bicgstab"))
+    end
+
     N = size(A_op, 1)
     CT = T <: Real ? Complex{T} : T
+    RT = typeof(real(zero(CT)))
+    rtol_value = RT(rtol)
+    rhs_scale = Ref(one(RT))
     current_shift = Ref(zero(CT))
     temp = Vector{CT}(undef, N)
     temp_A = Vector{CT}(undef, N)
@@ -709,11 +729,22 @@ function create_iterative_solver(A_op::MatrixFreeOperator{T},
         mul!(temp, B_op, x)
         @. temp = z * temp
         mul!(temp_A, A_op, x)
-        @. y = temp - temp_A
+        @. y = (temp - temp_A) / rhs_scale[]
         return y
     end
 
     shifted_op = LinearOperator{CT}(shifted_mul!, (N, N))
+    # Scaling K and b by 1/s leaves K*y=b unchanged. The inverse action
+    # for K/s is s*P, keeping preconditioned systems on the same scale too.
+    scaled_preconditioner = if preconditioner === nothing
+        nothing
+    else
+        LinearOperator{CT}((y,x) -> begin
+            mul!(y, preconditioner, x)
+            y .*= rhs_scale[]
+            y
+        end, (N,N))
+    end
 
     function linear_solver(Y::AbstractMatrix, z::Number, X::AbstractMatrix)
         # FEAST contour shifts are complex; keep the Krylov operator and
@@ -725,27 +756,41 @@ function create_iterative_solver(A_op::MatrixFreeOperator{T},
             @inbounds for i in 1:N
                 xj[i] = CT(X[i, j])
             end
+            # Besides relative stopping, Krylov has absolute breakdown tests.
+            # Normalize both sides to avoid accepting/discarding tiny RHSs
+            # solely because the entire pencil was rescaled.
+            rhs_scale[] = norm(xj)
+            if iszero(rhs_scale[])
+                fill!(view(Y, :, j), zero(CT))
+                continue
+            end
+            xj ./= rhs_scale[]
             if solver_type == :gmres
                 converged = _feast_gmres!(gmres_workspace, shifted_op, xj;
                                           restart=true,
-                                          rtol=rtol,
-                                          atol=rtol,
+                                          rtol=rtol_value,
+                                          atol=zero(RT),
+                                          preconditioner=scaled_preconditioner,
                                           itmax=maxiter)
                 copyto!(view(Y, :, j), _feast_gmres_solution(gmres_workspace))
             elseif solver_type == :bicgstab
                 result, converged = _feast_bicgstab(shifted_op, xj;
-                                                    rtol=rtol, atol=rtol,
+                                                    rtol=rtol_value, atol=zero(RT),
+                                                    preconditioner=scaled_preconditioner,
                                                     itmax=maxiter)
-                @views Y[:, j] .= result
-            elseif solver_type == :cg
-                # CG only works for SPD systems - but (z*B - A) is NOT SPD for complex z
-                # CG should not be used with FEAST's complex contour points
-                throw(ArgumentError("CG solver cannot be used with FEAST: " *
-                                   "the shifted system (z*B - A) is not SPD for complex z. " *
-                                   "Use :gmres or :bicgstab instead."))
-            else
-                throw(ArgumentError("Unsupported solver type: $solver_type. " *
-                                   "Use :gmres or :bicgstab"))
+                if all(isfinite, result)
+                    copyto!(view(Y, :, j), result)
+                else
+                    # BiCGSTAB can break down after an exact first step
+                    # (including with an exact inverse preconditioner),
+                    # forming 0/0 in its stabilization step. Retry that RHS
+                    # with GMRES rather than feeding NaNs to the projector.
+                    converged = _feast_gmres!(gmres_workspace, shifted_op, xj;
+                                              restart=true, rtol=rtol_value, atol=zero(RT),
+                                              preconditioner=scaled_preconditioner,
+                                              itmax=maxiter)
+                    copyto!(view(Y, :, j), _feast_gmres_solution(gmres_workspace))
+                end
             end
 
             if !converged

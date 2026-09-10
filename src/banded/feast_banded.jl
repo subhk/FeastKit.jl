@@ -831,6 +831,7 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
             epsout_val = max_res
             M_found = M
             if epsout_val <= eps_tol
+                info_code = _feast_exit_info(true, M, M0, N)
                 break
             end
 

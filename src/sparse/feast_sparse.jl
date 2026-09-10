@@ -184,43 +184,11 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                                   z::CT, tol::TR,
                                   maxiter::Int, gmres_restart::Int) where {CT<:Complex, TR<:Real}
     N = size(A, 1)
-    ncols = size(rhs, 2)
-
-    # Create temporary vectors for the operator
-    tmpB = Vector{CT}(undef, N)
-    tmpA = Vector{CT}(undef, N)
-
-    op = SparseShiftedOperator(A, B, z, tmpB, tmpA)
-    residual = Vector{CT}(undef, N)
-
-    for j in 1:ncols
-        b = view(rhs, :, j)
-        # Note: Krylov.gmres doesn't support initial guess, starts from zero
-        x_sol, solved = _feast_gmres(op, b;
-                                     restart=true,
-                                     memory=max(gmres_restart, 2),
-                                     rtol=tol,
-                                     atol=tol,
-                                     itmax=maxiter)
-        mul!(residual, op, x_sol)
-        @. residual -= b
-        res_norm = norm(residual)
-        b_norm = norm(b)
-        # See solve_dense_shifted!: this guards against breakdown, and cannot
-        # meaningfully verify below sqrt(eps) of the working precision.
-        residual_limit = max(10 * tol, sqrt(eps(one(b_norm)))) * max(b_norm, one(b_norm))
-        if res_norm > residual_limit
-            @warn "GMRES failed to converge" residual=res_norm rhs_norm=b_norm limit=residual_limit
-            return false
-        elseif !solved
-            # See solve_dense_shifted!: the explicit residual is the ground
-            # truth and FEAST's outer loop absorbs an inexact inner solve.
-            @debug "GMRES stopped early but the explicit residual is acceptable" residual=res_norm limit=residual_limit
-        end
-        dest[:, j] .= x_sol
-    end
-
-    return true
+    op = SparseShiftedOperator(A, B, z, Vector{CT}(undef, N), Vector{CT}(undef, N))
+    apply_shift! = (y, x) -> mul!(y, op, x)
+    # Reuse the normalized block solver without materializing a dense matrix.
+    return solve_dense_shifted!(dest, rhs, apply_shift!, :gmres,
+                                real(CT)(tol), maxiter, gmres_restart)
 end
 
 function solve_shifted_iterative_identity!(dest::AbstractMatrix{CT},
@@ -229,36 +197,10 @@ function solve_shifted_iterative_identity!(dest::AbstractMatrix{CT},
                                            z::CT, tol::TR,
                                            maxiter::Int, gmres_restart::Int) where {CT<:Complex, TR<:Real}
     N = size(A, 1)
-    ncols = size(rhs, 2)
-    tmpA = Vector{CT}(undef, N)
-    op = SparseIdentityShiftedOperator(A, z, tmpA)
-    residual = Vector{CT}(undef, N)
-
-    for j in 1:ncols
-        b = view(rhs, :, j)
-        x_sol, solved = _feast_gmres(op, b;
-                                     restart=true,
-                                     memory=max(gmres_restart, 2),
-                                     rtol=tol,
-                                     atol=tol,
-                                     itmax=maxiter)
-        mul!(residual, op, x_sol)
-        @. residual -= b
-        res_norm = norm(residual)
-        b_norm = norm(b)
-        residual_limit = max(10 * tol, sqrt(eps(one(b_norm)))) * max(b_norm, one(b_norm))
-        if res_norm > residual_limit
-            @warn "GMRES failed to converge" residual=res_norm rhs_norm=b_norm limit=residual_limit
-            return false
-        elseif !solved
-            # See solve_dense_shifted!: the explicit residual is the ground
-            # truth and FEAST's outer loop absorbs an inexact inner solve.
-            @debug "GMRES stopped early but the explicit residual is acceptable" residual=res_norm limit=residual_limit
-        end
-        dest[:, j] .= x_sol
-    end
-
-    return true
+    op = SparseIdentityShiftedOperator(A, z, Vector{CT}(undef, N))
+    apply_shift! = (y, x) -> mul!(y, op, x)
+    return solve_dense_shifted!(dest, rhs, apply_shift!, :gmres,
+                                real(CT)(tol), maxiter, gmres_restart)
 end
 
 """
@@ -1080,6 +1022,12 @@ Matrix-free sparse-style FEAST using GMRES for shifted solves. The user supplies
 real `A_matvec!` and `B_matvec!` callbacks; internally the shifted operator
 splits complex vectors into real and imaginary work buffers so the callbacks do
 not need to handle complex arithmetic themselves.
+
+The real RCI kernel compresses the filtered subspace and forms the generalized
+Rayleigh-Ritz pencil `Q' * A * Q`, `Q' * B * Q`; `A` and `B` need not commute.
+The existing `gmres_rtol`, `gmres_atol`, `gmres_restart`, and `gmres_maxiter`
+keywords control the inner solver. Inner non-convergence returns
+`Feast_ERROR_NO_CONVERGENCE`.
 """
 function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                              N::Int, Emin::T, Emax::T, M0::Int,
@@ -1090,187 +1038,40 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                              gmres_maxiter::Int = 200) where T<:Real
     FEAST_KRYLOV_AVAILABLE[] ||
         throw(ArgumentError("Krylov.jl is required for matrix-free GMRES solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
-
     feastdefault!(fpm)
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
 
-    workspace = FeastWorkspaceReal{T}(N, M0)
-    Q = workspace.work
-    _feast_seeded_subspace!(Q)
-
-    Aq_block = view(workspace.Aq, 1:M0, 1:M0)
-    Sq_block = view(workspace.Sq, 1:M0, 1:M0)
-    workc_block = view(workspace.workc, :, 1:M0)
-    q_vectors = view(workspace.q, :, 1:M0)
-    Q_block = view(Q, :, 1:M0)
-    lambda_vec = workspace.lambda
-    res_vec = workspace.res
-
-    contour = feast_get_custom_contour(T, fpm)
-    contour === nothing && (contour = feast_contour(Emin, Emax, fpm))
-    Zne = contour.Zne
-    Wne = contour.Wne
-    ne = length(Zne)
-
-    maxloop = fpm[4]
-    eps_tol = feast_tolerance(fpm, T)
-
-    shifted_operator = MatrixFreeShiftedOperator(N, zero(Complex{T}), A_matvec!, B_matvec!, T)
-
-    # Scratch buffers for applying B to each real basis vector and promoting
-    # the result to the complex RHS expected by the shifted Krylov solve.
-    rhs_real = zeros(T, N)
-    rhs_complex = zeros(Complex{T}, N)
-    moment = Matrix{Complex{T}}(undef, M0, M0)
-    Q_proj_real = zeros(T, N, M0)
-    lambda_tmp = similar(lambda_vec)
-    perm = Vector{Int}(undef, M0)
-    q_tmp = similar(q_vectors)
-    residual_vec = zeros(T, N)
-
-    epsout_val = T(Inf)
-    loop_count = 0
-    info_code = Int(Feast_SUCCESS)
-    M_found = 0
-
-    # Allocate buffer for accumulated filtered subspace
-    Q_proj = zeros(Complex{T}, N, M0)
-
-    @views for loop_idx in 0:maxloop
-        # The real reduced matrices are accumulated from complex contour
-        # moments. Q_proj is kept complex until projection back to real vectors.
-        loop_count = loop_idx
-        fill!(Aq_block, zero(T))
-        fill!(Sq_block, zero(T))
-        fill!(Q_proj, zero(Complex{T}))
-
-        gmres_failed = false
-        for e in 1:ne
-            shifted_operator.z = Zne[e]
-            weight = 2 * Wne[e]
-
-            for j in 1:M0
-                # Build one complex RHS at a time: B * q_j is real, then copied
-                # into the complex Krylov vector without allocating.
-                B_matvec!(rhs_real, view(Q_block, :, j))
-                _copyto_complex!(rhs_complex, rhs_real)
-
-                # Note: Krylov.gmres doesn't support initial guess, starts from zero
-                sol, solved = _feast_gmres(shifted_operator, rhs_complex;
-                                           rtol = gmres_rtol,
-                                           atol = gmres_atol,
-                                           memory = gmres_restart,
-                                           itmax = gmres_maxiter)
-
-                if !solved
-                    info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-                    @warn "GMRES did not converge for contour point $e, column $j"
-                    gmres_failed = true
-                    break
-                end
-
-                workc_block[:, j] .= sol
+    # The shared RCI kernel builds Q' A Q and Q' B Q from a compressed basis.
+    # Q' (zB-A)^-1 B Q is not symmetric for noncommuting A and B, so the old
+    # symmetric contour-moment pencil was not a valid generalized projection.
+    A_op = LinearOperator{T}(A_matvec!, (N,N); issymmetric=true)
+    B_op = LinearOperator{T}(B_matvec!, (N,N); issymmetric=true)
+    shifted = MatrixFreeShiftedOperator(N, zero(Complex{T}), A_matvec!, B_matvec!, T)
+    rhs = Vector{Complex{T}}(undef, N)
+    solve_failed = Ref(false)
+    function linear_solver(Y, z, X)
+        shifted.z = z
+        for j in axes(X, 2)
+            copyto!(rhs, view(X, :, j))
+            sol, solved = _feast_gmres(shifted, rhs;
+                                      rtol=gmres_rtol, atol=gmres_atol,
+                                      memory=gmres_restart, itmax=gmres_maxiter)
+            if !solved
+                solve_failed[] = true
+                error("GMRES did not converge for column $j")
             end
-
-            gmres_failed && break
-
-            # Accumulate filtered subspace
-            @. Q_proj += weight * workc_block
-
-            mul!(moment, transpose(Q_block), workc_block)
-            # Fold weighted moments into the real reduced matrices in place.
-            # Broadcasting `real.(weight .* moment)` would allocate two M0×M0
-            # temporaries per contour point; the fused loop allocates nothing.
-            zweight = weight * Zne[e]
-            @inbounds for j in 1:M0, i in 1:M0
-                m = moment[i, j]
-                Aq_block[i, j] += real(weight * m)
-                Sq_block[i, j] += real(zweight * m)
-            end
-        end
-
-        if gmres_failed
-            break
-        end
-
-        try
-            # For half-contour integration, the moment matrices are already real.
-            # Use Symmetric wrapper directly - no need for 0.5*(A+A') symmetrization.
-            # IMPORTANT: Solve Sq*v = lambda*Aq*v (consistent with _feast_hermitian_complex)
-            # Aq = sum(w * Q' * Y), Sq = sum(w * z * Q' * Y)
-            lambda_red = T[]
-            v_red = Matrix{T}(undef, 0, 0)
-            try
-                F = eigen(Symmetric(Sq_block), Symmetric(Aq_block))
-                lambda_red = F.values
-                v_red = F.vectors
-            catch e
-                if isa(e, PosDefException) || isa(e, LAPACKException)
-                    # Fall back to general eigenvalue solver if not positive definite
-                    F = eigen(Sq_block, Aq_block)
-                    lambda_red = real.(F.values)
-                    v_red = real.(F.vectors)
-                else
-                    rethrow(e)
-                end
-            end
-
-            # Project ALL eigenvectors using FILTERED subspace (Q_proj), not original Q
-            _feast_copy_real!(Q_proj_real, Q_proj)
-            for idx in 1:M0
-                mul!(view(q_vectors, :, idx), Q_proj_real, view(v_red, :, idx))
-                lambda_vec[idx] = convert(T, lambda_red[idx])
-            end
-
-            M = _feast_reorder_by_interval!(lambda_vec, q_vectors, perm,
-                                             lambda_tmp, q_tmp, Emin, Emax, M0)
-            if M == 0
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-                break
-            end
-
-            # Normalize only eigenvectors inside interval (for residual computation)
-            for j in 1:M
-                vec = view(q_vectors, :, j)
-                nrm = norm(vec)
-                nrm > 0 && (vec ./= nrm)
-            end
-
-            # Compute residuals only for eigenvalues inside interval
-            max_res = zero(T)
-            for j in 1:M
-                q_col = view(q_vectors, :, j)
-                A_matvec!(residual_vec, q_col)
-                B_matvec!(rhs_real, q_col)
-                @. residual_vec = residual_vec - lambda_vec[j] * rhs_real
-                # Relative residual: normalize by max(|λ|, 1)
-                res_val = norm(residual_vec) / max(abs(lambda_vec[j]), one(T))
-                res_vec[j] = res_val
-                max_res = max(max_res, res_val)
-            end
-
-            epsout_val = max_res
-            M_found = M
-
-            if epsout_val <= eps_tol || loop_idx == maxloop
-                info_code = _feast_exit_info(epsout_val <= eps_tol, M, M0, N)
-                break
-            end
-
-            # Use full M0 subspace for next iteration
-            Q[:, 1:M0] .= q_vectors[:, 1:M0]
-        catch err
-            info_code = Int(Feast_ERROR_LAPACK)
-            @warn "Reduced eigenvalue problem failed in matrix-free FEAST" exception=err
-            break
+            copyto!(view(Y, :, j), sol)
         end
     end
-
-    lambda = workspace.lambda[1:M_found]
-    q = workspace.q[:, 1:M_found]
-    res = workspace.res[1:M_found]
-
-    return FeastResult{T, T}(lambda, q, M_found, res, info_code, epsout_val, loop_count)
+    result = feast_matfree_srci!(A_op, B_op, (Emin,Emax), M0;
+                                 fpm=fpm, linear_solver=linear_solver)
+    # Keep this entry point's existing non-convergence status for inner failures.
+    if solve_failed[]
+        return FeastResult{T,T}(result.lambda, result.q, result.M, result.res,
+                                Int(Feast_ERROR_NO_CONVERGENCE), result.epsout,
+                                result.loop)
+    end
+    return result
 end
 
 # Convenience wrapper for sparse matrices using GMRES

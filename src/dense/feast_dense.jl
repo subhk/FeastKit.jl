@@ -22,6 +22,12 @@ end
 Solve `(zB - A) * X = rhs` one right-hand side at a time with an iterative
 Krylov method. `apply_shift!` is a closure over the current shift `z`; keeping
 it concrete lets Julia specialize the matrix-vector product used by GMRES.
+Each nonzero RHS and its operator are scaled together by the RHS norm. The
+explicit residual check is relative to that norm (without a unit-size floor),
+and zero RHS columns return zero without invoking Krylov. Sparse and banded
+drivers share this helper without converting their operators to dense matrices.
+If the explicit residual exceeds the requested accuracy, one additional GMRES
+correction (at most `maxiter` iterations) is attempted before the breakdown check.
 """
 function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
                               rhs::AbstractMatrix{Complex{T}},
@@ -35,31 +41,62 @@ function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
     end
 
     N = size(rhs, 1)
-    op = DenseShiftOperator{typeof(apply_shift!), T}(apply_shift!, N)
+    rhs_scale = Ref(one(T))
+    scaled_shift! = (y, x) -> begin
+        apply_shift!(y, x)
+        y ./= rhs_scale[]
+        y
+    end
+    op = DenseShiftOperator{typeof(scaled_shift!), T}(scaled_shift!, N)
 
     residual = zeros(Complex{T}, N)
     # One Krylov basis per block, not per right-hand side. Hermitian drivers
     # visit both contour halves, making per-column workspace allocation costly.
     gmres_workspace = _feast_gmres_workspace(N, Complex{T}; memory=max(restart, 2))
     rhs_column = Vector{Complex{T}}(undef, N)
+    refined_solution = similar(rhs_column)
     @views for j in 1:size(rhs, 2)
         b = view(rhs, :, j)
-        copyto!(rhs_column, b)
+        b_norm = norm(b)
+        isfinite(b_norm) || return false
+        if iszero(b_norm)
+            fill!(view(dest, :, j), zero(Complex{T}))
+            continue
+        end
+        # Scale K and b together: (K/||b||)x = b/||b|| has the same solution,
+        # without the absolute stopping/breakdown thresholds on tiny pencils.
+        rhs_scale[] = b_norm
+        @. rhs_column = b / b_norm
         solved = _feast_gmres!(gmres_workspace, op, rhs_column;
-                                restart=true, rtol=tol, atol=tol, itmax=maxiter)
+                                restart=true, rtol=tol, atol=zero(T), itmax=maxiter)
         x_sol = _feast_gmres_solution(gmres_workspace)
         apply_shift!(residual, x_sol)
-        @. residual -= b
+        @. residual = (residual - b) / b_norm
         res_norm = norm(residual)
-        b_norm = norm(b)
+        # Krylov's absolute Arnoldi-breakdown threshold can stop a nearly
+        # invariant RHS above a tight requested tolerance. Correct the actual
+        # residual once, scaling the correction system by its own RHS norm.
+        # Keep the original solution because the reusable workspace is reset.
+        if isfinite(res_norm) && res_norm > max(T(10)*tol, T(10)*eps(T))
+            copyto!(refined_solution, x_sol)
+            rhs_scale[] = b_norm * res_norm
+            @. rhs_column = -residual / res_norm
+            solved = _feast_gmres!(gmres_workspace, op, rhs_column;
+                                    restart=true, rtol=tol, atol=zero(T), itmax=maxiter)
+            refined_solution .+= _feast_gmres_solution(gmres_workspace)
+            x_sol = refined_solution
+            apply_shift!(residual, x_sol)
+            @. residual = (residual - b) / b_norm
+            res_norm = norm(residual)
+        end
         # Krylov stops on its own recurrence residual; the explicitly
         # recomputed one is larger, and on a shifted system whose contour point
         # sits near an eigenvalue the gap is orders of magnitude, not ulps. This
         # check exists to catch breakdown, not to re-impose `tol`: below
         # sqrt(eps) an explicit residual cannot be verified reliably anyway, and
         # FEAST's outer loop tolerates inexact solves by construction.
-        residual_limit = max(T(10) * tol, sqrt(eps(T))) * max(b_norm, one(T))
-        if res_norm > residual_limit
+        residual_limit = max(T(10) * tol, sqrt(eps(T)))
+        if !isfinite(res_norm) || res_norm > residual_limit
             @warn "GMRES failed to converge" residual=res_norm rhs_norm=b_norm limit=residual_limit
             return false
         elseif !solved

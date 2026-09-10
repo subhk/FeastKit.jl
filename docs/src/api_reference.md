@@ -437,6 +437,8 @@ result = feast_parallel(A, B, interval; M0=M0, fpm=fpm)
 
 ```@docs
 FeastKit.pfeast_show_distribution
+FeastKit.feast_parallel_comparison
+FeastKit.MPIFeastState
 ```
 
 ---
@@ -559,6 +561,15 @@ FeastKit.FeastPolyRCIState
 
 ## Utility Functions
 
+### Estimating the enclosed eigenvalue count
+
+Use this estimate to help choose `M0`, leaving a safety margin; a stochastic
+estimate is not a proof of the exact count.
+
+```@docs
+FeastKit.feast_estimate_count
+```
+
 ### feastinit!
 
 Initialize FeastKit parameter array.
@@ -652,7 +663,7 @@ FeastKit functions return status codes in `result.info`:
 |------|------|-------------|
 | 0 | `Feast_SUCCESS` | Success |
 | 1 | `Feast_ERROR_N` | Invalid matrix size N |
-| 2 | `Feast_ERROR_M0` | Invalid M0 parameter |
+| 2 | `Feast_ERROR_M0` | Invalid or saturated subspace; increase M0 or narrow the region |
 | 3 | `Feast_ERROR_EMIN_EMAX` | Invalid search interval |
 | 4 | `Feast_ERROR_EMID_R` | Invalid center/radius for complex problems |
 | 5 | `Feast_ERROR_NO_CONVERGENCE` | No convergence achieved |
@@ -684,12 +695,20 @@ The `fpm` parameter array controls FeastKit behavior:
 | Index | Parameter | Default | Description |
 |-------|-----------|---------|-------------|
 | `fpm[1]` | Print level | 0 | 0=silent, 1=summary, negative=write to file |
-| `fpm[2]` | Integration points | 8 | Number of contour points |
+| `fpm[2]` | Integration points | 8 | Symmetric/Hermitian half-contour node count |
 | `fpm[3]` | Tolerance exponent | 12 | Convergence: 10^(-fpm[3]) |
 | `fpm[4]` | Max iterations | 20 | Maximum refinement loops |
 | `fpm[5]` | Initial subspace | 0 | 0=random, 1=user-provided |
+| `fpm[8]` | General integration points | 16 | General full-contour node count |
+| `fpm[10]` | Factorization cache | 1 | 1=store direct factorizations, 0=recompute |
 | `fpm[16]` | Integration type | 0 | 0=Gauss, 1=Trapezoidal, 2=Zolotarev |
 | `fpm[18]` | Ellipse ratio | 100 | Aspect ratio × 100 |
+
+The precision-aware `feast_tolerance(fpm, Float32)` floors the target at
+`sqrt(eps(Float32))`; `fpm[7]` is a legacy slot, not its active stopping
+control. For Gauss/Zolotarev, half-contour counts above 20 must be one of
+24, 32, 40, 48, or 56. See [Problem Setup](problem_setup.md) for the distinction
+between outer parameters and inner-solver tolerances.
 
 With `fpm[5]=1`, the real-symmetric, complex-Hermitian, and general RCI kernels
 use the supplied initial subspace first. Before accepting converged pairs with

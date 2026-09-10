@@ -6,7 +6,14 @@ using LinearAlgebra
 using SparseArrays
 using FeastKit
 
-const DATA_DIR = joinpath(@__DIR__, "..", "FEAST", "example", "FEAST")
+export read_mm_dense_real, read_mm_dense_complex, read_mm_sparse_real,
+       read_mm_sparse_complex, read_banded_real, read_banded_complex,
+       read_polynomial_dense_real, read_polynomial_sparse_real,
+       to_complex_sparse, build_polygonal_contour, print_summary
+
+# Bundled synthetic fixtures are not the original Fortran benchmark matrices.
+# Set FEAST_EXAMPLE_DATA_DIR to use an external compatible fixture collection.
+const DATA_DIR = get(ENV, "FEAST_EXAMPLE_DATA_DIR", joinpath(@__DIR__, "data"))
 
 # Keep paths centralized so example functions can name FEAST systems rather than
 # hard-code fixture directories.
@@ -109,13 +116,14 @@ function read_banded_real(name::AbstractString)
             vals[k] = parse(Float64, parts[3])
         end
     end
-    # Convert coordinate entries into LAPACK general band storage where row
-    # `k_upper + 1` is the diagonal.
+    # Pad to FeastKit's equal-bandwidth storage: diagonal row k + 1,
+    # with k = max(k_lower, k_upper).
     k_lower = maximum(max(0, rows[i] - cols[i]) for i in eachindex(rows))
     k_upper = maximum(max(0, cols[i] - rows[i]) for i in eachindex(rows))
-    band = zeros(Float64, k_lower + k_upper + 1, n)
+    k = max(k_lower,k_upper)
+    band = zeros(Float64, 2k + 1, n)
     for (r, c, v) in zip(rows, cols, vals)
-        band[k_upper + 1 + r - c, c] = v
+        band[k + 1 + r - c, c] = v
     end
     return band, k_lower, k_upper
 end
@@ -146,9 +154,10 @@ function read_banded_complex(name::AbstractString)
     # FEAST band dimensions to symmetric and general wrappers.
     k_lower = maximum(max(0, rows[i] - cols[i]) for i in eachindex(rows))
     k_upper = maximum(max(0, cols[i] - rows[i]) for i in eachindex(rows))
-    band = zeros(ComplexF64, k_lower + k_upper + 1, n)
+    k = max(k_lower,k_upper)
+    band = zeros(ComplexF64, 2k + 1, n)
     for (r, c, v) in zip(rows, cols, vals)
-        band[k_upper + 1 + r - c, c] = v
+        band[k + 1 + r - c, c] = v
     end
     return band, k_lower, k_upper
 end
@@ -175,20 +184,25 @@ end
 
 function build_polygonal_contour(zedge::Vector{ComplexF64}, nedge::Vector{Int})
     # FEAST custom-contour examples specify polygon edges plus the number of
-    # quadrature nodes per edge; weights are then computed by FeastKit.
+    # quadrature nodes per edge. Supply normalized midpoint weights ourselves;
+    # feast_contour_custom_weights! only copies them.
     nodes = ComplexF64[]
+    weights = ComplexF64[]
     ne = length(zedge)
-    @assert ne == length(nedge)
+    ne >= 3 && ne == length(nedge) || throw(ArgumentError("Need matching polygon vertices and edge counts"))
+    all(>(0),nedge) || throw(ArgumentError("Edge counts must be positive"))
+    area = sum(imag(conj(zedge[i])*zedge[mod1(i+1,ne)]) for i in 1:ne)
+    isfinite(area) && area != 0 || throw(ArgumentError("Polygon must have nonzero finite area"))
     for idx in 1:ne
         start = zedge[idx]
         stop = zedge[mod(idx, ne) + 1]
         steps = nedge[idx]
         for k in 0:steps-1
-            t = k / steps
+            t = (k + 0.5) / steps
             push!(nodes, start + t * (stop - start))
+            push!(weights, sign(area) * (stop-start) / (steps * 2π * im))
         end
     end
-    weights = zeros(ComplexF64, length(nodes))
     contour = FeastKit.feast_contour_custom_weights!(nodes, weights)
     return contour
 end
@@ -210,6 +224,8 @@ function print_summary(label::AbstractString, result; max_values::Int=5)
         println("  residuals : ", round.(result.res[1:count]; digits=6))
     end
     println()
+    result.info == 0 || error("$label failed with info=$(result.info)")
+    return result
 end
 
 end # module

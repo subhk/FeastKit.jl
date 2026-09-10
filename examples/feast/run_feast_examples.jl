@@ -1,6 +1,6 @@
 #!/usr/bin/env julia
 
-# Julia translations of the FEAST Fortran reference examples.
+# Reference-style FEAST API demonstrations with bundled synthetic fixtures.
 #
 # Each function mirrors one original reference driver and prints a compact
 # summary so the examples can be run as a single smoke test.
@@ -8,7 +8,7 @@
 using LinearAlgebra
 using SparseArrays
 
-push!(LOAD_PATH, joinpath(@__DIR__, "..", "src"))
+# Launch with julia --project=. examples/feast/run_feast_examples.jl.
 using FeastKit
 
 include(joinpath(@__DIR__, "utils.jl"))
@@ -88,6 +88,7 @@ function dense_complex_syevx()
     FeastKit.feastinit!(fpm)
     fpm[1] = 1
     fpm[8] = length(contour.Zne)
+    fpm[16] = 1  # Custom midpoint rule: no Gauss node-count restriction
     Emid = complex(4.0, 0.0)
     r = 3.0
     result = FeastKit.feast_geevx!(copy(A), Emid, r, M0, fpm,
@@ -112,12 +113,16 @@ end
 function sparse_real_scsrgv_lowest()
     A = read_mm_sparse_real("system1")
     B = read_mm_sparse_real("system1B")
-    Emin, Emax = 0.18, 1.0
-    M0 = 40
+    # FEAST needs an interval; fpm[40] does not implement automatic discovery.
+    # Dense reference sizing is appropriate for these small example fixtures.
+    spectrum = eigvals(Symmetric(Matrix(A)),Symmetric(Matrix(B)))
+    k = min(5,length(spectrum)-1)
+    Emin = first(spectrum) - max(1.0,abs(first(spectrum))) * 0.01
+    Emax = (spectrum[k]+spectrum[k+1])/2
+    M0 = min(2k,size(A,1))
     fpm = zeros(Int, 64)
     FeastKit.feastinit!(fpm)
     fpm[1] = 1
-    fpm[40] = -1
     result = FeastKit.feast_scsrgv!(copy(A), copy(B), Emin, Emax, M0, fpm)
     print_summary("F90sparse_dfeast_scsrgv_lowest", result)
 end
@@ -183,6 +188,7 @@ function sparse_complex_scsrevx()
     FeastKit.feastinit!(fpm)
     fpm[1] = 1
     fpm[8] = length(contour.Zne)
+    fpm[16] = 1
     fpm[42] = 0
     result = FeastKit.feast_gcsrevx!(copy(A), Emid, r, M0,
                                      fpm, contour.Zne, contour.Wne)
@@ -256,6 +262,7 @@ function banded_complex_sbevx()
     FeastKit.feastinit!(fpm)
     fpm[1] = 1
     fpm[8] = length(contour.Zne)
+    fpm[16] = 1
     ka = max(kl_a, ku_a)
     Emid = complex(4.0, 0.0)
     r = 3.0
@@ -265,6 +272,8 @@ function banded_complex_sbevx()
 end
 
 function main()
+    println("Fixture directory: ", FeastExampleUtils.DATA_DIR)
+    println("Bundled data are synthetic; see examples/README.md.")
     # Run in storage-family order to make failures easy to relate to the wrapper
     # layer they exercise.
     dense_real_sygv()

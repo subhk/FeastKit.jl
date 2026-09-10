@@ -181,12 +181,21 @@ function pfeast_compute_all_contour_points!(state::ParallelFeastState{T},
 end
 
 # Convenience wrapper for parallel Feast with automatic RCI handling
+"""
+    feast_parallel(A, B, interval; M0=10, fpm=nothing, use_threads=true, auto_rci=true)
+
+Solve a real symmetric pencil with automatic parallel reverse communication.
+`auto_rci=false` is unsupported: manual callers must retain a
+`ParallelFeastState` and drive `pfeast_srci!` directly.
+"""
 function feast_parallel(A::AbstractMatrix{T}, B::AbstractMatrix{T}, 
                         interval::Tuple{T,T}; M0::Int = 10, 
                         fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                         use_threads::Bool = true,
                         auto_rci::Bool = true) where T<:Real
     # Parallel FeastKit with automatic RCI management
+    auto_rci || throw(ArgumentError(
+        "feast_parallel requires auto_rci=true; use pfeast_srci! with a ParallelFeastState for manual reverse communication"))
     
     Emin, Emax = interval
     N = size(A, 1)
@@ -220,24 +229,20 @@ function feast_parallel(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         pfeast_srci!(state, N, work, workc, Aq, Sq, fpm, 
                     Emin, Emax, M0, lambda, q, res)
         
-        if state.ijob == Int(Feast_RCI_PARALLEL_SOLVE) && auto_rci
+        if state.ijob == Int(Feast_RCI_PARALLEL_SOLVE)
             # Automatically handle parallel computation
             pfeast_compute_all_contour_points!(state, A, B, work, M0)
             
-        elseif state.ijob == Int(Feast_RCI_MULT_A) && auto_rci
+        elseif state.ijob == Int(Feast_RCI_MULT_A)
             # Automatically compute A*q for residual calculation
             M = state.mode
             work[:, 1:M] .= A * q[:, 1:M]
             
-        elseif state.ijob == Int(Feast_RCI_MULT_B) && auto_rci
+        elseif state.ijob == Int(Feast_RCI_MULT_B)
             M = state.mode
             work[:, 1:M] .= B * q[:, 1:M]
 
         elseif state.ijob == Int(Feast_RCI_DONE)
-            break
-            
-        elseif !auto_rci
-            # User must handle RCI manually
             break
         end
     end

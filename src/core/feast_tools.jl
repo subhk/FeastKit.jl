@@ -293,6 +293,15 @@ function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:AbstractFloa
     return FeastContour{T}(Zne, Wne)
 end
 
+# Public Hermitian contours contain one half of the conjugate-symmetric path.
+# For a complex trial block, the lower-half solve is NOT the conjugate of the
+# upper-half solution: both must be applied to the same B*Q. Expand the shifts
+# explicitly so direct, iterative, banded and RCI drivers share that contract.
+function _feast_complete_hermitian_contour(contour::FeastContour{T}) where T
+    return FeastContour{T}(vcat(contour.Zne, conj.(contour.Zne)),
+                           vcat(contour.Wne, conj.(contour.Wne)))
+end
+
 function feast_gcontour(Emid::Complex{T}, r::T, fpm::Vector{Int}) where T<:AbstractFloat
     # Same sentinel resolution as feast_contour: fpm[8] alone is not enough,
     # this builder also reads fpm[16], fpm[18] and the rotation fpm[19].

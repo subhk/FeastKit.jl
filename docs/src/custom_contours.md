@@ -147,7 +147,11 @@ Use a separate `fpm` vector for each concurrent solve.
     `feast` solves real symmetric or complex Hermitian problems on a real
     interval. Its kernels account for conjugate symmetry using a half-contour,
     as returned by `feast_contour_expert`. Use `feast_general` with a full
-    closed contour for complex search regions, as shown below. These examples
+    closed contour for complex search regions, as shown below. Complex
+    Hermitian solvers internally add the conjugate nodes and weights and solve
+    both halves against the same trial block. Continue supplying only the
+    half-contour; do not double its weights or append its conjugate yourself.
+    These examples
     explicitly select the serial backend; they do not assume that parallel
     backends consume registered custom contours.
 

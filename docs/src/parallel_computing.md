@@ -173,6 +173,7 @@ end
 ---
 
 ```@docs
+feast_parallel
 pfeast_srci!
 ```
 

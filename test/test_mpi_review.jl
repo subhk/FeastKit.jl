@@ -1,6 +1,26 @@
 # Called with MPI initialized by the backend test driver.
 function test_mpi_review(comm)
 @testset "MPI review regressions" begin
+    @testset "Partial Hermitian projector $storage $solver" for storage in (Matrix,sparse), solver in (:direct,:gmres)
+        n = 20
+        U = Matrix{ComplexF64}(I,n,n)
+        U[[1,n],[1,n]] = [1 im; im 1] / sqrt(2)
+        mass = collect(range(1.,2.;length=n))
+        A = storage(Matrix(Hermitian(U*Diagonal((1:n).*mass)*U')))
+        B = storage(Matrix(Hermitian(U*Diagonal(mass)*U')))
+        f = feastinit().fpm; f[4] = 6
+        # Only root registers the public half contour.
+        root = MPI.Comm_size(comm)-1
+        c = feast_contour(0.5,3.5,f)
+        solve = () -> mpi_feast(A,B,(0.5,3.5);M0=4,fpm=f,comm=comm,root=root,
+                                solver=solver,solver_tol=1e-13)
+        r = MPI.Comm_rank(comm) == root ? FeastKit.with_custom_contour(solve,f,c) : solve()
+        @test r.info == 0
+        @test r.M == 3
+        @test r.lambda ≈ [1.,2.,3.] atol=1e-9
+        @test all(j -> norm(A*r.q[:,j]-r.lambda[j]*B*r.q[:,j]) < 1e-10, 1:r.M)
+        @test all(j -> norm(r.q[:,j]) ≈ 1, 1:r.M)
+    end
     @testset "Custom contour" begin
         A = Matrix(Diagonal(ComplexF64[1,2,5]))
         c = feast_gcontour(1.0+0im,0.25,feastinit().fpm)

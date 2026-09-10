@@ -432,7 +432,8 @@ function _feast_hermitian_complex(A::AbstractMatrix{Complex{T}},
     # system back in the same buffer, so the right-hand side needs its own room.
     rhs = Matrix{Complex{T}}(undef, N, M0)
 
-    max_rci_iterations = max(fpm[2], 1) * 4 * (fpm[4] + 2) + 64
+    # Hermitian RCI explicitly solves both halves of the public half contour.
+    max_rci_iterations = max(fpm[2], 1) * 8 * (fpm[4] + 2) + 64
     rci_iterations = 0
     completed = false
 

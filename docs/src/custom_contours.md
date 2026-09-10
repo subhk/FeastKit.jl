@@ -114,6 +114,55 @@ println("Excellent for clustered eigenvalues")
 
 ## Custom Contour Design
 
+### Using a Contour with `feast`
+
+Creating a `contour` does not automatically attach it to a solve, and `feast`
+does **not** have a `contour=` keyword. Register it for the duration of the call
+using `FeastKit.with_custom_contour`, passing the **same parameter vector** to
+both the helper and the solver:
+
+```@example custom_symmetric
+using FeastKit, LinearAlgebra
+
+A = Matrix(Diagonal([0.5, 1.0, 1.5, 3.0]))
+interval = (0.0, 2.0)
+contour = feast_contour_expert(interval..., 16, 0, 100)
+fpm = feastinit().fpm  # Raw vector required by with_custom_contour
+
+result = FeastKit.with_custom_contour(fpm, contour) do
+    feast(A, interval; M0=4, fpm=fpm, backend=:serial)
+end
+
+@assert result.info == 0
+@assert result.lambda ≈ [0.5, 1.0, 1.5]
+result.lambda
+```
+
+For a generalized problem, use `feast(A, B, interval; ...)` inside the same
+block. The helper restores the previous contour settings when the block exits,
+including on exceptions. It is module-qualified because it is not exported.
+Use a separate `fpm` vector for each concurrent solve.
+
+!!! important "Half-contour versus full contour"
+    `feast` solves real symmetric or complex Hermitian problems on a real
+    interval. Its kernels account for conjugate symmetry using a half-contour,
+    as returned by `feast_contour_expert`. Use `feast_general` with a full
+    closed contour for complex search regions, as shown below. These examples
+    explicitly select the serial backend; they do not assume that parallel
+    backends consume registered custom contours.
+
+Choose `M0` larger than the expected number of enclosed eigenvalues, or use
+`M0 == size(A, 1)` for a small full-space solve. A saturated smaller subspace
+returns `Feast_ERROR_M0` because completeness cannot be certified.
+
+### Full-Contour Weight Convention
+
+For a counterclockwise full contour, supply quadrature weights for
+`dz / (2π * im)`, **not** for `dz` alone. For a parametrization `z(t)`, this is
+`z′(t) * Δt / (2π * im)`. `feast_contour_custom_weights!` copies the nodes and
+weights into a contour; it does not normalize the weights or register the contour.
+Do not divide the weights returned by FeastKit's built-in contour generators again.
+
 ### Designing Your Own Contour
 
 ```julia
@@ -129,25 +178,28 @@ function create_rectangular_contour(xmin, xmax, ymin, ymax, nx, ny)
     - nx, ny: Number of points on horizontal/vertical segments
     """
     
-    # Bottom edge: xmin to xmax
-    bottom_x = range(xmin, xmax, length=nx)
+    # Midpoint quadrature on each edge, traversed counterclockwise.
+    # Each weight includes the normalization dz / (2π * im).
+    dx = (xmax - xmin) / nx
+    dy = (ymax - ymin) / ny
+    bottom_x = [xmin + (j - 0.5) * dx for j in 1:nx]
     bottom_nodes = [x + im*ymin for x in bottom_x]
-    bottom_weights = fill((xmax - xmin) / nx, nx)
+    bottom_weights = fill(dx / (2π * im), nx)
     
     # Right edge: ymin to ymax  
-    right_y = range(ymin, ymax, length=ny)[2:end] # Skip corner
+    right_y = [ymin + (j - 0.5) * dy for j in 1:ny]
     right_nodes = [xmax + im*y for y in right_y]
-    right_weights = fill(im * (ymax - ymin) / ny, ny-1)
+    right_weights = fill(im * dy / (2π * im), ny)
     
     # Top edge: xmax to xmin (reverse direction)
-    top_x = range(xmax, xmin, length=nx)[2:end] # Skip corner
+    top_x = [xmax - (j - 0.5) * dx for j in 1:nx]
     top_nodes = [x + im*ymax for x in top_x] 
-    top_weights = fill(-(xmax - xmin) / nx, nx-1)
+    top_weights = fill(-dx / (2π * im), nx)
     
     # Left edge: ymax to ymin (reverse direction)
-    left_y = range(ymax, ymin, length=ny)[2:end-1] # Skip corners
+    left_y = [ymax - (j - 0.5) * dy for j in 1:ny]
     left_nodes = [xmin + im*y for y in left_y]
-    left_weights = fill(-im * (ymax - ymin) / ny, ny-2)
+    left_weights = fill(-im * dy / (2π * im), ny)
     
     # Combine all segments
     all_nodes = vcat(bottom_nodes, right_nodes, top_nodes, left_nodes)
@@ -166,7 +218,9 @@ contour = feast_contour_custom_weights!(nodes, weights)
 
 ### Circular Contour for Complex Eigenvalues
 
-```julia
+```@example custom_general
+using FeastKit, LinearAlgebra
+
 function create_circular_contour(center, radius, n_points)
     """
     Create circular contour for general eigenvalue problems.
@@ -174,7 +228,8 @@ function create_circular_contour(center, radius, n_points)
     θ = range(0, 2π, length=n_points+1)[1:end-1]  # Exclude 2π (same as 0)
     
     nodes = [center + radius * exp(im * θᵢ) for θᵢ in θ]
-    weights = [im * radius * exp(im * θᵢ) * (2π / n_points) for θᵢ in θ]
+    # dz / (2π * im) = radius * exp(im * θ) / n_points
+    weights = [radius * exp(im * θᵢ) / n_points for θᵢ in θ]
     
     return nodes, weights
 end
@@ -182,10 +237,28 @@ end
 # Example usage
 center = 1.0 + 0.5im  
 radius = 2.0
-nodes, weights = create_circular_contour(center, radius, 16)
+nodes, weights = create_circular_contour(center, radius, 64)
 
 contour = feast_contour_custom_weights!(nodes, weights)
+
+A = Matrix(Diagonal(ComplexF64[0.5 + 0.1im, 1.0 + 0.5im, 4.0 + 0.5im]))
+fpm = feastinit().fpm
+fpm[16] = 1  # Trapezoidal nodes, rather than Gauss node-count validation
+
+result = FeastKit.with_custom_contour(fpm, contour) do
+    feast_general(A, center, radius; M0=3, fpm=fpm, backend=:serial)
+end
+
+@assert result.info == 0
+@assert result.M == 2
+@assert sort(result.lambda; by=real) ≈ [0.5 + 0.1im, 1.0 + 0.5im]
+result.lambda
 ```
+
+For a generalized problem, call `feast_general(A, B, center, radius; ...)`.
+The `center` and `radius` arguments are still required by the interface; for this
+circular example they match the custom contour. The registered contour supplies
+the integration nodes and weights.
 
 ### Adaptive Contour Generation
 
@@ -278,7 +351,10 @@ function multi_level_feast(A, eigenvalue_regions; M0_per_region=10)
         fpm[2] = n_points
         fpm[16] = method
         
-        result = feast(A, (region_min, region_max), M0=M0_per_region, fpm=fpm)
+        result = FeastKit.with_custom_contour(fpm, contour) do
+            feast(A, (region_min, region_max); M0=M0_per_region, fpm=fpm,
+                  backend=:serial)
+        end
         
         println("Found $(result.M) eigenvalues in region $i")
         
@@ -385,24 +461,16 @@ function create_star_contour(center, radius, n_spikes, n_points_per_spike)
     nodes = ComplexF64[]
     weights = ComplexF64[]
     
-    for spike in 1:n_spikes
-        # Base angle for this spike
-        θ_base = 2π * (spike - 1) / n_spikes
-        
-        # Create points along this spike
-        for i in 1:n_points_per_spike
-            # Vary radius from center to maximum
-            r = radius * i / n_points_per_spike
-            θ = θ_base + 0.1 * sin(4π * i / n_points_per_spike)  # Add slight perturbation
-            
-            z = center + r * exp(im * θ)
-            push!(nodes, z)
-            
-            # Approximate weight (tangent direction)
-            dz_dt = (radius / n_points_per_spike) * exp(im * θ) * 
-                   (1 + im * 0.4 * π * cos(4π * i / n_points_per_spike) / n_points_per_spike)
-            push!(weights, dz_dt)
-        end
+    n = n_spikes * n_points_per_spike
+    Δθ = 2π / n
+    for j in 0:n-1
+        # A smooth closed curve, not disconnected radial spokes.
+        θ = (j + 0.5) * Δθ
+        r = radius * (1 + 0.3 * cos(n_spikes * θ))
+        dr = -0.3 * radius * n_spikes * sin(n_spikes * θ)
+        push!(nodes, center + r * exp(im * θ))
+        dz_dθ = (dr + im * r) * exp(im * θ)
+        push!(weights, dz_dθ * Δθ / (2π * im))
     end
     
     return nodes, weights
@@ -442,7 +510,7 @@ function create_lens_contour(focus1, focus2, width, n_points)
         dy_dθ = (minor_axis/2) * cos(θᵢ)
         dz_dθ = dx_dθ + im * dy_dθ
         
-        weight = dz_dθ * (2π / n_points)
+        weight = dz_dθ * (2π / n_points) / (2π * im)
         push!(weights, weight)
     end
     

@@ -20,19 +20,24 @@ function __init__()
     return nothing
 end
 
+# Contour systems often approach invariant Krylov subspaces. A second Arnoldi
+# pass prevents loss of orthogonality from turning happy breakdown into false
+# non-convergence (particularly in Float32 and with tight inner tolerances).
 # Each wrapper returns `(solution, converged::Bool)` so call sites never touch
 # Krylov's stats objects.
 function _feast_gmres(op, b; restart::Bool = true, memory::Int = 20,
                       rtol = 1e-8, atol = 1e-8, itmax::Int = 200)
     x, stats = Krylov.gmres(op, b; restart = restart, memory = memory,
-                            rtol = rtol, atol = atol, itmax = itmax)
+                            rtol = rtol, atol = atol, itmax = itmax,
+                            reorthogonalization = true)
     return x, stats.solved
 end
 
 function _feast_gmres(op, b, x0; restart::Bool = true, memory::Int = 20,
                       rtol = 1e-8, atol = 1e-8, itmax::Int = 200)
     x, stats = Krylov.gmres(op, b, x0; restart = restart, memory = memory,
-                            rtol = rtol, atol = atol, itmax = itmax)
+                            rtol = rtol, atol = atol, itmax = itmax,
+                            reorthogonalization = true)
     return x, stats.solved
 end
 
@@ -45,7 +50,7 @@ function _feast_gmres!(workspace, op, b; restart::Bool = true,
                        rtol = 1e-8, atol = 1e-8, itmax::Int = 200,
                        preconditioner = nothing)
     Krylov.gmres!(workspace, op, b; restart = restart, rtol = rtol,
-                  atol = atol, itmax = itmax,
+                  atol = atol, itmax = itmax, reorthogonalization = true,
                   M = preconditioner === nothing ? I : preconditioner)
     return workspace.stats.solved
 end

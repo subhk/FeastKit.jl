@@ -26,6 +26,8 @@ Each nonzero RHS and its operator are scaled together by the RHS norm. The
 explicit residual check is relative to that norm (without a unit-size floor),
 and zero RHS columns return zero without invoking Krylov. Sparse and banded
 drivers share this helper without converting their operators to dense matrices.
+If the explicit residual exceeds the requested accuracy, one additional GMRES
+correction (at most `maxiter` iterations) is attempted before the breakdown check.
 """
 function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
                               rhs::AbstractMatrix{Complex{T}},
@@ -52,6 +54,7 @@ function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
     # visit both contour halves, making per-column workspace allocation costly.
     gmres_workspace = _feast_gmres_workspace(N, Complex{T}; memory=max(restart, 2))
     rhs_column = Vector{Complex{T}}(undef, N)
+    refined_solution = similar(rhs_column)
     @views for j in 1:size(rhs, 2)
         b = view(rhs, :, j)
         b_norm = norm(b)
@@ -70,6 +73,22 @@ function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
         apply_shift!(residual, x_sol)
         @. residual = (residual - b) / b_norm
         res_norm = norm(residual)
+        # Krylov's absolute Arnoldi-breakdown threshold can stop a nearly
+        # invariant RHS above a tight requested tolerance. Correct the actual
+        # residual once, scaling the correction system by its own RHS norm.
+        # Keep the original solution because the reusable workspace is reset.
+        if isfinite(res_norm) && res_norm > max(T(10)*tol, T(10)*eps(T))
+            copyto!(refined_solution, x_sol)
+            rhs_scale[] = b_norm * res_norm
+            @. rhs_column = -residual / res_norm
+            solved = _feast_gmres!(gmres_workspace, op, rhs_column;
+                                    restart=true, rtol=tol, atol=zero(T), itmax=maxiter)
+            refined_solution .+= _feast_gmres_solution(gmres_workspace)
+            x_sol = refined_solution
+            apply_shift!(residual, x_sol)
+            @. residual = (residual - b) / b_norm
+            res_norm = norm(residual)
+        end
         # Krylov stops on its own recurrence residual; the explicitly
         # recomputed one is larger, and on a shifted system whose contour point
         # sits near an eigenvalue the gap is orders of magnitude, not ulps. This

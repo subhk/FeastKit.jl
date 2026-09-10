@@ -51,7 +51,10 @@ end
         kind == :hermitian ? mpi_feast(A,B,(0.5,3.5);M0=5,comm=comm,solver=solver) :
         mpi_feast_general(A,B,2.0+0im,1.5;M0=5,comm=comm,solver=solver)
     mpi_rhs_fault_target[] = nothing
-    @test solve().info == 0
+    control = solve()
+    @test control.info == 0
+    @test control.M == 3
+    @test control.epsout <= 1e-12
     mpi_rhs_fault_target[] = rank == 1 ? B : nothing
     result = solve()
     @test result.info == Int(solver == :direct ? Feast_ERROR_LAPACK : Feast_ERROR_NO_CONVERGENCE)

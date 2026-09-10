@@ -4,6 +4,31 @@ real_projection_callback(A::AbstractMatrix{T}) where T =
     (y::AbstractVector{T},x::AbstractVector{T})->mul!(y,A,x)
 
 @testset "Serial projection and scaling regressions" begin
+    @testset "GMRES near invariant-subspace breakdown" begin
+        T = Float32
+        A = T[2 1 0; 1 3 1; 0 1 4]
+        B = T[2 .5 0; .5 1 0; 0 0 1]
+        Q = zeros(T,3,3)
+        FeastKit._feast_seeded_subspace!(Q)
+        fpm = feastinit().fpm
+        feastdefault!(fpm)
+        z = first(feast_contour(T(.1),T(5),fpm).Zne)
+        op = FeastKit.MatrixFreeShiftedOperator(3,z,
+            real_projection_callback(A),real_projection_callback(B),T)
+        rhs = Complex{T}.(B*Q[:,2])
+        # Julia 1.10 previously reported breakdown before meeting 1e-6 here.
+        for warm in (false,true)
+            x, solved = warm ? FeastKit._feast_gmres(op,rhs,zeros(Complex{T},3);
+                rtol=T(1e-6),atol=T(1e-12)) : FeastKit._feast_gmres(op,rhs;
+                rtol=T(1e-6),atol=T(1e-12))
+            @test solved
+            @test norm((z*B-A)*x-rhs)/norm(rhs) <= T(1e-6)
+        end
+        workspace = FeastKit._feast_gmres_workspace(3,Complex{T})
+        @test FeastKit._feast_gmres!(workspace,op,rhs;rtol=T(1e-6),atol=T(1e-12))
+        x = FeastKit._feast_gmres_solution(workspace)
+        @test norm((z*B-A)*x-rhs)/norm(rhs) <= T(1e-6)
+    end
     @testset "Noncommuting callback pencil $T" for T in (Float32,Float64)
         A=T[2 1 0;1 3 1;0 1 4]
         B=T[2 .5 0;.5 1 0;0 0 1]

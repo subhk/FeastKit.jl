@@ -25,6 +25,16 @@ end
         interval = (0.1, 3.9)
         A, B, fpm = _parallel_backend_problem(n)
 
+        @testset "Distributed parallel RCI contributions" begin
+            f_rci = copy(fpm); feastdefault!(f_rci)
+            state = ParallelFeastState{Float64}(f_rci[2], n, true, false)
+            work = Matrix{Float64}(I,n,n)
+            pfeast_srci!(state,n,work,zeros(ComplexF64,n,n),zeros(n,n),zeros(n,n),
+                        f_rci,interval[1],interval[2],n,zeros(n),zeros(n,n),zeros(n))
+            pfeast_compute_all_contour_points!(state,Matrix(A),Matrix(B),work,n)
+            @test all(c -> norm(c[1]) > 0, state.moment_contributions)
+        end
+
         # Compare both high-level backend selection and FEAST-prefixed parallel
         # aliases against the same serial reference.
         serial = feast(A, B, interval; M0=n, fpm=copy(fpm), backend=:serial)
@@ -60,6 +70,21 @@ end
         rank = MPI.Comm_rank(comm)
         nranks = MPI.Comm_size(comm)
         @test nranks > 1
+
+        @testset "MPI saturation $T $storage M0=$m" for T in (Float64, ComplexF64), storage in (Matrix, sparse), m in (1,3)
+            A_sat = storage(Matrix{T}(I,3,3))
+            f_sat = feastinit().fpm; feastdefault!(f_sat)
+            r_sat = mpi_feast(A_sat, copy(A_sat), (0.5,1.5); M0=m, fpm=copy(f_sat), comm=comm)
+            @test r_sat.info == (m == 1 ? Int(Feast_ERROR_M0) : 0)
+            @test r_sat.M == m
+            @test r_sat.lambda ≈ ones(m)
+            if T === ComplexF64
+                g_sat = mpi_feast_general(A_sat, copy(A_sat), 1.0+0im, 0.5; M0=m, fpm=copy(f_sat), comm=comm)
+                @test g_sat.info == (m == 1 ? Int(Feast_ERROR_M0) : 0)
+                @test g_sat.M == m
+                @test g_sat.lambda ≈ ones(m)
+            end
+        end
 
         n = 10
         interval = (0.1, 3.9)
@@ -124,7 +149,9 @@ end
         @test herm_alias.info == 0
         @test herm_alias.M == length(expected_h)
         @test sort(herm_alias.lambda[1:herm_alias.M]) ≈ expected_h atol=1e-8
-        @test herm_iter_alias.info == 0
+        # These iterative cases intentionally use a saturated trial subspace:
+        # accurate pairs are retained, but completeness cannot be certified.
+        @test herm_iter_alias.info == Int(Feast_ERROR_M0)
         @test herm_iter_alias.M == length(expected_h)
         @test sort(herm_iter_alias.lambda[1:herm_iter_alias.M]) ≈ expected_h atol=1e-8
 
@@ -203,7 +230,7 @@ end
         @test dense_herm_alias.info == 0
         @test dense_herm_alias.M == length(expected_h)
         @test sort(dense_herm_alias.lambda[1:dense_herm_alias.M]) ≈ expected_h atol=1e-8
-        @test dense_herm_iter_alias.info == 0
+        @test dense_herm_iter_alias.info == Int(Feast_ERROR_M0)
         @test dense_herm_iter_alias.M == length(expected_h)
         @test sort(dense_herm_iter_alias.lambda[1:dense_herm_iter_alias.M]) ≈ expected_h atol=1e-8
         @test dense_herm_standard_mpi.info == 0
@@ -215,7 +242,7 @@ end
         @test dense_herm_standard_alias.info == 0
         @test dense_herm_standard_alias.M == length(expected_h)
         @test sort(dense_herm_standard_alias.lambda[1:dense_herm_standard_alias.M]) ≈ expected_h atol=1e-8
-        @test dense_herm_standard_iter_alias.info == 0
+        @test dense_herm_standard_iter_alias.info == Int(Feast_ERROR_M0)
         @test dense_herm_standard_iter_alias.M == length(expected_h)
         @test sort(dense_herm_standard_iter_alias.lambda[1:dense_herm_standard_iter_alias.M]) ≈ expected_h atol=1e-8
 

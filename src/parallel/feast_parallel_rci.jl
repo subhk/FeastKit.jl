@@ -82,7 +82,8 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
         state.total_points = length(contour.Zne)
         
         # Initialize workspace
-        fill!(work, zero(T))
+        # `work` contains the caller's trial subspace, not scratch at INIT.
+        # Clearing it makes every contour right-hand side identically zero.
         fill!(workc, zero(Complex{T}))
         fill!(Aq, zero(T))
         fill!(Sq, zero(T))
@@ -281,7 +282,7 @@ function pfeast_compute_all_contour_points!(state::ParallelFeastState{T},
             z = state.contour_points[e]
             w = state.contour_weights[e]
             
-            Aq_local, Sq_local = pfeast_solve_single_point(A, B, work, z, w, M0)
+            Aq_local, Sq_local, _ = pfeast_solve_single_point(A, B, work, z, w, M0)
             state.moment_contributions[e] = (Aq_local, Sq_local)
         end
     elseif nworkers() > 1
@@ -298,7 +299,8 @@ function pfeast_compute_all_contour_points!(state::ParallelFeastState{T},
                 for (j, e) in enumerate(chunk)
                     z = state.contour_points[e]
                     w = state.contour_weights[e]
-                    chunk_results[j] = pfeast_solve_single_point(A, B, work, z, w, M0)
+                    Aq_local, Sq_local, _ = pfeast_solve_single_point(A, B, work, z, w, M0)
+                    chunk_results[j] = (Aq_local, Sq_local)
                 end
                 chunk_results
             end
@@ -317,7 +319,8 @@ function pfeast_compute_all_contour_points!(state::ParallelFeastState{T},
         for e in 1:ne
             z = state.contour_points[e]
             w = state.contour_weights[e]
-            state.moment_contributions[e] = pfeast_solve_single_point(A, B, work, z, w, M0)
+            Aq_local, Sq_local, _ = pfeast_solve_single_point(A, B, work, z, w, M0)
+            state.moment_contributions[e] = (Aq_local, Sq_local)
         end
     end
 end
@@ -338,6 +341,9 @@ function feast_parallel(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         fpm = zeros(Int, 64)
         feastinit!(fpm)
     end
+    fpm = fpm isa FeastParameters ? fpm.fpm : fpm
+    feastdefault!(fpm)
+    check_feast_srci_input(N, M0, Emin, Emax, fpm)
     
     # Create parallel state
     state = ParallelFeastState{T}(fpm[2], M0, true, use_threads)

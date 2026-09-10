@@ -1341,6 +1341,7 @@ end
 
 include("test_eigen_correctness.jl")
 include("test_review_regressions.jl")
+include("test_contour_parallel_regressions.jl")
 include("test_matrix_free.jl")
 include("test_allocation_helpers.jl")
 include("test_backend_api.jl")

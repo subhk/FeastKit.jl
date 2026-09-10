@@ -319,7 +319,7 @@ function _feast_reorder_by_gcontour!(lambda::AbstractVector{Complex{T}},
     ninside = 0
     tail = M0
     @inbounds for i in 1:M0
-        if feast_inside_gcontour(lambda[i], Emid, r; fpm=fpm)
+        if _feast_inside_general_region(lambda[i], Emid, r, fpm)
             ninside += 1
             perm[ninside] = i
         else
@@ -411,6 +411,43 @@ function feast_clear_custom_contour!(fpm::Vector{Int})
         fpm[29] = 0
     end
     return nothing
+end
+
+# The custom nodes define the search region, not just its quadrature. Ray
+# crossing supports concave polygons and either orientation in linear time.
+function _feast_inside_polygon(z::Complex{T}, nodes::AbstractVector{Complex{T}}) where T<:Real
+    isfinite(z) || return false
+    length(nodes) >= 3 || return false
+    inside = false
+    a = nodes[end]
+    for b in nodes
+        edge = b - a
+        offset = z - a
+        scale = max(abs(a), abs(b), abs(z), one(T))
+        tol = 32 * eps(T) * scale
+        if abs(edge) <= tol
+            abs(offset) <= tol && return true
+        else
+            cross = real(edge)*imag(offset) - imag(edge)*real(offset)
+            dot = real(offset)*real(edge) + imag(offset)*imag(edge)
+            if abs(cross) <= tol*abs(edge) && -tol*abs(edge) <= dot <= abs2(edge)+tol*abs(edge)
+                return true
+            end
+            if (imag(a) > imag(z)) != (imag(b) > imag(z))
+                xcross = real(a) + (imag(z)-imag(a))*real(edge)/imag(edge)
+                real(z) < xcross && (inside = !inside)
+            end
+        end
+        a = b
+    end
+    return inside
+end
+
+function _feast_inside_general_region(z::Complex{T}, center::Complex{T}, radius::T,
+                                      fpm::Vector{Int}) where T<:Real
+    contour = feast_get_custom_contour(T, fpm)
+    return contour === nothing ? feast_inside_gcontour(z, center, radius; fpm=fpm) :
+                                 _feast_inside_polygon(z, contour.Zne)
 end
 
 """

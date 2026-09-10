@@ -347,7 +347,10 @@ function feast_gcontour(Emid::Complex{T}, r::T, fpm::Vector{Int}) where T<:Abstr
 
         # Lower half (e = ne/2+1 to ne)
         for e in (ne ÷ 2 + 1):ne
-            idx = e - ne ÷ 2
+            # Continue from the upper half's right endpoint around the lower
+            # half to the left. Quadrature is unchanged, but the node sequence
+            # must trace a closed polygon when reused as a custom contour.
+            idx = ne - e + 1
             xe = x_gl_lower[idx]
             we = w_gl_lower[idx]
 

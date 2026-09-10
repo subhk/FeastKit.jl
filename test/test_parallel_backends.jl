@@ -19,7 +19,8 @@ end
 
 @testset "Distributed backend" begin
     if get(ENV, "FEASTKIT_TEST_DISTRIBUTED", "false") == "true"
-        @test nworkers() > 1
+        @test nworkers() >= 1
+        @test determine_parallel_backend(:distributed) == :distributed
 
         n = 10
         interval = (0.1, 3.9)

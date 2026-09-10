@@ -151,15 +151,19 @@ using FeastKit
 
 # ne = contour points, M0 = subspace size, N = matrix size; work/workc/Aq/Sq,
 # lambda/q/res are the caller-owned RCI buffers (see `FeastWorkspaceReal`).
-state = ParallelFeastState{Float64}(ne, M0, use_parallel=true, use_threads=true)
+state = ParallelFeastState{Float64}(ne, M0, true, true)
 
 # RCI loop
 while true
     pfeast_srci!(state, N, work, workc, Aq, Sq, fpm, Emin, Emax, M0, lambda, q, res)
 
-    if state.ijob == Int(Feast_RCI_PARALLEL_SOLVE)
+    if state.ijob == Int(FeastKit.Feast_RCI_PARALLEL_SOLVE)
         # Solve all contour points in parallel
         pfeast_compute_all_contour_points!(state, A, B, work, M0)
+    elseif state.ijob == Int(Feast_RCI_MULT_A)
+        work[:, 1:state.mode] .= A * q[:, 1:state.mode]
+    elseif state.ijob == Int(Feast_RCI_MULT_B)
+        work[:, 1:state.mode] .= B * q[:, 1:state.mode]
     elseif state.ijob == Int(Feast_RCI_DONE)
         break
     end
@@ -167,6 +171,10 @@ end
 ```
 
 ---
+
+```@docs
+pfeast_srci!
+```
 
 ## Distributed Computing
 

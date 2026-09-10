@@ -68,9 +68,13 @@ jobs:
         run: |
           julia --project -e '
             using Distributed
-            addprocs(2; exeflags=`--project=$(Base.active_project())`)
-            @everywhere using FeastKit, LinearAlgebra, SparseArrays
-            include("test/test_parallel_backends.jl")
+            for count in (1, 2)
+              pids = addprocs(count; exeflags=`--project=$(Base.active_project())`)
+              @everywhere using FeastKit, LinearAlgebra, SparseArrays
+              include("test/test_parallel_backends.jl")
+              include("test/test_contour_parallel_regressions.jl")
+              rmprocs(pids)
+            end
           '
 
   mpi-backend:

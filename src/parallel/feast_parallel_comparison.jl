@@ -43,7 +43,7 @@ function feast_parallel_comparison(A::AbstractMatrix, B::AbstractMatrix, interva
     end
 
     # Distributed benchmark
-    if Distributed.nworkers() > 1
+    if _distributed_backend_ready()
         println("\n3. Distributed execution:")
         dist_time = @elapsed begin
             results[:distributed] = feast(A, B, interval, M0=M0, parallel=:distributed)

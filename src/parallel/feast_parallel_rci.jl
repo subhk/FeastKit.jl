@@ -23,6 +23,9 @@ mutable struct ParallelFeastState{T<:Real}
     # Worker management
     use_parallel::Bool
     use_threads::Bool
+    kernel::FeastSRCIState{T}
+    kernel_job::Int
+    contour_solutions::Vector{Matrix{Complex{T}}}
 
     function ParallelFeastState{T}(ne::Int, M0::Int, use_parallel::Bool=true, use_threads::Bool=true) where T<:Real
         new(
@@ -38,291 +41,143 @@ mutable struct ParallelFeastState{T<:Real}
             ne,                                    # total_points
             Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, ne),  # moment_contributions (complex)
             use_parallel,                          # use_parallel
-            use_threads                            # use_threads
+            use_threads,                           # use_threads
+            FeastSRCIState{T}(),
+            -1,
+            Matrix{Complex{T}}[]
         )
     end
 end
 
-# Parallel FeastKit RCI for real symmetric problems
+# Advance the shared numerical kernel; the adapter only batches contour solves.
+function _pfeast_kernel_step!(state::ParallelFeastState{T}, N, work, workc,
+                              Aq, Sq, fpm, Emin, Emax, M0, lambda, q, res) where T
+    job = Ref(state.kernel_job)
+    z = Ref(state.Ze)
+    epsout = Ref(state.epsout)
+    loop = Ref(state.loop)
+    mode = Ref(state.mode)
+    info = Ref(state.info)
+    feast_srci!(job, N, z, work, workc, Aq, Sq, fpm, epsout, loop,
+                Emin, Emax, M0, lambda, q, mode, res, info; state=state.kernel)
+    state.kernel_job = job[]
+    state.Ze = z[]
+    state.epsout = epsout[]
+    state.loop = loop[]
+    state.mode = mode[]
+    state.info = info[]
+    return nothing
+end
+
+"""
+    pfeast_srci!(state, N, work, workc, Aq, Sq, fpm, Emin, Emax, M0, lambda, q, res)
+
+Parallel adapter for the real symmetric RCI kernel. On initialization, `work`
+holds the caller's trial subspace. Handle `MULT_A` and `MULT_B` by writing
+`A*q[:,1:state.mode]` or `B*q[:,1:state.mode]` into `work`, respectively.
+For `PARALLEL_SOLVE`, call `pfeast_compute_all_contour_points!`; the adapter
+then feeds those solves to the shared rank-compression/Rayleigh–Ritz kernel.
+With `use_parallel=false`, handle ordinary FACTORIZE/SOLVE jobs instead.
+"""
 function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
                       work::Matrix{T}, workc::Matrix{Complex{T}},
                       Aq::Matrix{T}, Sq::Matrix{T}, fpm::Vector{Int},
-                      Emin::T, Emax::T, M0::Int,
-                      lambda::Vector{T}, q::Matrix{T}, 
-                      res::Vector{T}) where T<:Real
-    
-    if state.ijob == -1  # Initialization
-        # Initialize Feast parameters
-        feastdefault!(fpm)
-        state.info = Int(Feast_SUCCESS)
-        
-        # Input validation
-        if N <= 0
-            state.info = Int(Feast_ERROR_N)
-            state.ijob = Int(Feast_RCI_DONE)
-            return
-        end
-        
-        if M0 <= 0 || M0 > N
-            state.info = Int(Feast_ERROR_M0)
-            state.ijob = Int(Feast_RCI_DONE)
-            return
-        end
-        
-        if Emin >= Emax
-            state.info = Int(Feast_ERROR_EMIN_EMAX)
-            state.ijob = Int(Feast_RCI_DONE)
-            return
-        end
-        
-        # Generate integration contour
-        contour = feast_contour(Emin, Emax, fpm)
-        state.contour_points = contour.Zne
-        state.contour_weights = contour.Wne
-        state.total_points = length(contour.Zne)
-        
-        # Initialize workspace
-        # `work` contains the caller's trial subspace, not scratch at INIT.
-        # Clearing it makes every contour right-hand side identically zero.
-        fill!(workc, zero(Complex{T}))
-        fill!(Aq, zero(T))
-        fill!(Sq, zero(T))
-        fill!(lambda, zero(T))
-        fill!(q, zero(T))
-        fill!(res, zero(T))
-        
-        # Initialize moment contributions storage (complex)
-        for i in 1:state.total_points
-            state.moment_contributions[i] = (zeros(Complex{T}, M0, M0), zeros(Complex{T}, M0, M0))
-        end
-        
-        state.loop = 0
-        state.current_point = 1
-        
-        if state.use_parallel
-            # Start parallel computation of all contour points
-            state.ijob = Int(Feast_RCI_PARALLEL_SOLVE)
-        else
-            # Traditional RCI: process one point at a time
-            state.Ze = state.contour_points[1]
-            state.ijob = Int(Feast_RCI_FACTORIZE)
-        end
-        
-        return
-    end
-    
-    if state.ijob == Int(Feast_RCI_PARALLEL_SOLVE)
-        # User should solve all contour points in parallel
-        # This is a new RCI job type for parallel execution
-        state.ijob = Int(Feast_RCI_PARALLEL_ACCUMULATE)
-        return
-    end
-    
-    if state.ijob == Int(Feast_RCI_PARALLEL_ACCUMULATE)
-        # Accumulate results from parallel computation
-        # Moments are stored as complex; extract real symmetric part
-
-        # Accumulate complex moments first
-        zAq = zeros(Complex{T}, size(Aq))
-        zSq = zeros(Complex{T}, size(Sq))
-        for i in 1:state.total_points
-            Aq_contrib, Sq_contrib = state.moment_contributions[i]
-            zAq .+= Aq_contrib
-            zSq .+= Sq_contrib
-        end
-
-        # Extract real symmetric part (matches dense solver approach in feast_parallel.jl)
-        Aq .= real.(0.5 .* (zAq .+ adjoint(zAq)))
-        Sq .= real.(0.5 .* (zSq .+ adjoint(zSq)))
-
-        # Proceed to eigenvalue computation
-        state.ijob = Int(Feast_RCI_EIGEN_SOLVE)
-        return
-    end
-    
-    if state.ijob == Int(Feast_RCI_EIGEN_SOLVE)
-        # Solve reduced eigenvalue problem
-        # IMPORTANT: Solve Sq*v = lambda*Aq*v (not Aq*v = lambda*Sq*v)
-        # Aq = sum(w * Q' * Y), Sq = sum(w * z * Q' * Y)
+                      Emin::T, Emax::T, M0::Int, lambda::Vector{T},
+                      q::Matrix{T}, res::Vector{T}) where T<:Real
+    if state.ijob == Int(Feast_RCI_DONE)
+        return nothing
+    elseif state.ijob == -1
+        state.kernel = FeastSRCIState{T}()
+        state.kernel_job = -1
+        # Parallel RCI has always accepted the seed in work. Tell the shared
+        # kernel to use it, without changing the caller's parameter setting.
+        old_initial = fpm[5]
+        fpm[5] = 1
         try
-            F = eigen(Sq[1:M0, 1:M0], Aq[1:M0, 1:M0])
-            lambda_red = real.(F.values)
-            v_red = real.(F.vectors)
-            
-            # Filter eigenvalues in search interval
-            M = 0
-            for i in 1:M0
-                if feast_inside_contour(lambda_red[i], Emin, Emax)
-                    M += 1
-                    lambda[M] = lambda_red[i]
-                    q[:, M] = work[:, 1:M0] * v_red[:, i]
-                end
-            end
-            
-            state.mode = M
-            
-            if M == 0
-                state.info = Int(Feast_ERROR_NO_CONVERGENCE)
-                state.ijob = Int(Feast_RCI_DONE)
-                return
-            end
-            
-            # Compute residuals
-            state.ijob = Int(Feast_RCI_MULT_A)
-            return
-            
-        catch e
-            @debug "Parallel RCI reduced eigenproblem failed" exception=e
-            state.info = Int(Feast_ERROR_LAPACK)
-            state.ijob = Int(Feast_RCI_DONE)
-            return
+            _pfeast_kernel_step!(state,N,work,workc,Aq,Sq,fpm,Emin,Emax,M0,lambda,q,res)
+        finally
+            fpm[5] = old_initial
         end
-    end
-    
-    if state.ijob == Int(Feast_RCI_MULT_A)
-        # User has computed A*q in work, now compute residuals
-        # For generalized eigenvalue problem A*x = lambda*B*x:
-        # Residual r_j = ||A*q_j - lambda_j*B*q_j|| / ||A*q_j||
-        # work[:, j] contains A*q[:, j]
-        M = state.mode
-
-        for j in 1:M
-            # Compute relative residual: ||A*q - lambda*B*q|| / ||A*q||
-            # Note: For standard eigenvalue (B=I), this reduces to ||A*q - lambda*q|| / ||A*q||
-            Aq_norm = norm(work[:, j])
-            if Aq_norm > 0
-                # work[:, j] = A*q[:, j], so residual = ||work - lambda*B*q||
-                # For now, approximate with B=I assumption (user should provide B*q if needed)
-                res[j] = norm(work[:, j] - lambda[j] * q[:, j]) / Aq_norm
-            else
-                res[j] = zero(eltype(res))
-            end
+        if state.kernel_job != Int(Feast_RCI_DONE)
+            state.contour_points = copy(state.kernel.Zne)
+            state.contour_weights = copy(state.kernel.Wne)
+            state.total_points = length(state.contour_points)
+            resize!(state.moment_contributions, state.total_points)
+            state.contour_solutions = [zeros(Complex{T},N,M0) for _ in 1:state.total_points]
         end
-
-        # Check convergence
-        state.epsout = maximum(res[1:M])
-        eps_tolerance = feast_tolerance(fpm, T)
-        
-        if state.epsout <= eps_tolerance || state.loop >= fpm[4]
-            # Converged or maximum iterations reached
-            feast_sort!(lambda, q, res, M)
-            state.ijob = Int(Feast_RCI_DONE)
-        else
-            # Start new refinement loop
-            state.loop += 1
-            
-            # Reset moment matrices
-            fill!(Aq, zero(T))
-            fill!(Sq, zero(T))
-            
-            # Use current eigenvectors as initial guess
-            work[:, 1:M] = q[:, 1:M]
-            
-            if state.use_parallel
-                state.ijob = Int(Feast_RCI_PARALLEL_SOLVE)
-            else
-                state.current_point = 1
-                state.Ze = state.contour_points[1]
-                state.ijob = Int(Feast_RCI_FACTORIZE)
-            end
+    elseif state.ijob == Int(Feast_RCI_PARALLEL_SOLVE)
+        state.ijob = Int(Feast_RCI_PARALLEL_ACCUMULATE)
+        return nothing
+    elseif state.ijob == Int(Feast_RCI_PARALLEL_ACCUMULATE)
+        for e in 1:state.total_points
+            state.current_point = e
+            # FACTORIZE -> SOLVE supplies the trial basis in work.
+            _pfeast_kernel_step!(state,N,work,workc,Aq,Sq,fpm,Emin,Emax,M0,lambda,q,res)
+            copyto!(workc, state.contour_solutions[e])
+            # SOLVE accumulates the projector; the last node starts Ritz work.
+            _pfeast_kernel_step!(state,N,work,workc,Aq,Sq,fpm,Emin,Emax,M0,lambda,q,res)
+            state.kernel_job == Int(Feast_RCI_DONE) && break
         end
+    else
+        state.kernel_job = state.ijob
+        _pfeast_kernel_step!(state,N,work,workc,Aq,Sq,fpm,Emin,Emax,M0,lambda,q,res)
     end
-    
-    # Traditional RCI paths for serial execution
-    if state.ijob == Int(Feast_RCI_FACTORIZE)
-        # User should factorize (Ze*B - A)
-        state.ijob = Int(Feast_RCI_SOLVE)
-        return
+
+    state.ijob = state.kernel_job
+    if state.use_parallel && state.kernel_job == Int(Feast_RCI_FACTORIZE)
+        # Refinement changes Q0 inside the shared kernel. All workers must see
+        # that new basis, not the previous residual matrix left in work.
+        active = state.kernel.active
+        fill!(work, zero(T))
+        copyto!(view(work,:,1:active), view(state.kernel.Q0,:,1:active))
+        state.current_point = 1
+        state.ijob = Int(Feast_RCI_PARALLEL_SOLVE)
     end
-    
-    if state.ijob == Int(Feast_RCI_SOLVE)
-        # User has solved linear systems for current point
-        # workc contains Y = (z*B - A)^{-1} * (B*Q) where Q = work[:, 1:M0]
-        e = state.current_point
-        w = state.contour_weights[e]
-        z = state.contour_points[e]
-
-        # Compute moment contribution: Q' * Y (M0 × M0 matrix)
-        # Factor of 2 for half-contour symmetry (conjugate half handled implicitly)
-        temp = work[:, 1:M0]' * workc[:, 1:M0]
-        weight = 2 * w
-
-        # Update reduced matrices
-        # IMPORTANT: Sq uses real(w * z * ...), NOT real(w * ...) * real(z)
-        Aq .+= real.(weight .* temp)
-        Sq .+= real.((weight * z) .* temp)
-
-        # Move to next integration point
-        state.current_point += 1
-        
-        if state.current_point <= state.total_points
-            # More points to process
-            state.Ze = state.contour_points[state.current_point]
-            state.ijob = Int(Feast_RCI_FACTORIZE)
-        else
-            # All points processed
-            state.current_point = 1
-            state.ijob = Int(Feast_RCI_EIGEN_SOLVE)
-        end
-    end
+    return nothing
 end
 
-# Helper function for parallel contour computation
-function pfeast_compute_all_contour_points!(state::ParallelFeastState{T}, 
+function _pfeast_rci_point(A, B, work::Matrix{T}, z::Complex{T}, w::Complex{T}) where T
+    Y = Matrix{Complex{T}}((z*B - A) \ (B*work))
+    moment = transpose(work) * Y
+    return (2*w .* moment, 2*w*z .* moment, Y)
+end
+
+# Store both legacy reduced moments and the full solved subspace. The latter
+# is essential: moments alone cannot reconstruct eigenvectors in the original
+# space when the initial trial basis is not already an invariant subspace.
+function pfeast_compute_all_contour_points!(state::ParallelFeastState{T},
                                            A::AbstractMatrix{T}, B::AbstractMatrix{T},
                                            work::Matrix{T}, M0::Int) where T<:Real
-    # This function implements the parallel computation of all contour points
-    # It's called by the user when ijob == Feast_RCI_PARALLEL_SOLVE
-    
     ne = state.total_points
-    
     if state.use_threads && Threads.nthreads() > 1
-        # Use threading
         Threads.@threads for e in 1:ne
-            z = state.contour_points[e]
-            w = state.contour_weights[e]
-            
-            Aq_local, Sq_local, _ = pfeast_solve_single_point(A, B, work, z, w, M0)
-            state.moment_contributions[e] = (Aq_local, Sq_local)
+            a, b, Y = _pfeast_rci_point(A,B,work,state.contour_points[e],state.contour_weights[e])
+            state.moment_contributions[e] = (a,b)
+            copyto!(state.contour_solutions[e],Y)
         end
-    elseif nworkers() > 1
-        # Use distributed computing
-        work_chunks = distribute_contour_points(ne, nworkers())
-
-        # Parallel computation
-        moment_futures = Vector{Future}(undef, length(work_chunks))
-
-        for (i, chunk) in enumerate(work_chunks)
-            moment_futures[i] = @spawnat workers()[i] begin
-                # Use Complex{T} to match pfeast_solve_single_point return type
-                chunk_results = Vector{Tuple{Matrix{Complex{T}}, Matrix{Complex{T}}}}(undef, length(chunk))
-                for (j, e) in enumerate(chunk)
-                    z = state.contour_points[e]
-                    w = state.contour_weights[e]
-                    Aq_local, Sq_local, _ = pfeast_solve_single_point(A, B, work, z, w, M0)
-                    chunk_results[j] = (Aq_local, Sq_local)
-                end
-                chunk_results
+    elseif _distributed_backend_ready()
+        chunks = distribute_contour_points(ne,nworkers())
+        futures = Vector{Future}(undef,length(chunks))
+        nodes, weights = state.contour_points, state.contour_weights
+        for (i, chunk) in enumerate(chunks)
+            futures[i] = @spawnat workers()[i] begin
+                [_pfeast_rci_point(A,B,work,nodes[e],weights[e]) for e in chunk]
             end
         end
-
-        # Collect results
-        for (i, future) in enumerate(moment_futures)
-            chunk_results = fetch(future)
-            chunk = work_chunks[i]
-            for (j, e) in enumerate(chunk)
-                state.moment_contributions[e] = chunk_results[j]
+        for (chunk, future) in zip(chunks,futures)
+            for (e, (a,b,Y)) in zip(chunk,fetch(future))
+                state.moment_contributions[e] = (a,b)
+                copyto!(state.contour_solutions[e],Y)
             end
         end
     else
-        # Serial fallback
         for e in 1:ne
-            z = state.contour_points[e]
-            w = state.contour_weights[e]
-            Aq_local, Sq_local, _ = pfeast_solve_single_point(A, B, work, z, w, M0)
-            state.moment_contributions[e] = (Aq_local, Sq_local)
+            a, b, Y = _pfeast_rci_point(A,B,work,state.contour_points[e],state.contour_weights[e])
+            state.moment_contributions[e] = (a,b)
+            copyto!(state.contour_solutions[e],Y)
         end
     end
+    return nothing
 end
 
 # Convenience wrapper for parallel Feast with automatic RCI handling
@@ -374,6 +229,10 @@ function feast_parallel(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             M = state.mode
             work[:, 1:M] .= A * q[:, 1:M]
             
+        elseif state.ijob == Int(Feast_RCI_MULT_B) && auto_rci
+            M = state.mode
+            work[:, 1:M] .= B * q[:, 1:M]
+
         elseif state.ijob == Int(Feast_RCI_DONE)
             break
             
@@ -420,7 +279,7 @@ function pfeast_rci_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tu
     end
 
     # Parallel with processes
-    if nworkers() > 1
+    if _distributed_backend_ready()
         println("\nParallel FeastKit (distributed):")
         dist_time = @elapsed begin
             result_dist = feast_parallel(A, B, interval, M0=M0, use_threads=false)
@@ -442,7 +301,7 @@ function pfeast_rci_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tu
         if Threads.nthreads() > 1 && @isdefined(thread_time)
             println("Thread speedup: $(round(serial_time/thread_time, digits=2))x")
         end
-        if nworkers() > 1 && @isdefined(dist_time)
+        if _distributed_backend_ready() && @isdefined(dist_time)
             println("Distributed speedup: $(round(serial_time/dist_time, digits=2))x")
         end
     end

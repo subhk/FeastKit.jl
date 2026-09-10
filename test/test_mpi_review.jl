@@ -1,7 +1,24 @@
+using Logging
+
 # Called with MPI initialized by the backend test driver.
 function test_mpi_review(comm)
     test_mpi_safety(comm)
 @testset "MPI review regressions" begin
+    @testset "Tiny general custom contour $T $storage" for T in (Float32,Float64), storage in (Matrix,sparse)
+        scale = T == Float32 ? T(1e-8) : T(1e-16)
+        center, radius = Complex{T}(T(1.5)*scale), T(0.75)*scale
+        A = storage(Matrix(Diagonal(Complex{T}.(scale .* T[1,2,2.4]))))
+        f = feastinit().fpm
+        c = feast_gcontour(center,radius,f)
+        root = MPI.Comm_size(comm)-1
+        solve = () -> mpi_feast_general(A,center,radius;M0=3,fpm=f,comm=comm,root=root)
+        r = with_logger(NullLogger()) do
+            MPI.Comm_rank(comm) == root ? FeastKit.with_custom_contour(solve,f,c) : solve()
+        end
+        @test r.info == 0
+        @test r.M == 2
+        @test r.M == 2 && isapprox(sort(real.(r.lambda ./ scale)),T[1,2];rtol=1e-5)
+    end
     @testset "Partial Hermitian projector $storage $solver" for storage in (Matrix,sparse), solver in (:direct,:gmres)
         n = 20
         U = Matrix{ComplexF64}(I,n,n)

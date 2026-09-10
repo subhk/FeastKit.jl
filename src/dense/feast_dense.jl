@@ -178,6 +178,7 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
     # complex shift in a Dict. Sized lazily from fpm[51] once the kernel has
     # built the contour; the concrete element type keeps lookups inferrable.
     factor_cache = Vector{Union{Nothing, LinearAlgebra.LU{Complex{T}, Matrix{Complex{T}}, Vector{Int}}}}()
+    store_factors = fpm[10] == 1
 
     # Shifted matrix-vector product for the iterative solver. Defined once here
     # (not rebuilt inside the SOLVE branch each iteration) so the closure and the
@@ -232,10 +233,10 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
             if use_direct
                 try
                     if isempty(factor_cache)
-                        resize!(factor_cache, fpm[51])
+                        resize!(factor_cache, store_factors ? fpm[51] : 1)
                         fill!(factor_cache, nothing)
                     end
-                    e = fpm[50]   # current contour point index set by the kernel
+                    e = store_factors ? fpm[50] : 1
                     cached = (1 <= e <= length(factor_cache)) ? factor_cache[e] : nothing
                     if cached === nothing
                         if B_is_identity
@@ -272,6 +273,7 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
                 try
                     copyto!(workc_block, rhs)
                     ldiv!(LU_factorization[], workc_block)
+                    store_factors || (factor_cache[1] = nothing)
                 catch e
                     @debug "Dense FEAST step failed" exception=e
                     info[] = Int(Feast_ERROR_LAPACK)

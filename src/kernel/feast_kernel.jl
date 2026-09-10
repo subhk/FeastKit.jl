@@ -83,6 +83,7 @@ end
         state.rank = 0
         state.M = 0
         state.active = M0
+        state.checked_subspace = fpm[5] != 1
         state.initialized = true
 
         # Store state in fpm array
@@ -345,6 +346,13 @@ end
             eps_tolerance = feast_tolerance(fpm, T)
             maxloop = fpm[4]
             converged = epsout[] <= eps_tolerance
+            # A user seed may be nearly/exactly orthogonal to an enclosed
+            # eigendirection. Small residuals certify only the pairs found,
+            # not completeness. Before accepting that seed, retain the found
+            # vectors and refill the unused search space with independent
+            # probes. Lowering the QR cutoff alone cannot recover zero overlap.
+            check_subspace = converged && !state.checked_subspace && M < M0
+            check_subspace && (converged = false)
 
             if converged || loop[] >= maxloop
                 feast_sort!(lambda, q, res, M)
@@ -362,9 +370,16 @@ end
             fill!(Aq, zero(T))
             fill!(Sq, zero(T))
 
-            # Restart from the Ritz vectors spanning the compressed subspace.
-            state.active = state.rank
-            copyto!(view(state.Q0, :, 1:state.rank), view(q, :, 1:state.rank))
+            if check_subspace
+                _feast_seeded_subspace!(state.Q0)
+                copyto!(view(state.Q0, :, 1:M), view(q, :, 1:M))
+                state.active = M0
+                state.checked_subspace = true
+            else
+                # Restart from the Ritz vectors spanning the compressed subspace.
+                state.active = state.rank
+                copyto!(view(state.Q0, :, 1:state.rank), view(q, :, 1:state.rank))
+            end
 
             state.e = 1
             fpm[50] = 1  # Reset integration point counter

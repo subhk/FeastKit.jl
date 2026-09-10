@@ -715,19 +715,11 @@ end
         end
     end
 
-    @testset "A rank-deficient user subspace is not reported as success" begin
-        # KNOWN DEFECT, recorded so a fix flips these to passing.
-        #
-        # With fpm[5] = 1 the caller supplies the initial subspace. If that
-        # subspace is nearly orthogonal to one eigenvector inside the interval,
-        # the pivoted-QR compression (rank_tol = sqrt(eps) ~ 1.5e-8) drops that
-        # direction on the first sweep. The Ritz pairs that survive are exact,
-        # so the residual test passes immediately and FEAST returns
-        # Feast_SUCCESS having found 2 of the 3 eigenvalues in the interval.
-        #
-        # Convergence is judged only on the pairs that were found; nothing
-        # cross-checks the count. Refinement cannot rescue it either, because
-        # the solve converges on loop 0 and never gets a second sweep.
+    @testset "Weak user subspace overlap=$overlap maxloops=$maxloops" for
+            overlap in (0.0, 1.0e-12), maxloops in (1, 20)
+        # The first projection drops e3; the surviving pairs are exact, but
+        # accepting their residuals alone used to miss the third eigenvalue.
+        # An independent completion sweep must recover even zero overlap.
         nd, M0d = 5, 4
         A = Matrix(Diagonal([1.0, 2.0, 3.0, 10.0, 11.0]))
         B = Matrix{Float64}(I, nd, nd)
@@ -735,10 +727,11 @@ end
 
         fpm = fresh_fpm()
         fpm[5] = 1
+        fpm[4] = maxloops
         work = zeros(Float64, nd, M0d)
         work[1, 1] = 1.0
         work[2, 2] = 1.0
-        work[3, 3] = 1.0e-12    # the e3 direction is present only at 1e-12
+        work[3, 3] = overlap    # e3 is weakly represented or entirely absent
         work[4, 3] = 1.0
         work[5, 4] = 1.0
 
@@ -772,13 +765,16 @@ end
         end
 
         # Three eigenvalues (1, 2, 3) lie in [0.5, 3.5].
-        @test_broken mode[] == 3
+        @test mode[] == 3
         # Reporting success while undercounting is the harmful half: a caller
         # has no way to tell this apart from a correct answer.
-        @test_broken !(info[] == 0 && mode[] < 3)
-        # What it does today, so the record is unambiguous.
-        @test mode[] == 2
-        @test info[] == 0
+        @test !(info[] == 0 && mode[] < 3)
+        # One refinement discovers the missing pair, but its residual needs a
+        # further sweep. Respect the limit rather than misreporting convergence.
+        @test info[] == (maxloops == 1 ? Int(Feast_ERROR_NO_CONVERGENCE) : 0)
+        @test (epsout[] <= FeastKit.feast_tolerance(fpm,Float64)) == (info[] == 0)
+        @test loop[] > 0
+        @test mode[] == 3 && isapprox(lambda[1:mode[]], [1.,2.,3.]; atol=1e-8)
     end
 
     @testset "Reusing the state object is mandatory" begin

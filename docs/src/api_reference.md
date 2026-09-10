@@ -680,6 +680,15 @@ The `fpm` parameter array controls FeastKit behavior:
 | `fpm[16]` | Integration type | 0 | 0=Gauss, 1=Trapezoidal, 2=Zolotarev |
 | `fpm[18]` | Ellipse ratio | 100 | Aspect ratio × 100 |
 
+With `fpm[5]=1`, the real-symmetric RCI kernel uses the supplied initial
+subspace first. Before accepting converged pairs with unused subspace capacity,
+it retains those pairs and fills the remaining columns with deterministic random
+probes for a verification sweep. This helps recover enclosed eigendirections
+absent from the initial guess. The sweep counts toward `fpm[4]`; exhausting that
+budget before verification/refinement finishes reports non-convergence, not
+success. As with a random initial subspace, this is not a certified eigenvalue
+count.
+
 **Setting parameters:**
 ```@example apifpm
 using FeastKit, LinearAlgebra

@@ -413,15 +413,6 @@ end
 7. **Hybrid parallelism**: Combine MPI processes with threading for maximum performance
 8. **Load balancing**: FeastKit automatically distributes contour points for optimal load balancing
 
-## Scope
-
-FeastKit focuses on the public APIs covered by the test suite rather than
-mirroring every optional routine from the original FEAST library:
-
-- Custom contour integration is supported for the FEAST interfaces documented here
-- Advanced PFEAST routines outside the documented backend matrix are out of scope
-- Matrix-free APIs use FeastKit's Julia-native operator interface
-
 ## References
 
 1. E. Polizzi, "Density-matrix-based algorithm for solving eigenvalue problems", Physical Review B 79, 115112 (2009)

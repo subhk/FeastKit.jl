@@ -4,23 +4,6 @@
 [![Stable documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://subhk.github.io/FeastKit.jl/stable/)
 [![Development documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://subhk.github.io/FeastKit.jl/dev/)
 
-A Julia implementation of the FeastKit eigenvalue solver for finding eigenvalues and eigenvectors of large-scale eigenvalue problems within a specified region.
-
-## Documentation
-
-- [Stable documentation](https://subhk.github.io/FeastKit.jl/stable/) covers the latest tagged release.
-- [Development documentation](https://subhk.github.io/FeastKit.jl/dev/) tracks `main`, including features not yet released.
-
-Use the documentation version dropdown to switch versions. If you are working
-from `main`, use `/dev/` rather than `/stable/`.
-
-For maintainers: Documenter publishes both versions to the `gh-pages` branch.
-GitHub Pages must use **Deploy from a branch → `gh-pages` → `/ (root)`** with
-the current workflow. The site's root URL may redirect to the stable version;
-use the explicit `/dev/` link for development documentation.
-
-## Overview
-
 FeastKit.jl is a pure Julia translation of the original FEAST library. FEAST is a numerical algorithm for solving both standard and generalized eigenvalue problems by computing eigenvalues located inside a given region in the complex plane.
 
 ### Key Features

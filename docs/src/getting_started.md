@@ -2,6 +2,9 @@
 
 This guide will get you up and running with FeastKit.jl in minutes. Whether you're new to eigenvalue problems or an experienced user, this tutorial covers everything you need to know.
 
+For a code-aligned checklist covering matrix assumptions, storage, contours,
+solver options, and result validation, start with [Problem Setup](problem_setup.md).
+
 ## Table of Contents
 
 1. [Installation](#installation)
@@ -17,7 +20,7 @@ This guide will get you up and running with FeastKit.jl in minutes. Whether you'
 
 ### Prerequisites
 
-FeastKit.jl requires Julia 1.6 or later. Install Julia from [julialang.org](https://julialang.org/downloads/).
+FeastKit.jl requires Julia 1.10 or later, as specified in `Project.toml`. Install Julia from [julialang.org](https://julialang.org/downloads/).
 
 ### Installing FeastKit.jl
 
@@ -86,7 +89,7 @@ println("Searching for eigenvalues in [$Emin, $Emax]")
 
 ```@example first
 # Step 3: Run FeastKit
-# M0 = maximum number of eigenvalues to find
+# M0 = trial-subspace size; leave room beyond the expected eigenvalue count
 result = feast(A, (Emin, Emax), M0=10)
 
 println("FeastKit completed:")
@@ -231,7 +234,8 @@ complex_eigenvalues = result.lambda[1:result.M]
 
 ### The FeastResult Structure
 
-Every FeastKit calculation returns a `FeastResult` with these fields:
+Symmetric/Hermitian solves return `FeastResult`; general solves return
+`FeastGeneralResult`. Both expose these fields:
 
 ```julia
 result = feast(A, (Emin, Emax), M0=10)
@@ -256,7 +260,7 @@ if result.info == 0
 elseif result.info == 1
     println("Error: Invalid matrix size")
 elseif result.info == 2  
-    println("Error: Invalid M0 parameter")
+    println("Error: Invalid or saturated M0; increase the subspace or narrow the region")
 elseif result.info == 3
     println("Error: Invalid search interval")
 else

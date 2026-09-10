@@ -30,6 +30,20 @@ function documentation_sandbox()
 end
 
 @testset "Executable documentation regressions" begin
+    @testset "Problem setup guide" begin
+        source = read(joinpath(@__DIR__, "..", "docs", "src", "problem_setup.md"), String)
+        examples = collect(eachmatch(r"(?ms)^```@example (setup_\w+)\n(.*?)^```", source))
+        @test length(examples) == 6
+        for example in examples
+            @testset "$(example.captures[1])" begin
+                sandbox = Module(gensym(:ProblemSetupExample))
+                Base.include_string(sandbox, example.captures[2])
+                result = getfield(sandbox, :result)
+                @test result.info == 0
+                @test result.M > 0
+            end
+        end
+    end
     @testset "Convergence workflow" begin
         sandbox = documentation_sandbox()
         code = documentation_block("getting_started.md", "**Problem**: FeastKit isn't converging well")

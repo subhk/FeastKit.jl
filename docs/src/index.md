@@ -2,7 +2,7 @@
 
 *Fast Eigenvalue Algorithm using Spectral Transformations in Julia*
 
-[Quick Start](@ref quick-start) | [Examples](@ref examples-gallery) | [API Reference](api_reference.md) | [Advanced Features](@ref core-concepts)
+[Problem Setup](problem_setup.md) | [Quick Start](@ref quick-start) | [Examples](@ref examples-gallery) | [API Reference](api_reference.md) | [Advanced Features](@ref core-concepts)
 
 ---
 
@@ -52,8 +52,8 @@ A = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))
 
 # Find eigenvalues near λ = 1. The eigenvalues here are 2 - 2cos(kπ/(n+1)),
 # spaced about 3e-3 apart near λ = 1, so this window holds 8 of them. M0 must
-# be at least the number of eigenvalues in the interval, or FEAST cannot
-# converge and returns info = 5.
+# exceed the number of eigenvalues in the interval unless using the full space;
+# saturation or non-convergence means the subspace/region needs adjustment.
 result = feast(A, (0.9801, 1.0182), M0=10)
 
 println("Found $(result.M) eigenvalues:")   # 8
@@ -313,7 +313,7 @@ result = feast(A_op, interval, solver=:bicgstab)
 A_op = LinearOperator{Float64}(A_mul!, size(A))
 result = feast(A_op, interval, M0=10)
 
-# Reduce M0 (max eigenvalues)
+# Reduce M0 (trial-subspace size), keeping room for all target eigenvalues
 result = feast(A, interval, M0=5)  # Instead of M0=20
 ```
 

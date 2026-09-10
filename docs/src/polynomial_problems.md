@@ -30,14 +30,18 @@ Polynomial eigenvalue problems arise in many applications:
 | Acoustic waveguides | Quadratic | 2 |
 | Viscoelastic materials | Rational/Polynomial | Variable |
 
-### Why Not Linearize?
+### Choose the Polynomial Interface
 
-While PEPs can be linearized to standard eigenvalue problems, this:
-- Increases problem size by factor of p (polynomial degree)
-- Introduces spurious eigenvalues at infinity
-- May lose numerical accuracy
+The assembled `feast_polynomial` convenience interface and the `*pev!` drivers
+use a companion linearization of dimension `p*n`. The convenience interface
+materializes coefficients as dense matrices, even for sparse input. The
+matrix-free convenience interface applies a companion operator without
+assembling that enlarged matrix. Direct polynomial RCI is a separate interface;
+see the implementation notes below. Check residuals in the original polynomial
+and account for possible infinite eigenvalues when the leading coefficient is singular.
 
-FeastKit solves PEPs directly using contour integration.
+See [Problem Setup](problem_setup.md) for an executable minimal example and
+coefficient-order, search-region, and subspace-size guidance.
 
 ---
 

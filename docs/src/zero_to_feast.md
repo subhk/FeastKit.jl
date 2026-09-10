@@ -2,6 +2,9 @@
 
 New to FeastKit or eigenvalue problems? This guide takes you from zero knowledge to running robust FeastKit computations — step by step.
 
+Use [Problem Setup](problem_setup.md) as the checklist when adapting these
+examples to your own matrices, callbacks, or polynomial model.
+
 ## What You’ll Learn
 
 - What FeastKit does and when to use it
@@ -65,7 +68,7 @@ A = spdiagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))
 
 # Target the low end of the spectrum. The eigenvalues are 2 - 2cos(kπ/(n+1));
 # (0.0, 0.2) would hold 28 of them, more than M0, and FEAST would return
-# info = 5. Bracket the ten smallest instead.
+# saturation or non-convergence. Bracket the ten smallest instead.
 Emin, Emax = 0.0, 0.02438
 res = feast(A, (Emin, Emax), M0=16)
 
@@ -75,7 +78,8 @@ res = feast(A, (Emin, Emax), M0=16)
 
 Tips:
 
-- `M0` is the max desired eigenvalues; choose slightly larger than expected.
+- `M0` is the trial-subspace size; choose larger than the expected count,
+  without exceeding the matrix dimension.
 - If `res.M == 0`, broaden the interval or validate bounds (see Section 8).
 
 ---

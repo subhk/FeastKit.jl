@@ -24,6 +24,7 @@ makedocs(
     ),
     pages = [
         "Home" => "index.md",
+        "Problem Setup" => "problem_setup.md",
         "Zero to FeastKit" => "zero_to_feast.md",
         "Getting Started" => "getting_started.md",
         "User Guide" => [

@@ -531,6 +531,7 @@ end
             contour = feast_contour(Emin, Emax, fpm)
         end
 
+        contour = _feast_complete_hermitian_contour(contour)
         state.Zne = copy(contour.Zne)
         state.Wne = copy(contour.Wne)
         state.ne = length(contour.Zne)
@@ -623,7 +624,7 @@ end
             fill!(Q_proj, zero(Complex{T}))
         end
 
-        weight = 2 * Wne[e]
+        weight = Wne[e]  # Both conjugate halves are explicit in state.Zne.
         Q_proj[:, 1:active] .+= weight .* workc[:, 1:active]
 
         fpm[50] = e + 1

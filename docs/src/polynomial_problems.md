@@ -75,6 +75,11 @@ The contour C encloses the eigenvalues of interest.
 
 ### Using `feast_polynomial`
 
+Coefficient matrices may use dense, sparse, or structured storage. This
+convenience interface materializes them as dense matrices and builds a dense
+companion problem; sparse input does not make this particular solver sparse.
+For large problems, use the matrix-free polynomial interface.
+
 ```julia
 using FeastKit, LinearAlgebra
 

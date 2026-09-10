@@ -653,6 +653,7 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
 
     contour = feast_get_custom_contour(T, fpm)
     contour === nothing && (contour = feast_contour(Emin, Emax, fpm))
+    contour = _feast_complete_hermitian_contour(contour)
     Zne = contour.Zne
     Wne = contour.Wne
     store_factors = fpm[10] == 1
@@ -685,7 +686,7 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
 
         solve_failed = false
         for (idx, z) in enumerate(Zne)
-            weight = 2 * Wne[idx]
+            weight = Wne[idx]
             basis_block = view(Q_basis, :, 1:active_dim)
             rhs_block = view(rhs_buffer, :, 1:active_dim)
             solutions_block = view(solutions, :, 1:active_dim)

@@ -481,7 +481,10 @@ function feast_polynomial(coeffs::Vector{<:AbstractMatrix{Complex{T}}},
     end
     
     d = length(coeffs) - 1  # Degree of polynomial
-    return feast_pep!(coeffs, d, center, radius, M0, _ensure_feast_parameters(fpm))
+    # The companion linearization is dense; accept the public AbstractMatrix
+    # contract by materializing sparse and structured coefficients here.
+    dense_coeffs = Matrix{Complex{T}}[Matrix{Complex{T}}(A) for A in coeffs]
+    return feast_pep!(dense_coeffs, d, center, radius, M0, _ensure_feast_parameters(fpm))
 end
 
 # Matrix-free interfaces

@@ -38,16 +38,16 @@ function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
     op = DenseShiftOperator{typeof(apply_shift!), T}(apply_shift!, N)
 
     residual = zeros(Complex{T}, N)
-    x0 = zeros(Complex{T}, N)
+    # One Krylov basis per block, not per right-hand side. Hermitian drivers
+    # visit both contour halves, making per-column workspace allocation costly.
+    gmres_workspace = _feast_gmres_workspace(N, Complex{T}; memory=max(restart, 2))
+    rhs_column = Vector{Complex{T}}(undef, N)
     @views for j in 1:size(rhs, 2)
         b = view(rhs, :, j)
-        fill!(x0, zero(Complex{T}))
-        x_sol, solved = _feast_gmres(op, b, x0;
-                                     restart=true,
-                                     memory=max(restart, 2),
-                                     rtol=tol,
-                                     atol=tol,
-                                     itmax=maxiter)
+        copyto!(rhs_column, b)
+        solved = _feast_gmres!(gmres_workspace, op, rhs_column;
+                                restart=true, rtol=tol, atol=tol, itmax=maxiter)
+        x_sol = _feast_gmres_solution(gmres_workspace)
         apply_shift!(residual, x_sol)
         @. residual -= b
         res_norm = norm(residual)

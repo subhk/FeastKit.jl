@@ -685,7 +685,7 @@ function mpi_compute_complex_hermitian_moments(
     mul!(rhs, B, Q_basis)
     for e in eachindex(local_Zne)
         z = local_Zne[e]
-        weight = 2 * local_Wne[e]
+        weight = local_Wne[e]
         try
             if solver_choice == :direct
                 F = lu(z * B - A)
@@ -737,7 +737,7 @@ function mpi_compute_complex_hermitian_moments(
         shifted = Matrix{Complex{T}}(undef, N, N)
         for e in eachindex(local_Zne)
             z = local_Zne[e]
-            weight = 2 * local_Wne[e]
+            weight = local_Wne[e]
             try
                 @. shifted = z * B - A
                 F = lu!(shifted)
@@ -769,7 +769,7 @@ function mpi_compute_complex_hermitian_moments(
 
         for e in eachindex(local_Zne)
             z = local_Zne[e]
-            weight = 2 * local_Wne[e]
+            weight = local_Wne[e]
             try
                 current_shift[] = z
                 copyto!(rhs_copy, rhs)
@@ -952,6 +952,7 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
     tol = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
 
     contour, _ = _mpi_contour(T,fpm,Emin,Emax,root,comm)
+    contour = _feast_complete_hermitian_contour(contour)
     ne = length(contour.Zne)
     Zne_global, Wne_global = contour.Zne, contour.Wne
 
@@ -1003,7 +1004,7 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
         if solver_choice == :direct
             B_is_identity ? copyto!(BQ_loop, Q_basis) : mul!(BQ_loop, B, Q_basis)
             local_success = _mpi_local_projection!(Q_proj_local_buf,local_factors,BQ_loop,
-                                                   mpi_state.local_Wne,Y_loop; scale=2)
+                                                   mpi_state.local_Wne,Y_loop)
             local_Q_proj = Q_proj_local_buf
         else
             _, _, local_Q_proj, local_success =

@@ -293,11 +293,54 @@ function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:AbstractFloa
     return FeastContour{T}(Zne, Wne)
 end
 
+# True when the nodes and weights already form a conjugate-closed (full) path.
+# A Hermitian half contour lies strictly on one side of the real axis, so every
+# node must pair with a DISTINCT node carrying the conjugate weight. A
+# self-conjugate (real-axis) node therefore reads as "not yet completed", which
+# is the safe direction: the documented public convention is a half contour.
+function _feast_hermitian_contour_is_closed(contour::FeastContour{T}) where T
+    Zne, Wne = contour.Zne, contour.Wne
+    n = length(Zne)
+    (n > 0 && iseven(n)) || return false
+    all(isfinite, Zne) && all(isfinite, Wne) || return false
+    # No absolute floor: tiny contours and tiny weights still need distinct
+    # conjugate partners. Compare node components separately so a large real
+    # translation cannot mask an imaginary-coordinate mismatch.
+    rtol = T(8) * eps(T)
+    matched = falses(n)
+    for i in 1:n
+        matched[i] && continue
+        iszero(imag(Zne[i])) && return false
+        zc = conj(Zne[i])
+        wc = conj(Wne[i])
+        partner = 0
+        for j in 1:n
+            (j == i || matched[j]) && continue
+            iszero(imag(Zne[j])) && continue
+            signbit(imag(Zne[i])) == signbit(imag(Zne[j])) && continue
+            if isapprox(real(Zne[j]), real(zc); rtol=rtol, atol=zero(T)) &&
+               isapprox(imag(Zne[j]), imag(zc); rtol=rtol, atol=zero(T)) &&
+               isapprox(Wne[j], wc; rtol=rtol, atol=zero(T))
+                partner = j
+                break
+            end
+        end
+        partner == 0 && return false
+        matched[i] = true
+        matched[partner] = true
+    end
+    return true
+end
+
 # Public Hermitian contours contain one half of the conjugate-symmetric path.
 # For a complex trial block, the lower-half solve is NOT the conjugate of the
 # upper-half solution: both must be applied to the same B*Q. Expand the shifts
 # explicitly so direct, iterative, banded and RCI drivers share that contract.
+# Already-closed paths are returned untouched: `feast_hrcix!` and
+# `feast_set_custom_contour!` take arbitrary user paths, and completing one of
+# those twice would double every weight in the projector.
 function _feast_complete_hermitian_contour(contour::FeastContour{T}) where T
+    _feast_hermitian_contour_is_closed(contour) && return contour
     return FeastContour{T}(vcat(contour.Zne, conj.(contour.Zne)),
                            vcat(contour.Wne, conj.(contour.Wne)))
 end

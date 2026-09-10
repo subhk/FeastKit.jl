@@ -314,6 +314,15 @@ MPI honors custom contours registered in `fpm` on the communicator's root.
 The contour nodes and weights are broadcast to every rank, and general-problem
 eigenvalue selection uses that same geometry. A rank-local factorization or
 shifted-solve failure returns `Feast_ERROR_LAPACK` collectively.
+Projected eigenproblem and distributed residual failures are also synchronized
+before ranks enter the next collective. Ranks use the root's Ritz vectors and
+stopping decision. Supply the same matrices and solver settings on all ranks.
+
+`fpm[10]=0` disables retained LU factors: each rank factors and solves one local
+shift at a time on each refinement sweep. This mode also uses serial contour
+solves within a hybrid rank to bound factor storage; `fpm[10]=1` retains factors
+and permits threaded reuse. Real and complex `mpi_feast` entry points accept
+either the `FeastParameters` returned by `feastinit()` or its raw `.fpm` vector.
 
 ```julia
 # Direct MPI interface

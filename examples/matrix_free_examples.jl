@@ -394,7 +394,7 @@ function run_matfree_examples()
     if isempty(failed)
         println("\nAll matrix-free examples converged.")
     else
-        println("\nDid not converge: " * join(failed, ", "))
+        error("Did not converge: " * join(failed, ", "))
     end
 
     return results

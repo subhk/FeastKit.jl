@@ -1200,7 +1200,9 @@ to the dense GMRES path used by the existing dense general solver.
     end
 
     grci_state = FeastGRCIState{T}()
-    max_rci_iterations = fpm[8] * (fpm[4] + 1) * 10
+    # Custom contours need not have fpm[8] nodes. Each sweep requests two
+    # jobs per actual node plus four matrix products.
+    max_rci_iterations = (2 * length(contour.Zne) + 4) * (fpm[4] + 1) + 8
     rci_iteration_count = 0
 
     while true

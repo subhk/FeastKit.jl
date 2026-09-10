@@ -179,10 +179,10 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
 
             if epsout <= eps_tolerance
                 mpi_state.converged = true
-                mpi_state.info = Int(Feast_SUCCESS)
+                mpi_state.info = _feast_exit_info(true, M, M0, N)
                 feast_sort!(lambda, q, res, M)
                 return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
-                                         Int(Feast_SUCCESS), epsout, loop)
+                                         mpi_state.info, epsout, loop)
             end
 
             active_dim = rank_r
@@ -194,7 +194,7 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     end
 
     if info_code == Int(Feast_SUCCESS)
-        info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+        info_code = _feast_exit_info(false, M_found, M0, N)
     end
     mpi_state.info = info_code
     M = M_found
@@ -469,10 +469,10 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
 
         if status == 1
             mpi_state.converged = true
-            mpi_state.info = Int(Feast_SUCCESS)
+            mpi_state.info = _feast_exit_info(true, M, M0, N)
             feast_sort!(lambda, q, res, M)
             return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
-                                     Int(Feast_SUCCESS), epsout, loop)
+                                     mpi_state.info, epsout, loop)
         end
 
         active_dim = rank_r
@@ -480,7 +480,7 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     end
 
     if info_code == Int(Feast_SUCCESS)
-        info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+        info_code = _feast_exit_info(false, M_found, M0, N)
     end
     mpi_state.info = info_code
     M = M_found
@@ -1000,10 +1000,10 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
             epsout_val = maximum(res_vec[1:M])
             M_found = M
             if epsout_val <= feast_tolerance(fpm, T)
-                info_code = Int(Feast_SUCCESS)
+                info_code = _feast_exit_info(true, M, M0, N)
                 break
             elseif loop_idx == fpm[4]
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                info_code = _feast_exit_info(false, M, M0, N)
                 break
             end
             copyto!(Q_basis, solutions)
@@ -1178,10 +1178,10 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
             epsout_val = maximum(res_vec[1:M])
             M_found = M
             if epsout_val <= feast_tolerance(fpm, T)
-                info_code = Int(Feast_SUCCESS)
+                info_code = _feast_exit_info(true, M, M0, N)
                 break
             elseif loop_idx == fpm[4]
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                info_code = _feast_exit_info(false, M, M0, N)
                 break
             end
             copyto!(Q_basis, solutions)

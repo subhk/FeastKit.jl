@@ -2,6 +2,39 @@ using Test, FeastKit, LinearAlgebra, SparseArrays
 
 review_fpm() = (f = zeros(Int, 64); feastinit!(f); f)
 
+@testset "Parallel RCI and banded review regressions" begin
+    @testset "Parallel RCI preserves caller seed" begin
+        f = review_fpm(); feastdefault!(f)
+        s = ParallelFeastState{Float64}(f[2], 3)
+        w = Matrix{Float64}(I, 3, 3)
+        pfeast_srci!(s, 3, w, zeros(ComplexF64,3,3), zeros(3,3),
+                    zeros(3,3), f, 0.5, 3.5, 3, zeros(3), zeros(3,3), zeros(3))
+        @test w == Matrix{Float64}(I,3,3)
+        A = Matrix(Diagonal([1.,2.,3.]))
+        pfeast_compute_all_contour_points!(s, A, Matrix{Float64}(I,3,3), w, 3)
+        @test all(c -> norm(c[1]) > 0, s.moment_contributions)
+    end
+    @testset "Parallel wrapper parameters $kind" for kind in (:default, :vector, :wrapper)
+        A = Matrix(Diagonal([1.,2.,3.]))
+        f = feastinit(); feastdefault!(f.fpm)
+        kwargs = kind == :default ? (;) : (fpm=kind == :vector ? f.fpm : f,)
+        r = feast_parallel(A, Matrix{Float64}(I,3,3), (0.5,3.5); M0=3, kwargs...)
+        @test r.info == 0
+        @test r.M == 3
+        @test r.lambda ≈ [1.,2.,3.] atol=1e-8
+    end
+    @testset "Banded custom contour budget" begin
+        cf = review_fpm(); cf[8]=256; cf[16]=1
+        c = feast_gcontour(1.5+0im,0.75,cf)
+        f = review_fpm(); f[8]=8; f[4]=1; f[16]=1
+        A = full_to_general_banded(Matrix(Diagonal(ComplexF64[1,2,3])),0)
+        r = feast_gbevx!(A,0,1.5+0im,0.75,3,f,c.Zne,c.Wne)
+        @test r.info == 0
+        @test r.M == 2
+        @test sort(real.(r.lambda)) ≈ [1.,2.] atol=1e-8
+    end
+end
+
 @testset "Second review regressions" begin
     @testset "Parallel saturation agrees with serial" begin
         for storage in (Matrix, sparse), m in (1, 3)

@@ -443,11 +443,13 @@ function _feast_inside_polygon(z::Complex{T}, nodes::AbstractVector{Complex{T}})
     return inside
 end
 
-function _feast_inside_general_region(z::Complex{T}, center::Complex{T}, radius::T,
+function _feast_inside_general_region(z::Number, center::Complex{T}, radius::T,
                                       fpm::Vector{Int}) where T<:Real
+    # LAPACK may return real Ritz values for a complex pencil with real spectrum.
+    point = Complex{T}(z)
     contour = feast_get_custom_contour(T, fpm)
-    return contour === nothing ? feast_inside_gcontour(z, center, radius; fpm=fpm) :
-                                 _feast_inside_polygon(z, contour.Zne)
+    return contour === nothing ? feast_inside_gcontour(point, center, radius; fpm=fpm) :
+                                 _feast_inside_polygon(point, contour.Zne)
 end
 
 """

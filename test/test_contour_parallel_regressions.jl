@@ -76,6 +76,12 @@ using Test, FeastKit, LinearAlgebra, SparseArrays
             @test FeastKit._feast_inside_polygon(1.0+0im,c.Zne)
             @test FeastKit._feast_inside_polygon(2.0+0im,c.Zne)
             @test !FeastKit._feast_inside_polygon(3.0+0im,c.Zne)
+            # Real-valued Ritz arrays are platform-dependent LAPACK output.
+            @test FeastKit._feast_inside_general_region(1.0,1.5+0im,0.75,f)
+            FeastKit.with_custom_contour(f,c) do
+                @test FeastKit._feast_inside_general_region(1.0,1.5+0im,0.75,f)
+                @test !FeastKit._feast_inside_general_region(3.0,1.5+0im,0.75,f)
+            end
         end
     end
     @testset "Custom rectangle excludes nominal-circle eigenvalues" begin

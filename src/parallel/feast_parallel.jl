@@ -153,7 +153,7 @@ function pfeast_sygv!(A::Matrix{T}, B::Matrix{T},
 
     # Preserve the historical contract: with threading off and no worker
     # processes, computation proceeds serially over contour points.
-    if !use_threads && nworkers() == 1
+    if !use_threads && !_distributed_backend_ready()
         @warn "No worker processes available, falling back to serial computation"
     end
 
@@ -429,7 +429,7 @@ function pfeast_compute_moments_distributed(A::Matrix{T}, B::Matrix{T},
     ne = length(contour.Zne)
 
     # Distribute work across available workers
-    if nworkers() == 1
+    if !_distributed_backend_ready()
         @warn "No worker processes available, falling back to serial computation"
         return pfeast_compute_moments_serial(A, B, work, contour, M0)
     end
@@ -838,7 +838,7 @@ function pfeast_compute_sparse_moments_distributed(A::SparseMatrixCSC{T,Int},
                                                   M0::Int) where T<:Real
     ne = length(contour.Zne)
 
-    if nworkers() == 1
+    if !_distributed_backend_ready()
         return pfeast_compute_sparse_moments_serial(A, B, work, contour, M0)
     end
 
@@ -975,7 +975,7 @@ function pfeast_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple,
     end
 
     # Parallel timing (distributed)
-    if nworkers() > 1
+    if _distributed_backend_ready()
         println("\nParallel execution (distributed):")
         distributed_time = @elapsed begin
             if isa(A, SparseMatrixCSC)

@@ -1027,7 +1027,7 @@ end
                 perm = state.perm
                 tail = rank
                 for i in 1:rank
-                    if feast_inside_gcontour(lambda_red[i], Emid, r; fpm=fpm)
+                    if _feast_inside_general_region(lambda_red[i], Emid, r, fpm)
                         M += 1
                         perm[M] = i
                         lambda[M] = lambda_red[i]
@@ -1483,7 +1483,7 @@ end
             M = 0
             basis = view(state.basis, :, 1:k)
             for i in 1:k
-                if feast_inside_gcontour(lambda_red[i], Emid, r; fpm=fpm)
+                if _feast_inside_general_region(lambda_red[i], Emid, r, fpm)
                     M += 1
                     lambda[M] = lambda_red[i]
                     q_col = view(q, :, M)

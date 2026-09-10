@@ -4,6 +4,10 @@
 nworkers() = Distributed.nworkers()
 workers() = Distributed.workers()
 
+# With no added workers Julia reports nworkers()==1 for the main process.
+# nprocs distinguishes that case from one actual worker plus the main process.
+_distributed_backend_ready() = Distributed.nprocs() > 1
+
 # Check if MPI is available
 function mpi_available()
     return isdefined(FeastKit, :MPI_AVAILABLE) && FeastKit.MPI_AVAILABLE[]
@@ -19,12 +23,12 @@ function determine_parallel_backend(parallel::Symbol, comm=nothing)
         # Explicit MPI request
         if !_mpi_backend_ready(comm)
             @warn "MPI requested but not available, falling back to distributed"
-            return nworkers() > 1 ? :distributed : (Threads.nthreads() > 1 ? :threads : :serial)
+            return _distributed_backend_ready() ? :distributed : (Threads.nthreads() > 1 ? :threads : :serial)
         end
         return :mpi
         
     elseif parallel == :distributed
-        return nworkers() > 1 ? :distributed : :serial
+        return _distributed_backend_ready() ? :distributed : :serial
         
     elseif parallel == :threads
         return Threads.nthreads() > 1 ? :threads : :serial
@@ -36,7 +40,7 @@ function determine_parallel_backend(parallel::Symbol, comm=nothing)
         # Automatic backend selection based on available resources
         if _mpi_backend_ready(comm)
             return :mpi
-        elseif nworkers() > 1
+        elseif _distributed_backend_ready()
             return :distributed
         elseif Threads.nthreads() > 1
             return :threads
@@ -54,7 +58,7 @@ function _select_parallel_backend(requested::Symbol, comm=nothing; allow_fallbac
     # requests can still degrade to a backend that is actually available.
     if !allow_fallback && requested == :mpi && !_mpi_backend_ready(comm)
         throw(ArgumentError("Requested backend :mpi is not available. Initialize MPI and pass comm=MPI.COMM_WORLD, or use backend=:auto to allow fallback."))
-    elseif !allow_fallback && requested == :distributed && nworkers() <= 1
+    elseif !allow_fallback && requested == :distributed && !_distributed_backend_ready()
         throw(ArgumentError("Requested backend :distributed requires at least one Julia worker. Call Distributed.addprocs(...) first, or use backend=:auto to allow fallback."))
     elseif !allow_fallback && requested == :threads && Threads.nthreads() <= 1
         throw(ArgumentError("Requested backend :threads requires Julia to run with more than one thread. Start Julia with JULIA_NUM_THREADS>1, or use backend=:auto to allow fallback."))
@@ -224,7 +228,7 @@ function feast_parallel_capabilities()
     capabilities[:threads] = Threads.nthreads() > 1
     
     # Check distributed computing
-    capabilities[:distributed] = nworkers() > 1
+    capabilities[:distributed] = _distributed_backend_ready()
     
     # Check MPI
     capabilities[:mpi] = mpi_available()
@@ -246,7 +250,7 @@ function feast_parallel_info()
     println("\nDistributed Computing:")
     println("  Available workers: $(nworkers())")
     println("  Worker processes: $(workers())")
-    println("  Status: $(nworkers() > 1 ? "Enabled" : "Disabled")")
+    println("  Status: $(_distributed_backend_ready() ? "Enabled" : "Disabled")")
     
     # MPI info (if available)
     println("\nMPI:")
@@ -275,7 +279,7 @@ function feast_parallel_info()
         if Threads.nthreads() > 1
             println("  Best for hybrid: Use feast_hybrid() for MPI+threading")
         end
-    elseif nworkers() > 1
+    elseif _distributed_backend_ready()
         println("  Best for multi-core: Use parallel=:distributed")
     elseif Threads.nthreads() > 1
         println("  Best for multi-core: Use parallel=:threads")

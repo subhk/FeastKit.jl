@@ -309,6 +309,11 @@ julia --project -e 'using MPI; run(`$(MPI.mpiexec()) -n 8 julia --project feast_
 
 ### MPI-Specific Functions
 
+MPI honors custom contours registered in `fpm` on the communicator's root.
+The contour nodes and weights are broadcast to every rank, and general-problem
+eigenvalue selection uses that same geometry. A rank-local factorization or
+shifted-solve failure returns `Feast_ERROR_LAPACK` collectively.
+
 ```julia
 # Direct MPI interface
 result = mpi_feast(A, B, interval, M0=M0, comm=comm, fpm=fpm)
@@ -375,7 +380,7 @@ rank = MPI.Comm_rank(comm)
 result = feast_hybrid(A, B, interval,
                       M0=20,
                       comm=comm,
-                      use_threads=true)
+                      use_threads_per_rank=true)
 
 if rank == 0
     println("Hybrid computation complete")
@@ -388,6 +393,11 @@ MPI.Finalize()
 ```
 
 ### Architecture
+
+Hybrid execution uses the same filtered-subspace solver as the real MPI backend,
+with independent contour solves threaded within each rank. MPI collectives run
+on the calling thread. Rank-local factorization or solve failures are propagated
+collectively as `Feast_ERROR_LAPACK`.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -570,7 +580,7 @@ feast(A, B, interval; backend=:mpi, comm=MPI.COMM_WORLD)
 # Direct parallel interface
 feast_parallel(A, B, interval; use_threads=true)
 mpi_feast(A, B, interval; comm=comm)
-feast_hybrid(A, B, interval; comm=comm, use_threads=true)
+feast_hybrid(A, B, interval; comm=comm, use_threads_per_rank=true)
 ```
 
 ### State Management

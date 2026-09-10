@@ -301,7 +301,8 @@ function _feast_reorder_by_gcontour!(lambda::AbstractVector{Complex{T}},
                                      lambda_tmp::AbstractVector{Complex{T}},
                                      vector_tmp::AbstractMatrix{Complex{T}},
                                      Emid::Complex{T}, r::T,
-                                     fpm::Vector{Int}, M0::Int) where T<:Real
+                                     fpm::Vector{Int}, M0::Int;
+                                     contour=feast_get_custom_contour(T, fpm)) where T<:Real
     @boundscheck begin
         length(lambda) >= M0 || throw(BoundsError(lambda, M0))
         length(perm) >= M0 || throw(BoundsError(perm, M0))
@@ -319,7 +320,9 @@ function _feast_reorder_by_gcontour!(lambda::AbstractVector{Complex{T}},
     ninside = 0
     tail = M0
     @inbounds for i in 1:M0
-        if _feast_inside_general_region(lambda[i], Emid, r, fpm)
+        inside = contour === nothing ? feast_inside_gcontour(lambda[i], Emid, r; fpm=fpm) :
+                                       _feast_inside_polygon(lambda[i], contour.Zne)
+        if inside
             ninside += 1
             perm[ninside] = i
         else

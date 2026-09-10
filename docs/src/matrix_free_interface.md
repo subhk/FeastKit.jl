@@ -9,6 +9,10 @@ Instead of providing explicit matrices `A` and `B`, you provide functions that c
 - `B_mul!(y, x)` computes `y = B*x`
 - `linear_solver(Y, z, X)` solves `(z*B - A)*Y = X`
 
+For generalized problems, the wrapper supplies `X = B*Q` during contour
+projection. The callback should solve the supplied system without multiplying
+the right-hand side by `B` again.
+
 ## Matrix-Free Operator Types
 
 ### LinearOperator

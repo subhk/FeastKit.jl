@@ -295,6 +295,8 @@ end
         @test dense_general_standard_iter_alias.M == length(expected_g)
         @test isapprox(sort_complex(dense_general_standard_iter_alias.lambda[1:dense_general_standard_iter_alias.M]), sort_complex(expected_g); atol=1e-8)
 
+        include("test_mpi_review.jl")
+        test_mpi_review(comm)
         rank == 0 && println("MPI backend verified on $nranks ranks")
         MPI.Finalize()
     else

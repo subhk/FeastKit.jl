@@ -5,11 +5,80 @@
 using LinearAlgebra
 using SparseArrays
 
+# The root owns contour configuration, including the process-local registry.
+# Broadcast geometry explicitly; registry IDs are not meaningful on other ranks.
+function _mpi_contour(::Type{T}, fpm, center, radius, root, comm; general=false) where T
+    contour = nothing
+    custom = false
+    failure = nothing
+    if MPI.Comm_rank(comm) == root
+        try
+            contour = feast_get_custom_contour(T, fpm)
+            custom = contour !== nothing
+            contour === nothing && (contour = general ? feast_gcontour(center,radius,fpm) :
+                                                        feast_contour(center,radius,fpm))
+        catch err
+            failure = sprint(showerror,err)
+        end
+    end
+    failure = MPI.bcast(failure,root,comm)
+    failure === nothing || throw(ArgumentError(failure))
+    contour = MPI.bcast(contour,root,comm)
+    custom = MPI.bcast(custom,root,comm)
+    return contour, custom
+end
+
+function _mpi_factorize_contour(A, B, nodes, comm)
+    factors = try
+        [lu(z*B-A) for z in nodes]
+    catch err
+        @debug "MPI local factorization failed" exception=err
+        nothing
+    end
+    return _mpi_success_count(factors !== nothing,comm) == MPI.Comm_size(comm) ? factors : nothing
+end
+
+# MPI collectives remain on the calling thread. Worker tasks own separate solve
+# and accumulation buffers; any local failure is reported collectively by callers.
+function _mpi_local_projection!(dest, factors, rhs, weights, scratch;
+                                scale=1, use_threads=false)
+    fill!(dest,zero(eltype(dest)))
+    try
+        if use_threads && Threads.nthreads() > 1 && length(factors) > 1
+            chunks = collect(Iterators.partition(eachindex(factors),
+                             cld(length(factors),Threads.nthreads())))
+            partials = [zeros(eltype(dest),size(dest)) for _ in chunks]
+            Threads.@threads for ci in eachindex(chunks)
+                Y = similar(scratch)
+                for e in chunks[ci]
+                    copyto!(Y,rhs)
+                    ldiv!(factors[e],Y)
+                    partials[ci] .+= (scale*weights[e]) .* Y
+                end
+            end
+            for part in partials
+                dest .+= part
+            end
+        else
+            for e in eachindex(factors)
+                copyto!(scratch,rhs)
+                ldiv!(factors[e],scratch)
+                dest .+= (scale*weights[e]) .* scratch
+            end
+        end
+        return true
+    catch err
+        @debug "MPI local shifted solve failed" exception=err
+        return false
+    end
+end
+
 # Main MPI FeastKit interface
 function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                          Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                          comm::MPI.Comm = MPI.COMM_WORLD,
-                         root::Int = 0) where T<:Real
+                         root::Int = 0,
+                         use_threads::Bool = false) where T<:Real
     # MPI parallel Feast for real symmetric generalized eigenvalue problems
 
     # Initialize MPI if not already done
@@ -25,15 +94,9 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
 
     # Generate integration contour (on root, then broadcast)
-    contour = nothing
-    if rank == root
-        contour = feast_contour(Emin, Emax, fpm)
-    end
-
-    # Broadcast contour to all ranks
-    ne = MPI.bcast(rank == root ? length(contour.Zne) : 0, root, comm)
-    Zne_global = MPI.bcast(rank == root ? contour.Zne : Vector{Complex{T}}(undef, ne), root, comm)
-    Wne_global = MPI.bcast(rank == root ? contour.Wne : Vector{Complex{T}}(undef, ne), root, comm)
+    contour, _ = _mpi_contour(T,fpm,Emin,Emax,root,comm)
+    ne = length(contour.Zne)
+    Zne_global, Wne_global = contour.Zne, contour.Wne
 
     # Create MPI state
     mpi_state = MPIFeastState{T}(comm, MPI.Comm_rank(comm), MPI.Comm_size(comm),
@@ -49,16 +112,19 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     eps_tolerance = feast_tolerance(fpm, T)
     max_loops = fpm[4]
 
-    # Trial subspace: deterministic complex seed (identical on every rank),
-    # broadcast from root so all ranks start bit-for-bit identical.
-    Q = Matrix{Complex{T}}(undef, N, M0)
-    _feast_seeded_subspace_complex!(Q)
+    # Half-contour symmetry requires a real trial basis. Its full projector is
+    # the real part of the doubled upper-half contribution.
+    Q_real = Matrix{T}(undef,N,M0)
+    _feast_seeded_subspace!(Q_real)
+    Q = Complex{T}.(Q_real)
     MPI.Bcast!(Q, root, comm)
     active_dim = M0
 
     # Each rank factorizes ONLY its local contour shifts, once, and reuses them
     # across refinement loops. This is the work MPI parallelizes across ranks.
-    local_factors = [lu(z * B - A) for z in mpi_state.local_Zne]
+    local_factors = _mpi_factorize_contour(A,B,mpi_state.local_Zne,comm)
+    local_factors === nothing && return FeastResult{T,T}(T[],zeros(T,N,0),0,T[],
+        Int(Feast_ERROR_LAPACK),T(Inf),0)
     B_is_identity = (B == I)   # standard problem: skip the per-loop identity matmuls
 
     # Scratch reused across loops. The reduced Rayleigh-Ritz problem mirrors the
@@ -67,7 +133,8 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     # eigenpairs for M0 larger than the number of eigenvalues in the interval.
     Q_proj_local = Matrix{Complex{T}}(undef, N, M0)
     BQ_loop = Matrix{Complex{T}}(undef, N, M0)
-    Y_loop = Matrix{Complex{T}}(undef, N, M0)
+    Y_loop = A isa AbstractSparseMatrix ?
+        Matrix{Complex{promote_type(T,Float64)}}(undef,N,M0) : Matrix{Complex{T}}(undef,N,M0)
     q_basis = Matrix{Complex{T}}(undef, N, M0)
     AQ = Matrix{Complex{T}}(undef, N, M0)
     BQm = Matrix{Complex{T}}(undef, N, M0)
@@ -104,15 +171,16 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         qpl = view(Q_proj_local, :, 1:active_dim)
         fill!(qpl, zero(Complex{T}))
         Yv = view(Y_loop, :, 1:active_dim)
-        for (e, Fe) in enumerate(local_factors)
-            copyto!(Yv, bq)
-            ldiv!(Fe, Yv)
-            w = 2 * mpi_state.local_Wne[e]
-            @. qpl += w * Yv
+        success = _mpi_local_projection!(qpl,local_factors,bq,mpi_state.local_Wne,Yv;
+                                         scale=2,use_threads=use_threads)
+        if _mpi_success_count(success,comm) != nprocs
+            info_code = Int(Feast_ERROR_LAPACK)
+            break
         end
         # In-place Allreduce: every rank's partial sum is replaced by the global
         # sum, no per-loop slice copy or fresh receive buffer.
         MPI.Allreduce!(qpl, MPI.SUM, comm)
+        @. qpl = real(qpl)
 
         try
             rank_r = _feast_qr_compress!(q_basis, qpl, active_dim;
@@ -308,10 +376,9 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     size(B) == (N, N) || throw(ArgumentError("Matrix B must match size of A"))
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
 
-    contour = rank == root ? feast_contour(Emin, Emax, fpm) : nothing
-    ne = MPI.bcast(rank == root ? length(contour.Zne) : 0, root, comm)
-    Zne_global = MPI.bcast(rank == root ? contour.Zne : Vector{Complex{T}}(undef, ne), root, comm)
-    Wne_global = MPI.bcast(rank == root ? contour.Wne : Vector{Complex{T}}(undef, ne), root, comm)
+    contour, _ = _mpi_contour(T,fpm,Emin,Emax,root,comm)
+    ne = length(contour.Zne)
+    Zne_global, Wne_global = contour.Zne, contour.Wne
 
     mpi_state = MPIFeastState{T}(comm, MPI.Comm_rank(comm), MPI.Comm_size(comm),
                                  N, M0, ne, root)
@@ -321,13 +388,16 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     eps_tolerance = feast_tolerance(fpm, T)
     max_loops = fpm[4]
 
-    Q = Matrix{Complex{T}}(undef, N, M0)
-    _feast_seeded_subspace_complex!(Q)
+    Q_real = Matrix{T}(undef,N,M0)
+    _feast_seeded_subspace!(Q_real)
+    Q = Complex{T}.(Q_real)
     MPI.Bcast!(Q, root, comm)
     active_dim = M0
 
     # Each rank factorizes only its local contour shifts, once, reused across loops.
-    local_factors = [lu(z * B - A) for z in mpi_state.local_Zne]
+    local_factors = _mpi_factorize_contour(A,B,mpi_state.local_Zne,comm)
+    local_factors === nothing && return FeastResult{T,T}(T[],zeros(T,N,0),0,T[],
+        Int(Feast_ERROR_LAPACK),T(Inf),0)
     B_is_identity = (B == I)   # standard problem: skip the per-loop identity matmuls
 
     Q_proj_local = Matrix{Complex{T}}(undef, N, M0)
@@ -369,11 +439,10 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
         qpl = view(Q_proj_local, :, 1:active_dim)
         fill!(qpl, zero(Complex{T}))
         Yv = view(Y_loop, :, 1:active_dim)
-        for (e, Fe) in enumerate(local_factors)
-            copyto!(Yv, bq)
-            ldiv!(Fe, Yv)
-            w = 2 * mpi_state.local_Wne[e]
-            @. qpl += w * Yv
+        success = _mpi_local_projection!(qpl,local_factors,bq,mpi_state.local_Wne,Yv; scale=2)
+        if _mpi_success_count(success,comm) != nprocs
+            info_code = Int(Feast_ERROR_LAPACK)
+            break
         end
 
         # Sum the partial filtered subspaces to ROOT ONLY. The reduced
@@ -382,6 +451,7 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
         # bandwidth and capped scaling). Results are broadcast back. The reduce
         # is in place: root's qpl becomes the global sum, no fresh buffer.
         MPI.Reduce!(qpl, MPI.SUM, root, comm)
+        @. qpl = real(qpl)
 
         rank_r = active_dim
         M = 0
@@ -881,10 +951,9 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
     solver_choice = _mpi_solver_choice(solver)
     tol = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
 
-    contour = rank == root ? feast_contour(Emin, Emax, fpm) : nothing
-    ne = MPI.bcast(rank == root ? length(contour.Zne) : 0, root, comm)
-    Zne_global = MPI.bcast(rank == root ? contour.Zne : Vector{Complex{T}}(undef, ne), root, comm)
-    Wne_global = MPI.bcast(rank == root ? contour.Wne : Vector{Complex{T}}(undef, ne), root, comm)
+    contour, _ = _mpi_contour(T,fpm,Emin,Emax,root,comm)
+    ne = length(contour.Zne)
+    Zne_global, Wne_global = contour.Zne, contour.Wne
 
     mpi_state = MPIFeastState{T}(comm, MPI.Comm_rank(comm), MPI.Comm_size(comm),
                                  N, M0, ne, root)
@@ -897,7 +966,11 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
     # Cache this rank's local factorizations once (direct solver only); reused
     # across all refinement loops. Iterative solves have nothing to cache.
     local_factors = solver_choice == :direct ?
-        [lu(z * B - A) for z in mpi_state.local_Zne] : nothing
+        _mpi_factorize_contour(A,B,mpi_state.local_Zne,comm) : nothing
+    if solver_choice == :direct && local_factors === nothing
+        return FeastResult{T,Complex{T}}(T[],zeros(Complex{T},N,0),0,T[],
+            Int(Feast_ERROR_LAPACK),T(Inf),0)
+    end
     B_is_identity = (B == I)   # standard problem: skip per-loop identity matmuls
     BQ_loop = similar(Q_basis)
     Q_proj_local_buf = similar(Q_basis)
@@ -929,14 +1002,9 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
         # ORTHONORMAL basis below — what the old rank-deficient moment path lacked.
         if solver_choice == :direct
             B_is_identity ? copyto!(BQ_loop, Q_basis) : mul!(BQ_loop, B, Q_basis)
-            fill!(Q_proj_local_buf, zero(Complex{T}))
-            for (e, Fe) in enumerate(local_factors)
-                copyto!(Y_loop, BQ_loop)
-                ldiv!(Fe, Y_loop)
-                @. Q_proj_local_buf += (2 * mpi_state.local_Wne[e]) * Y_loop
-            end
+            local_success = _mpi_local_projection!(Q_proj_local_buf,local_factors,BQ_loop,
+                                                   mpi_state.local_Wne,Y_loop; scale=2)
             local_Q_proj = Q_proj_local_buf
-            local_success = true
         else
             _, _, local_Q_proj, local_success =
                 mpi_compute_complex_hermitian_moments(A, B, Q_basis,
@@ -1068,10 +1136,9 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
     solver_choice = _mpi_solver_choice(solver)
     tol = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
 
-    contour = rank == root ? feast_gcontour(Emid, r, fpm) : nothing
-    ne = MPI.bcast(rank == root ? length(contour.Zne) : 0, root, comm)
-    Zne_global = MPI.bcast(rank == root ? contour.Zne : Vector{Complex{T}}(undef, ne), root, comm)
-    Wne_global = MPI.bcast(rank == root ? contour.Wne : Vector{Complex{T}}(undef, ne), root, comm)
+    contour, custom_contour = _mpi_contour(T,fpm,Emid,r,root,comm; general=true)
+    ne = length(contour.Zne)
+    Zne_global, Wne_global = contour.Zne, contour.Wne
 
     mpi_state = MPIFeastState{T}(comm, MPI.Comm_rank(comm), MPI.Comm_size(comm),
                                  N, M0, ne, root)
@@ -1084,7 +1151,11 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
     # Cache this rank's local factorizations once (direct solver only); reused
     # across all refinement loops. Iterative solves have nothing to cache.
     local_factors = solver_choice == :direct ?
-        [lu(z * B - A) for z in mpi_state.local_Zne] : nothing
+        _mpi_factorize_contour(A,B,mpi_state.local_Zne,comm) : nothing
+    if solver_choice == :direct && local_factors === nothing
+        return FeastGeneralResult{T}(Complex{T}[],zeros(Complex{T},N,0),0,T[],
+            Int(Feast_ERROR_LAPACK),T(Inf),0)
+    end
     B_is_identity = (B == I)   # standard problem: skip per-loop identity matmuls
     BQ_loop = similar(Q_basis)
     Q_proj_local_buf = similar(Q_basis)
@@ -1115,14 +1186,9 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
             # Cached factorizations: apply each local resolvent to B*Q. General
             # FEAST uses the full contour, so the weight is Wne[e] (no factor 2).
             B_is_identity ? copyto!(BQ_loop, Q_basis) : mul!(BQ_loop, B, Q_basis)
-            fill!(Q_proj_local_buf, zero(Complex{T}))
-            for (e, Fe) in enumerate(local_factors)
-                copyto!(Y_loop, BQ_loop)
-                ldiv!(Fe, Y_loop)
-                @. Q_proj_local_buf += mpi_state.local_Wne[e] * Y_loop
-            end
+            local_success = _mpi_local_projection!(Q_proj_local_buf,local_factors,BQ_loop,
+                                                   mpi_state.local_Wne,Y_loop; scale=1)
             local_Q_proj = Q_proj_local_buf
-            local_success = true
         else
             local_Q_proj, local_success =
                 mpi_compute_complex_general_projection(A, B, Q_basis,
@@ -1164,7 +1230,8 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
             end
             M = _feast_reorder_by_gcontour!(lambda_vec, solutions, perm,
                                             lambda_tmp, solutions_tmp,
-                                            Emid, r, fpm, M0)
+                                            Emid, r, fpm, M0;
+                                            contour=custom_contour ? contour : nothing)
             if M == 0
                 info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                 break
@@ -1265,7 +1332,7 @@ function mpi_feast(A::AbstractMatrix{T}, interval::Tuple{T,T};
 
     # Create identity matrix of appropriate type
     if isa(A, SparseMatrixCSC)
-        B = sparse(I, N, N)
+        B = spdiagm(0 => fill(one(T), N))
     else
         B = Matrix{T}(I, N, N)
     end

@@ -481,7 +481,7 @@ function feast_polynomial(coeffs::Vector{<:AbstractMatrix{Complex{T}}},
     end
     
     d = length(coeffs) - 1  # Degree of polynomial
-    return feast_pep!(coeffs, d, center, radius, M0, fpm)
+    return feast_pep!(coeffs, d, center, radius, M0, _ensure_feast_parameters(fpm))
 end
 
 # Matrix-free interfaces
@@ -500,7 +500,7 @@ function feast_matvec(A_mul!::Function, B_mul!::Function, N::Int,
         feastinit!(fpm)
     end
     
-    return feast_sparse_matvec!(A_mul!, B_mul!, N, Emin, Emax, M0, fpm)
+    return feast_sparse_matvec!(A_mul!, B_mul!, N, Emin, Emax, M0, _ensure_feast_parameters(fpm))
 end
 
 # Advanced configuration functions

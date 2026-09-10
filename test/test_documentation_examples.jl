@@ -32,7 +32,13 @@ end
 @testset "Executable documentation regressions" begin
     @testset "Problem setup guide" begin
         source = read(joinpath(@__DIR__, "..", "docs", "src", "problem_setup.md"), String)
-        examples = collect(eachmatch(r"(?ms)^```@example (setup_\w+)\n(.*?)^```", source))
+        pattern = r"(?ms)^```@example (setup_\w+)\r?\n(.*?)^```"
+        # Exercise both checkout styles on every platform, including Unix CI.
+        unix_source = replace(source, "\r\n" => "\n")
+        for text in (unix_source, replace(unix_source, "\n" => "\r\n"))
+            @test length(collect(eachmatch(pattern, text))) == 6
+        end
+        examples = collect(eachmatch(pattern, source))
         @test length(examples) == 6
         for example in examples
             @testset "$(example.captures[1])" begin

@@ -122,7 +122,7 @@ A = spdiagm(0 => [1.0, 2.0, 3.0, 4.0])
 B = spdiagm(0 => ones(4))
 fpm = feastinit().fpm
 result = feast_scsrgv!(A, B, 0.5, 2.5, 3, fpm;
-                       solver=:gmres, solver_tol=1e-12,
+                       solver=:gmres, solver_tol=1e-14,
                        solver_maxiter=200, solver_restart=20)
 @assert result.info == 0 && result.M == 2
 result.lambda
@@ -131,7 +131,9 @@ result.lambda
 Direct factorization is a useful baseline. Sparse factorization can have
 substantial fill-in; storing all contour factorizations trades memory for
 speed. Iterative solves need sufficiently accurate inner solutions, especially
-near clustered eigenvalues. Tightening the outer tolerance alone is not enough.
+near clustered eigenvalues. Here the inner tolerance is `1e-14`, tighter than
+the default outer residual target `10.0^(-fpm[3]) == 1e-12`, to leave room for
+error in the shifted solves. Tightening the outer tolerance alone is not enough.
 
 ### Matrix-free callback contract
 

@@ -2,7 +2,9 @@
 # Demonstrates advanced contour integration features following the original Fortran implementation
 
 using FeastKit
-using LinearAlgebra, Plots
+using LinearAlgebra
+include(joinpath(@__DIR__, "feast", "utils.jl"))
+using .FeastExampleUtils: build_polygonal_contour
 
 """
 Example 1: Different Integration Methods
@@ -75,16 +77,10 @@ function example_custom_contour()
         -1.0 - 0.5im    # Bottom left
     ]
     
-    # Corresponding weights for rectangular contour (trapezoidal rule)
-    Wne = [
-        2.0 + 0.0im,    # Horizontal segments  
-        0.0 - 1.0im,    # Vertical segments
-        -2.0 + 0.0im,   # Horizontal segments
-        0.0 + 1.0im     # Vertical segments  
-    ]
-    
-    # Create contour with custom nodes and weights
-    custom_contour = feast_contour_custom_weights!(Zne, Wne)
+    # Resolve each edge with midpoint quadrature. The helper normalizes by
+    # 2πim and corrects orientation so either vertex order gives a projector.
+    custom_contour = build_polygonal_contour(Zne, fill(64,4))
+    @assert abs(sum(custom_contour.Wne ./ custom_contour.Zne)-1) < 1e-3
     
     println("Custom rectangular contour:")
     for i in 1:length(Zne)
@@ -131,7 +127,6 @@ function example_eigenvalue_problem()
     # Create a simple test matrix
     n = 10
     A = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))  # Tridiagonal matrix
-    B = I  # Identity matrix
     
     println("Matrix A ($(n)x$(n) tridiagonal):")
     println("  Diagonal: $(diag(A)[1:3])... ")
@@ -143,11 +138,10 @@ function example_eigenvalue_problem()
     
     # Search for eigenvalues in middle range
     Emin, Emax = 1.0, 3.0
-    M0 = 6  # Number of eigenvalues to find
+    M0 = 6  # Trial subspace size (larger than the expected eigenvalue count)
     
     # Use different contour types 
     println("\\nUsing Gauss-Legendre integration (8 points):")
-    # This would typically be used in a full Feast solver
     contour_gauss = feast_contour_expert(Emin, Emax, 8, 0, 100)
     println("Integration nodes generated: $(length(contour_gauss.Zne))")
     
@@ -155,7 +149,19 @@ function example_eigenvalue_problem()
     contour_zolo = feast_contour_expert(Emin, Emax, 8, 2, 100)
     println("Integration nodes generated: $(length(contour_zolo.Zne))")
     
-    return A, true_eigenvalues, contour_gauss, contour_zolo
+    expected = filter(λ -> Emin < λ < Emax, true_eigenvalues)
+    results = map((contour_gauss,contour_zolo)) do contour
+        fpm = feastinit().fpm
+        result = FeastKit.with_custom_contour(fpm,contour) do
+            feast(A,(Emin,Emax); M0=M0,fpm=fpm,backend=:serial)
+        end
+        @assert result.info == 0
+        @assert result.M == length(expected)
+        @assert isapprox(sort(result.lambda),expected;atol=1e-8)
+        println("Eigenvalues: ", result.lambda, "; residual: ", result.epsout)
+        result
+    end
+    return results
 end
 
 """

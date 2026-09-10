@@ -16,7 +16,23 @@ contour = feast_contour_expert(0.0, 4.0, 12, 2, 100)
 
 println(&quot;Zolotarev contour characteristics:&quot;)
 println(&quot;Optimized for elliptical regions&quot;)
-println(&quot;Excellent for clustered eigenvalues&quot;)</code></pre><p><strong>Advantages</strong>:</p><ul><li>Theoretically optimal for ellipses  </li><li>Excellent for clustered eigenvalues</li><li>Adaptive node placement</li></ul><p><strong>Disadvantages</strong>:</p><ul><li>More complex implementation</li><li>Problem-specific optimization</li></ul><hr/><h2 id="Custom-Contour-Design"><a class="docs-heading-anchor" href="#Custom-Contour-Design">Custom Contour Design</a><a id="Custom-Contour-Design-1"></a><a class="docs-heading-anchor-permalink" href="#Custom-Contour-Design" title="Permalink"></a></h2><h3 id="Designing-Your-Own-Contour"><a class="docs-heading-anchor" href="#Designing-Your-Own-Contour">Designing Your Own Contour</a><a id="Designing-Your-Own-Contour-1"></a><a class="docs-heading-anchor-permalink" href="#Designing-Your-Own-Contour" title="Permalink"></a></h3><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+println(&quot;Excellent for clustered eigenvalues&quot;)</code></pre><p><strong>Advantages</strong>:</p><ul><li>Theoretically optimal for ellipses  </li><li>Excellent for clustered eigenvalues</li><li>Adaptive node placement</li></ul><p><strong>Disadvantages</strong>:</p><ul><li>More complex implementation</li><li>Problem-specific optimization</li></ul><hr/><h2 id="Custom-Contour-Design"><a class="docs-heading-anchor" href="#Custom-Contour-Design">Custom Contour Design</a><a id="Custom-Contour-Design-1"></a><a class="docs-heading-anchor-permalink" href="#Custom-Contour-Design" title="Permalink"></a></h2><h3 id="Using-a-Contour-with-feast"><a class="docs-heading-anchor" href="#Using-a-Contour-with-feast">Using a Contour with <code>feast</code></a><a id="Using-a-Contour-with-feast-1"></a><a class="docs-heading-anchor-permalink" href="#Using-a-Contour-with-feast" title="Permalink"></a></h3><p>Creating a <code>contour</code> does not automatically attach it to a solve, and <code>feast</code> does <strong>not</strong> have a <code>contour=</code> keyword. Register it for the duration of the call using <code>FeastKit.with_custom_contour</code>, passing the <strong>same parameter vector</strong> to both the helper and the solver:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+A = Matrix(Diagonal([0.5, 1.0, 1.5, 3.0]))
+interval = (0.0, 2.0)
+contour = feast_contour_expert(interval..., 16, 0, 100)
+fpm = feastinit().fpm  # Raw vector required by with_custom_contour
+
+result = FeastKit.with_custom_contour(fpm, contour) do
+    feast(A, interval; M0=4, fpm=fpm, backend=:serial)
+end
+
+@assert result.info == 0
+@assert result.lambda ≈ [0.5, 1.0, 1.5]
+result.lambda</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">3-element Vector{Float64}:
+ 0.5000000000000001
+ 1.0
+ 1.5</code></pre><p>For a generalized problem, use <code>feast(A, B, interval; ...)</code> inside the same block. The helper restores the previous contour settings when the block exits, including on exceptions. It is module-qualified because it is not exported. Use a separate <code>fpm</code> vector for each concurrent solve.</p><div class="admonition is-category-important" id="Half-contour-versus-full-contour-e313c5ddf9836729"><header class="admonition-header">Half-contour versus full contour<a class="admonition-anchor" href="#Half-contour-versus-full-contour-e313c5ddf9836729" title="Permalink"></a></header><div class="admonition-body"><p><code>feast</code> solves real symmetric or complex Hermitian problems on a real interval. Its kernels account for conjugate symmetry using a half-contour, as returned by <code>feast_contour_expert</code>. Use <code>feast_general</code> with a full closed contour for complex search regions, as shown below. These examples explicitly select the serial backend; they do not assume that parallel backends consume registered custom contours.</p></div></div><p>Choose <code>M0</code> larger than the expected number of enclosed eigenvalues, or use <code>M0 == size(A, 1)</code> for a small full-space solve. A saturated smaller subspace returns <code>Feast_ERROR_M0</code> because completeness cannot be certified.</p><h3 id="Full-Contour-Weight-Convention"><a class="docs-heading-anchor" href="#Full-Contour-Weight-Convention">Full-Contour Weight Convention</a><a id="Full-Contour-Weight-Convention-1"></a><a class="docs-heading-anchor-permalink" href="#Full-Contour-Weight-Convention" title="Permalink"></a></h3><p>For a counterclockwise full contour, supply quadrature weights for <code>dz / (2π * im)</code>, <strong>not</strong> for <code>dz</code> alone. For a parametrization <code>z(t)</code>, this is <code>z′(t) * Δt / (2π * im)</code>. <code>feast_contour_custom_weights!</code> copies the nodes and weights into a contour; it does not normalize the weights or register the contour. Do not divide the weights returned by FeastKit&#39;s built-in contour generators again.</p><h3 id="Designing-Your-Own-Contour"><a class="docs-heading-anchor" href="#Designing-Your-Own-Contour">Designing Your Own Contour</a><a id="Designing-Your-Own-Contour-1"></a><a class="docs-heading-anchor-permalink" href="#Designing-Your-Own-Contour" title="Permalink"></a></h3><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
 
 function create_rectangular_contour(xmin, xmax, ymin, ymax, nx, ny)
     &quot;&quot;&quot;
@@ -28,25 +44,28 @@ function create_rectangular_contour(xmin, xmax, ymin, ymax, nx, ny)
     - nx, ny: Number of points on horizontal/vertical segments
     &quot;&quot;&quot;
     
-    # Bottom edge: xmin to xmax
-    bottom_x = range(xmin, xmax, length=nx)
+    # Midpoint quadrature on each edge, traversed counterclockwise.
+    # Each weight includes the normalization dz / (2π * im).
+    dx = (xmax - xmin) / nx
+    dy = (ymax - ymin) / ny
+    bottom_x = [xmin + (j - 0.5) * dx for j in 1:nx]
     bottom_nodes = [x + im*ymin for x in bottom_x]
-    bottom_weights = fill((xmax - xmin) / nx, nx)
+    bottom_weights = fill(dx / (2π * im), nx)
     
     # Right edge: ymin to ymax  
-    right_y = range(ymin, ymax, length=ny)[2:end] # Skip corner
+    right_y = [ymin + (j - 0.5) * dy for j in 1:ny]
     right_nodes = [xmax + im*y for y in right_y]
-    right_weights = fill(im * (ymax - ymin) / ny, ny-1)
+    right_weights = fill(im * dy / (2π * im), ny)
     
     # Top edge: xmax to xmin (reverse direction)
-    top_x = range(xmax, xmin, length=nx)[2:end] # Skip corner
+    top_x = [xmax - (j - 0.5) * dx for j in 1:nx]
     top_nodes = [x + im*ymax for x in top_x] 
-    top_weights = fill(-(xmax - xmin) / nx, nx-1)
+    top_weights = fill(-dx / (2π * im), nx)
     
     # Left edge: ymax to ymin (reverse direction)
-    left_y = range(ymax, ymin, length=ny)[2:end-1] # Skip corners
+    left_y = [ymax - (j - 0.5) * dy for j in 1:ny]
     left_nodes = [xmin + im*y for y in left_y]
-    left_weights = fill(-im * (ymax - ymin) / ny, ny-2)
+    left_weights = fill(-im * dy / (2π * im), ny)
     
     # Combine all segments
     all_nodes = vcat(bottom_nodes, right_nodes, top_nodes, left_nodes)
@@ -60,24 +79,42 @@ nodes, weights = create_rectangular_contour(-1, 3, -2, 2, 20, 16)
 println(&quot;Created rectangular contour with $(length(nodes)) points&quot;)
 
 # Use with FeastKit
-contour = feast_contour_custom_weights!(nodes, weights)</code></pre><h3 id="Circular-Contour-for-Complex-Eigenvalues"><a class="docs-heading-anchor" href="#Circular-Contour-for-Complex-Eigenvalues">Circular Contour for Complex Eigenvalues</a><a id="Circular-Contour-for-Complex-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Circular-Contour-for-Complex-Eigenvalues" title="Permalink"></a></h3><pre><code class="language-julia hljs">function create_circular_contour(center, radius, n_points)
+contour = feast_contour_custom_weights!(nodes, weights)</code></pre><h3 id="Circular-Contour-for-Complex-Eigenvalues"><a class="docs-heading-anchor" href="#Circular-Contour-for-Complex-Eigenvalues">Circular Contour for Complex Eigenvalues</a><a id="Circular-Contour-for-Complex-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Circular-Contour-for-Complex-Eigenvalues" title="Permalink"></a></h3><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+
+function create_circular_contour(center, radius, n_points)
     &quot;&quot;&quot;
     Create circular contour for general eigenvalue problems.
     &quot;&quot;&quot;
     θ = range(0, 2π, length=n_points+1)[1:end-1]  # Exclude 2π (same as 0)
-    
+
     nodes = [center + radius * exp(im * θᵢ) for θᵢ in θ]
-    weights = [im * radius * exp(im * θᵢ) * (2π / n_points) for θᵢ in θ]
-    
+    # dz / (2π * im) = radius * exp(im * θ) / n_points
+    weights = [radius * exp(im * θᵢ) / n_points for θᵢ in θ]
+
     return nodes, weights
 end
 
 # Example usage
-center = 1.0 + 0.5im  
+center = 1.0 + 0.5im
 radius = 2.0
-nodes, weights = create_circular_contour(center, radius, 16)
+nodes, weights = create_circular_contour(center, radius, 64)
 
-contour = feast_contour_custom_weights!(nodes, weights)</code></pre><h3 id="Adaptive-Contour-Generation"><a class="docs-heading-anchor" href="#Adaptive-Contour-Generation">Adaptive Contour Generation</a><a id="Adaptive-Contour-Generation-1"></a><a class="docs-heading-anchor-permalink" href="#Adaptive-Contour-Generation" title="Permalink"></a></h3><pre><code class="language-julia hljs">function adaptive_elliptical_contour(Emin, Emax, eigenvalue_estimates; 
+contour = feast_contour_custom_weights!(nodes, weights)
+
+A = Matrix(Diagonal(ComplexF64[0.5 + 0.1im, 1.0 + 0.5im, 4.0 + 0.5im]))
+fpm = feastinit().fpm
+fpm[16] = 1  # Trapezoidal nodes, rather than Gauss node-count validation
+
+result = FeastKit.with_custom_contour(fpm, contour) do
+    feast_general(A, center, radius; M0=3, fpm=fpm, backend=:serial)
+end
+
+@assert result.info == 0
+@assert result.M == 2
+@assert sort(result.lambda; by=real) ≈ [0.5 + 0.1im, 1.0 + 0.5im]
+result.lambda</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2-element Vector{ComplexF64}:
+ 0.49999999999999994 + 0.1im
+                 1.0 + 0.5000000000000001im</code></pre><p>For a generalized problem, call <code>feast_general(A, B, center, radius; ...)</code>. The <code>center</code> and <code>radius</code> arguments are still required by the interface; for this circular example they match the custom contour. The registered contour supplies the integration nodes and weights.</p><h3 id="Adaptive-Contour-Generation"><a class="docs-heading-anchor" href="#Adaptive-Contour-Generation">Adaptive Contour Generation</a><a id="Adaptive-Contour-Generation-1"></a><a class="docs-heading-anchor-permalink" href="#Adaptive-Contour-Generation" title="Permalink"></a></h3><pre><code class="language-julia hljs">function adaptive_elliptical_contour(Emin, Emax, eigenvalue_estimates; 
                                     min_points=8, max_points=32)
     &quot;&quot;&quot;
     Create elliptical contour adapted to eigenvalue distribution.
@@ -153,7 +190,10 @@ contour = adaptive_elliptical_contour(0.0, 2.5, λ_estimates)</code></pre><hr/><
         fpm[2] = n_points
         fpm[16] = method
         
-        result = feast(A, (region_min, region_max), M0=M0_per_region, fpm=fpm)
+        result = FeastKit.with_custom_contour(fpm, contour) do
+            feast(A, (region_min, region_max); M0=M0_per_region, fpm=fpm,
+                  backend=:serial)
+        end
         
         println(&quot;Found $(result.M) eigenvalues in region $i&quot;)
         
@@ -242,24 +282,16 @@ println(&quot;Optimized interval: $optimized_interval&quot;)</code></pre><hr/><h
     nodes = ComplexF64[]
     weights = ComplexF64[]
     
-    for spike in 1:n_spikes
-        # Base angle for this spike
-        θ_base = 2π * (spike - 1) / n_spikes
-        
-        # Create points along this spike
-        for i in 1:n_points_per_spike
-            # Vary radius from center to maximum
-            r = radius * i / n_points_per_spike
-            θ = θ_base + 0.1 * sin(4π * i / n_points_per_spike)  # Add slight perturbation
-            
-            z = center + r * exp(im * θ)
-            push!(nodes, z)
-            
-            # Approximate weight (tangent direction)
-            dz_dt = (radius / n_points_per_spike) * exp(im * θ) * 
-                   (1 + im * 0.4 * π * cos(4π * i / n_points_per_spike) / n_points_per_spike)
-            push!(weights, dz_dt)
-        end
+    n = n_spikes * n_points_per_spike
+    Δθ = 2π / n
+    for j in 0:n-1
+        # A smooth closed curve, not disconnected radial spokes.
+        θ = (j + 0.5) * Δθ
+        r = radius * (1 + 0.3 * cos(n_spikes * θ))
+        dr = -0.3 * radius * n_spikes * sin(n_spikes * θ)
+        push!(nodes, center + r * exp(im * θ))
+        dz_dθ = (dr + im * r) * exp(im * θ)
+        push!(weights, dz_dθ * Δθ / (2π * im))
     end
     
     return nodes, weights
@@ -291,7 +323,7 @@ end</code></pre><h3 id="Lens-Shaped-Contours"><a class="docs-heading-anchor" hre
         dy_dθ = (minor_axis/2) * cos(θᵢ)
         dz_dθ = dx_dθ + im * dy_dθ
         
-        weight = dz_dθ * (2π / n_points)
+        weight = dz_dθ * (2π / n_points) / (2π * im)
         push!(weights, weight)
     end
     
@@ -397,4 +429,4 @@ for i in 1:result.M
 end
 
 # 3. Use iterative refinement
-fpm[4] = 50  # More refinement iterations</code></pre></div></div><hr/><h2 id="Expert-reverse-communication-state"><a class="docs-heading-anchor" href="#Expert-reverse-communication-state">Expert reverse-communication state</a><a id="Expert-reverse-communication-state-1"></a><a class="docs-heading-anchor-permalink" href="#Expert-reverse-communication-state" title="Permalink"></a></h2><p>The expert RCI wrappers <code>feast_srcix!</code>, <code>feast_hrcix!</code>, and <code>feast_grcix!</code> accept a <code>state</code> keyword just like their ordinary-contour counterparts. Construct a <code>FeastSRCIState{T}</code>, <code>FeastHRCIState{T}</code>, or <code>FeastGRCIState{T}</code> once and pass the same object with <code>state=state</code> on every call in the RCI loop. The contour arguments alone do not preserve the trial subspace or iteration phase between calls.</p><hr/><p>&lt;div align=&quot;center&quot;&gt;   &lt;p&gt;&lt;strong&gt;Master advanced contour integration techniques with FeastKit.jl&lt;/strong&gt;&lt;/p&gt;   ← <a href="../performance/">Performance</a> | <a href="../api_reference/">API Reference</a> → &lt;/div&gt;</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../performance/">« Performance Tips</a><a class="docs-footer-nextpage" href="../complex_eigenvalues/">Complex Eigenvalues »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Thursday 10 September 2026 00:20">Thursday 10 September 2026</span>. Using Julia version 1.12.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+fpm[4] = 50  # More refinement iterations</code></pre></div></div><hr/><h2 id="Expert-reverse-communication-state"><a class="docs-heading-anchor" href="#Expert-reverse-communication-state">Expert reverse-communication state</a><a id="Expert-reverse-communication-state-1"></a><a class="docs-heading-anchor-permalink" href="#Expert-reverse-communication-state" title="Permalink"></a></h2><p>The expert RCI wrappers <code>feast_srcix!</code>, <code>feast_hrcix!</code>, and <code>feast_grcix!</code> accept a <code>state</code> keyword just like their ordinary-contour counterparts. Construct a <code>FeastSRCIState{T}</code>, <code>FeastHRCIState{T}</code>, or <code>FeastGRCIState{T}</code> once and pass the same object with <code>state=state</code> on every call in the RCI loop. The contour arguments alone do not preserve the trial subspace or iteration phase between calls.</p><hr/><p>&lt;div align=&quot;center&quot;&gt;   &lt;p&gt;&lt;strong&gt;Master advanced contour integration techniques with FeastKit.jl&lt;/strong&gt;&lt;/p&gt;   ← <a href="../performance/">Performance</a> | <a href="../api_reference/">API Reference</a> → &lt;/div&gt;</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../performance/">« Performance Tips</a><a class="docs-footer-nextpage" href="../complex_eigenvalues/">Complex Eigenvalues »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Thursday 10 September 2026 00:49">Thursday 10 September 2026</span>. Using Julia version 1.12.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

@@ -466,7 +466,7 @@ interval = (0.0, 2.5e-5)
 feast_parallel_comparison(A, B, interval, 20)
 
 # Detailed benchmarks
-pfeast_rci_benchmark(A, B, interval, M0, compare_serial=true)
+FeastKit.pfeast_rci_benchmark(A, B, interval, 20; compare_serial=true)
 # Parallel RCI Performance Comparison
 # =====================================
 # Matrix size: 5000

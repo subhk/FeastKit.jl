@@ -645,9 +645,9 @@ diagnostics = diagnose_contour_quality(contour, A, interval)
     **Solutions**:
     ```julia
     # 1. Increase precision
-    fpm = zeros(Int, 64)
+    fpm = feastinit().fpm
     fpm[3] = 14  # Higher tolerance (10^-14)
-    result = feast(A, interval, fmp=fpm)
+    result = feast(A, interval; fpm=fpm)
     
     # 2. Check residuals
     for i in 1:result.M

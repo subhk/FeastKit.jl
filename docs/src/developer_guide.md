@@ -272,23 +272,18 @@ end
 
 Ensure type-stable code paths:
 ```julia
-# Good: explicit type parameters
-function solve{T<:Real}(A::Matrix{T}, ...)
-    workspace = zeros(T, n, m)
-    ...
-end
-
-# Avoid: type instability
-function solve(A, ...)
-    workspace = similar(A)  # Type inferred at runtime
-    ...
+# Explicit type parameters and a workspace with a concrete element type
+function solve(A::Matrix{T}, b::Vector{T}) where {T<:Real}
+    workspace = zeros(T, length(b))
+    ldiv!(workspace, lu(A), b)
+    return workspace
 end
 ```
 
 ### Documentation
 
 Use docstrings for public functions:
-```julia
+````julia
 """
     feast_sygv!(A, B, Emin, Emax, M0, fpm)
 
@@ -311,9 +306,9 @@ result = feast_sygv!(A, B, 0.0, 1.0, 10, fpm)
 ```
 """
 function feast_sygv!(A, B, Emin, Emax, M0, fpm)
-    ...
+    # Implementation
 end
-```
+````
 
 ---
 

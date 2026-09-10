@@ -201,7 +201,7 @@ end
 
 ### Docstrings
 
-```julia
+````julia
 """
     my_function(A, B; tol=1e-12)
 
@@ -227,7 +227,7 @@ See also [`related_function`](@ref).
 function my_function(A::Matrix{T}, B::Matrix{T}; tol=1e-12) where T
     # Implementation
 end
-```
+````
 
 ---
 

@@ -343,17 +343,17 @@ println("Estimated eigenvalue range: $bounds")
 # Step 2: Adjust FeastKit parameters
 fpm = zeros(Int, 64)
 feastinit!(fpm)
-fpm[1] = 1      # Print level (0=silent, 1=summary, 2=detailed)
+fpm[1] = 1      # Print level (0=silent, 1=on)
 fpm[2] = 16     # Integration points (8-32 typical)
-fmp[3] = 12     # Tolerance: 10^(-fmp[3])
+fpm[3] = 12     # Tolerance: 10^(-fpm[3])
 fpm[4] = 50     # Max refinement iterations
 
 result = feast(A, (Emin, Emax), M0=20, fpm=fpm)
 
 # Step 3: Try different integration methods
-result_zolotarev = feast(A, (Emin, Emax), M0=20, 
-                        integration_method=:zolotarev, 
-                        integration_points=12)
+fpm[16] = 2     # 0=Gauss-Legendre, 1=trapezoidal, 2=Zolotarev
+fpm[2] = 12     # Half-contour integration points
+result_zolotarev = feast(A, (Emin, Emax); M0=20, fpm=fpm)
 ```
 
 ### Workflow 4: Large-Scale Problems

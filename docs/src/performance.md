@@ -140,7 +140,7 @@ end
 Different integration methods have varying computational costs:
 
 ```julia
-using FeastKit, BenchmarkTools
+using FeastKit, LinearAlgebra
 
 function benchmark_integration_methods(A, interval)
     methods = [
@@ -159,10 +159,7 @@ function benchmark_integration_methods(A, interval)
         
         # Test different numbers of integration points
         for ne in [8, 12, 16, 24]
-            contour = feast_contour_expert(interval[1], interval[2], ne, method_id, 100)
-            
-            fpm = zeros(Int, 64)
-            feastinit!(fmp)
+            fpm = feastinit().fpm
             fpm[2] = ne
             fpm[16] = method_id
             
@@ -361,11 +358,8 @@ end
 function optimize_for_distribution(A, interval, eigenvalue_density="uniform")
     if eigenvalue_density == "clustered"
         # Use more integration points and Zolotarev method
-        contour = feast_contour_expert(interval[1], interval[2], 24, 2, 100)
-        
-        fpm = zeros(Int, 64)
-        feastinit!(fpm)
-        fmp[2] = 24      # More integration points
+        fpm = feastinit().fpm
+        fpm[2] = 24      # More integration points
         fpm[16] = 2      # Zolotarev integration
         fpm[3] = 14      # Higher precision
         
@@ -373,9 +367,10 @@ function optimize_for_distribution(A, interval, eigenvalue_density="uniform")
         
     elseif eigenvalue_density == "sparse"
         # Use fewer integration points, lower precision
-        result = feast(A, interval, M0=10, 
-                      integration_points=8, 
-                      tolerance=1e-8)
+        fpm = feastinit().fpm
+        fpm[2] = 8      # Half-contour integration points
+        fpm[3] = 8      # Tolerance: 10^(-fpm[3]) = 1e-8
+        result = feast(A, interval; M0=10, fpm=fpm)
         
     else  # uniform
         # Default settings work well

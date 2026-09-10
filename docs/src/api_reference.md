@@ -404,16 +404,24 @@ Use `strict_backend=true` when fallback to serial should be treated as an error.
 Direct MPI interface.
 
 ```julia
-mpi_feast(A, B, interval, comm; kwargs...)
+mpi_feast(A, B, interval; comm=comm, kwargs...)
 ```
 
 ### ParallelFeastState
 
-State structure for parallel FeastKit calculations.
+State for the threaded/distributed reverse-communication API `pfeast_srci!`,
+not an MPI communicator or a standalone solver. Construct it with the number
+of contour points and the subspace size. For an automatic solve, use
+`feast_parallel`:
 
 ```julia
-state = ParallelFeastState(comm, A, B, interval, M0)
-result = feast_parallel!(state)
+fpm = feastinit().fpm
+fpm[2] = 8  # Set the point count before constructing manual RCI state
+M0 = 10
+state = ParallelFeastState{Float64}(fpm[2], M0, true, true)
+# Manual RCI callers pass state to pfeast_srci! and service its requested jobs.
+# Automatic solve (manages its own state):
+result = feast_parallel(A, B, interval; M0=M0, fpm=fpm)
 ```
 
 ```@docs

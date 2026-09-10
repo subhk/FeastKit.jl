@@ -114,6 +114,51 @@ println("Excellent for clustered eigenvalues")
 
 ## Custom Contour Design
 
+### Built-in Circle, Ellipse, and Box
+
+Use the exported shape constructors for standard closed contours; no manual
+node generation or weight normalization is needed:
+
+```julia
+circle = feast_circle(0.0 + 0im, 1.0; n=64)
+ellipse = feast_ellipse(0.0 + 0im, 2.0, 1.0; n=64, rotation=0.2)
+box = feast_rectangle(-1.0, 1.0, -1.0, 1.0; points_per_edge=32)
+```
+
+Ellipse axes are **semiaxis lengths**, and `rotation` is in **radians**.
+The box arguments are `xmin, xmax, ymin, ymax`; 32 points per edge means 128
+total nodes. All three constructors return full closed contours with normalized
+weights. Use them with `feast_general`, not as half-contours for `feast`.
+
+Here is a complete solve with each shape:
+
+```@example standard_shapes
+using FeastKit, LinearAlgebra
+
+A = Matrix(Diagonal(ComplexF64[-0.3+0.2im, 0.4-0.1im, 2.5]))
+contours = (feast_circle(0, 1),
+            feast_ellipse(0, 2, 1; rotation=0.2),
+            feast_rectangle(-1, 1, -1, 1))
+results = map(contours) do contour
+    fpm = feastinit().fpm
+    fpm[16] = 1  # Midpoint/trapezoidal quadrature, not Gauss node-count rules
+    result = FeastKit.with_custom_contour(fpm, contour) do
+        feast_general(A, 0.0+0im, 3.0; M0=3, fpm=fpm, backend=:serial)
+    end
+    @assert result.info == 0 && result.M == 2
+    @assert sort(result.lambda; by=real) ≈ [-0.3+0.2im, 0.4-0.1im]
+    result
+end
+[result.lambda for result in results]
+```
+
+The nominal center/radius arguments remain required, but the **registered
+contour** controls integration and eigenvalue selection: `2.5` is excluded here
+even though it lies inside the nominal radius of 3. For a generalized problem,
+replace the call with `feast_general(A, B, 0.0+0im, 3.0; ...)`.
+Keep eigenvalues away from contour boundaries and increase the node count when
+needed, especially for boxes. No `contour=` keyword is supported.
+
 ### Using a Contour with `feast`
 
 Creating a `contour` does not automatically attach it to a solve, and `feast`

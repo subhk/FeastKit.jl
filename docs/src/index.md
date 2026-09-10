@@ -331,7 +331,7 @@ Ready to dive deeper? Explore these advanced topics:
 
 - [Matrix-Free Interface](matrix_free_interface.md) - For large-scale problems
 - [Parallel Computing](parallel_computing.md) - MPI and threading
-- [Custom Contours](custom_contours.md) - Advanced integration methods
+- [Custom Contours](custom_contours.md) - Circle, ellipse, and box constructors with complete solves
 - [Performance Optimization](performance.md) - Speed and memory tips
 - [Examples](examples.md) - Real-world applications
 

@@ -142,6 +142,7 @@ mutable struct FeastSRCIState{T<:Real}
     rank::Int                     # Numerical rank of the filtered subspace
     active::Int                   # Columns of Q0 currently in use
     M::Int
+    checked_subspace::Bool        # User seed has had an independent completion sweep
     perm::Vector{Int}
     q_tmp::Matrix{T}
     lambda_tmp::Vector{T}
@@ -151,7 +152,7 @@ mutable struct FeastSRCIState{T<:Real}
         new{T}(false, Complex{T}[], Complex{T}[], 0, 1,
                Matrix{T}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
                Matrix{T}(undef, 0, 0), Matrix{T}(undef, 0, 0),
-               FEAST_PHASE_IDLE, 0, 0, 0,
+               FEAST_PHASE_IDLE, 0, 0, 0, false,
                Int[], Matrix{T}(undef, 0, 0), T[], T[])
     end
 end

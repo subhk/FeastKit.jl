@@ -421,13 +421,26 @@ end
 function _feast_inside_polygon(z::Complex{T}, nodes::AbstractVector{Complex{T}}) where T<:Real
     isfinite(z) || return false
     length(nodes) >= 3 || return false
+    # Work in translated, dimensionless coordinates. An absolute unit floor
+    # expands tiny contours; cross products in the original units can also
+    # underflow/overflow. Translation prevents a large offset from setting the
+    # tolerance for a small local polygon.
+    origin = nodes[1]
+    scale = abs(z - origin)
+    for node in nodes
+        isfinite(node) || return false
+        scale = max(scale, abs(node - origin))
+    end
+    isfinite(scale) || return false
+    iszero(scale) && return true
+    point = (z - origin) / scale
+    tol = T(32) * eps(T)
     inside = false
-    a = nodes[end]
-    for b in nodes
+    a = (nodes[end] - origin) / scale
+    for node in nodes
+        b = (node - origin) / scale
         edge = b - a
-        offset = z - a
-        scale = max(abs(a), abs(b), abs(z), one(T))
-        tol = 32 * eps(T) * scale
+        offset = point - a
         if abs(edge) <= tol
             abs(offset) <= tol && return true
         else
@@ -436,9 +449,9 @@ function _feast_inside_polygon(z::Complex{T}, nodes::AbstractVector{Complex{T}})
             if abs(cross) <= tol*abs(edge) && -tol*abs(edge) <= dot <= abs2(edge)+tol*abs(edge)
                 return true
             end
-            if (imag(a) > imag(z)) != (imag(b) > imag(z))
-                xcross = real(a) + (imag(z)-imag(a))*real(edge)/imag(edge)
-                real(z) < xcross && (inside = !inside)
+            if (imag(a) > imag(point)) != (imag(b) > imag(point))
+                xcross = real(a) + (imag(point)-imag(a))*real(edge)/imag(edge)
+                real(point) < xcross && (inside = !inside)
             end
         end
         a = b

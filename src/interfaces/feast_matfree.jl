@@ -160,7 +160,7 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
                             linear_solver::Union{Function, Nothing} = nothing,
                             workspace::Union{NamedTuple, Nothing} = nothing,
                             maxiter::Int = 20,
-                            tol::T = 1e-12) where T<:Real
+                            tol::T = T(1e-12)) where T<:Real
     
     Emin, Emax = interval
     N = size(A_op, 1)
@@ -291,7 +291,7 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
                             linear_solver::Union{Function, Nothing} = nothing,
                             workspace::Union{NamedTuple, Nothing} = nothing,
                             maxiter::Int = 20,
-                            tol::T = 1e-12) where T<:Real
+                            tol::T = T(1e-12)) where T<:Real
     
     N = size(A_op, 1)
     

@@ -110,7 +110,7 @@ jobs:
             env = mktempdir()
             Pkg.activate(env)
             Pkg.develop(path=".")
-            Pkg.add(["MPI", "Krylov"])
+            Pkg.add(["MPI", "Krylov", "Logging"])
             using MPI
             run(`$(MPI.mpiexec()) -n 2 julia --project=$(env) test/test_parallel_backends.jl`)
             # Separate process: fault tests deliberately inject rank-local

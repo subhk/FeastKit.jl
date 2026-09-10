@@ -1,5 +1,6 @@
 # Called with MPI initialized by the backend test driver.
 function test_mpi_review(comm)
+    test_mpi_safety(comm)
 @testset "MPI review regressions" begin
     @testset "Partial Hermitian projector $storage $solver" for storage in (Matrix,sparse), solver in (:direct,:gmres)
         n = 20

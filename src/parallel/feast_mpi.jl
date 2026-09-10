@@ -28,7 +28,29 @@ function _mpi_contour(::Type{T}, fpm, center, radius, root, comm; general=false)
     return contour, custom
 end
 
-function _mpi_factorize_contour(A, B, nodes, comm)
+# Lazy factors implement the no-storage policy without retaining any LU. The
+# projection loop drops each factor before moving to the next contour point.
+struct _MPIUncachedFactors{TA,TB,TZ} <: AbstractVector{Any}
+    A::TA
+    B::TB
+    nodes::TZ
+end
+Base.size(f::_MPIUncachedFactors) = size(f.nodes)
+Base.getindex(f::_MPIUncachedFactors,i::Int) = lu(f.nodes[i]*f.B-f.A)
+
+function _mpi_collective_try(f, comm)
+    success = try
+        f()
+        true
+    catch err
+        @debug "MPI local computation failed" exception=err
+        false
+    end
+    return _mpi_success_count(success,comm) == MPI.Comm_size(comm)
+end
+
+function _mpi_factorize_contour(A, B, nodes, comm; store=true)
+    store || return _MPIUncachedFactors(A,B,nodes)
     factors = try
         [lu(z*B-A) for z in nodes]
     catch err
@@ -44,7 +66,7 @@ function _mpi_local_projection!(dest, factors, rhs, weights, scratch;
                                 scale=1, use_threads=false)
     fill!(dest,zero(eltype(dest)))
     try
-        if use_threads && Threads.nthreads() > 1 && length(factors) > 1
+        if use_threads && !(factors isa _MPIUncachedFactors) && Threads.nthreads() > 1 && length(factors) > 1
             chunks = collect(Iterators.partition(eachindex(factors),
                              cld(length(factors),Threads.nthreads())))
             partials = [zeros(eltype(dest),size(dest)) for _ in chunks]
@@ -120,9 +142,9 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     MPI.Bcast!(Q, root, comm)
     active_dim = M0
 
-    # Each rank factorizes ONLY its local contour shifts, once, and reuses them
-    # across refinement loops. This is the work MPI parallelizes across ranks.
-    local_factors = _mpi_factorize_contour(A,B,mpi_state.local_Zne,comm)
+    # Each rank caches its local shifts, or factors them lazily when storage
+    # is disabled. Contour work remains distributed in both modes.
+    local_factors = _mpi_factorize_contour(A,B,mpi_state.local_Zne,comm;store=fpm[10]==1)
     local_factors === nothing && return FeastResult{T,T}(T[],zeros(T,N,0),0,T[],
         Int(Feast_ERROR_LAPACK),T(Inf),0)
     B_is_identity = (B == I)   # standard problem: skip the per-loop identity matmuls
@@ -155,6 +177,7 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     info_code = Int(Feast_SUCCESS)
     loop_done = 0
     M_found = 0
+    converged = false
 
     for loop in 1:max_loops
         loop_done = loop
@@ -182,12 +205,13 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         MPI.Allreduce!(qpl, MPI.SUM, comm)
         @. qpl = real(qpl)
 
-        try
+        rank_r = 0
+        M = 0
+        success = _mpi_collective_try(comm) do
             rank_r = _feast_qr_compress!(q_basis, qpl, active_dim;
                                          rank_tol=sqrt(eps(T)))
             if rank_r == 0
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-                break
+                return
             end
 
             q_rank = view(q_basis, :, 1:rank_r)
@@ -230,8 +254,7 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             M = _feast_reorder_by_interval!(lambda, q, perm, lambda_tmp, q_tmp,
                                             Emin, Emax, rank_r)
             if M == 0
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-                break
+                return
             end
 
             for j in 1:M
@@ -242,29 +265,37 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             feast_residual!(A, B, lambda, q, res, M,
                             residual_Aq, residual_Bq, residual)
             epsout = maximum(view(res, 1:M))
-            mpi_state.epsout = epsout
-            M_found = M
-
-            if epsout <= eps_tolerance
-                mpi_state.converged = true
-                mpi_state.info = _feast_exit_info(true, M, M0, N)
-                feast_sort!(lambda, q, res, M)
-                return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
-                                         mpi_state.info, epsout, loop)
-            end
-
-            active_dim = rank_r
-            copyto!(view(Q, :, 1:active_dim), view(q, :, 1:active_dim))
-        catch err
+        end
+        if !success
             info_code = Int(Feast_ERROR_LAPACK)
+            M_found = 0
             break
         end
+        # Every rank uses the root's Ritz basis and termination decision.
+        rank_r,M,epsout,converged = MPI.bcast((rank_r,M,epsout,epsout<=eps_tolerance),root,comm)
+        if M == 0
+            info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+            M_found = 0
+            break
+        end
+        MPI.Bcast!(lambda,root,comm)
+        MPI.Bcast!(q,root,comm)
+        MPI.Bcast!(res,root,comm)
+        M_found = M
+        if converged
+            info_code = _feast_exit_info(true,M,M0,N)
+            break
+        end
+        active_dim = rank_r
+        copyto!(view(Q,:,1:active_dim),view(q,:,1:active_dim))
     end
 
     if info_code == Int(Feast_SUCCESS)
-        info_code = _feast_exit_info(false, M_found, M0, N)
+        info_code = _feast_exit_info(converged, M_found, M0, N)
     end
     mpi_state.info = info_code
+    mpi_state.converged = converged
+    mpi_state.epsout = epsout
     M = M_found
     M > 1 && feast_sort!(lambda, q, res, M)
     return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
@@ -394,8 +425,8 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     MPI.Bcast!(Q, root, comm)
     active_dim = M0
 
-    # Each rank factorizes only its local contour shifts, once, reused across loops.
-    local_factors = _mpi_factorize_contour(A,B,mpi_state.local_Zne,comm)
+    # Cache local shifts only when requested; otherwise factor them on demand.
+    local_factors = _mpi_factorize_contour(A,B,mpi_state.local_Zne,comm;store=fpm[10]==1)
     local_factors === nothing && return FeastResult{T,T}(T[],zeros(T,N,0),0,T[],
         Int(Feast_ERROR_LAPACK),T(Inf),0)
     B_is_identity = (B == I)   # standard problem: skip the per-loop identity matmuls
@@ -923,14 +954,18 @@ function mpi_compute_complex_residuals!(A::AbstractMatrix{Complex{T}},
     local_res = zeros(T, length(res))
     residual = Vector{Complex{T}}(undef, size(A, 1))
     Bq = similar(residual)
-    for j in start_idx:min(end_idx, M)
-        qj = view(q, :, j)
-        mul!(residual, A, qj)
-        mul!(Bq, B, qj)
-        @. residual = residual - lambda[j] * Bq
-        local_res[j] = norm(residual) / max(abs(lambda[j]), one(T))
+    success = _mpi_collective_try(comm) do
+        for j in start_idx:min(end_idx, M)
+            qj = view(q, :, j)
+            mul!(residual, A, qj)
+            mul!(Bq, B, qj)
+            @. residual = residual - lambda[j] * Bq
+            local_res[j] = norm(residual) / max(abs(lambda[j]), one(T))
+        end
     end
+    success || return false
     MPI.Allreduce!(local_res, res, MPI.SUM, comm)
+    return true
 end
 
 function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
@@ -964,10 +999,10 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
     _feast_seeded_subspace_complex!(Q_basis)
     MPI.Bcast!(Q_basis, root, comm)
 
-    # Cache this rank's local factorizations once (direct solver only); reused
-    # across all refinement loops. Iterative solves have nothing to cache.
+    # Direct solves cache local factors only when fpm[10] requests storage.
+    # Iterative solves have nothing to cache.
     local_factors = solver_choice == :direct ?
-        _mpi_factorize_contour(A,B,mpi_state.local_Zne,comm) : nothing
+        _mpi_factorize_contour(A,B,mpi_state.local_Zne,comm;store=fpm[10]==1) : nothing
     if solver_choice == :direct && local_factors === nothing
         return FeastResult{T,Complex{T}}(T[],zeros(Complex{T},N,0),0,T[],
             Int(Feast_ERROR_LAPACK),T(Inf),0)
@@ -1024,7 +1059,8 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
         # receive array per refinement loop.
         MPI.Allreduce!(local_Q_proj, Q_proj, MPI.SUM, comm)
 
-        try
+        M = 0
+        success = _mpi_collective_try(comm) do
             # Orthonormalize the filtered subspace, then Hermitian Rayleigh-Ritz:
             # Sq = Qᴴ A Q, Aq = Qᴴ B Q. Orthonormality keeps the reduced pencil
             # well-conditioned even when the filtered subspace is rank deficient.
@@ -1057,29 +1093,40 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
                                              lambda_tmp, solutions_tmp,
                                              Emin, Emax, M0)
             if M == 0
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-                break
+                return
             end
             for j in 1:M
                 qj = view(solutions, :, j)
                 nrm = norm(qj)
                 nrm > 0 && (qj ./= nrm)
             end
-            mpi_compute_complex_residuals!(A, B, lambda_vec, solutions, res_vec, M, comm)
-            epsout_val = maximum(res_vec[1:M])
-            M_found = M
-            if epsout_val <= feast_tolerance(fpm, T)
-                info_code = _feast_exit_info(true, M, M0, N)
-                break
-            elseif loop_idx == fpm[4]
-                info_code = _feast_exit_info(false, M, M0, N)
-                break
-            end
-            copyto!(Q_basis, solutions)
-        catch err
+        end
+        if !success
             info_code = Int(Feast_ERROR_LAPACK)
+            M_found = 0
             break
         end
+        M = MPI.bcast(M,root,comm)
+        if M == 0
+            info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+            M_found = 0
+            break
+        end
+        MPI.Bcast!(lambda_vec,root,comm)
+        MPI.Bcast!(solutions,root,comm)
+        if !mpi_compute_complex_residuals!(A,B,lambda_vec,solutions,res_vec,M,comm)
+            info_code = Int(Feast_ERROR_LAPACK)
+            M_found = 0
+            break
+        end
+        epsout_val = maximum(view(res_vec,1:M))
+        M_found = M
+        converged,exhausted = MPI.bcast((epsout_val<=feast_tolerance(fpm,T),loop_idx==fpm[4]),root,comm)
+        if converged || exhausted
+            info_code = _feast_exit_info(converged,M,M0,N)
+            break
+        end
+        copyto!(Q_basis,solutions)
     end
 
     M_found > 1 && feast_sort!(lambda_vec, solutions, res_vec, M_found)
@@ -1149,10 +1196,10 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
     _feast_seeded_subspace_complex!(Q_basis)
     MPI.Bcast!(Q_basis, root, comm)
 
-    # Cache this rank's local factorizations once (direct solver only); reused
-    # across all refinement loops. Iterative solves have nothing to cache.
+    # Direct solves cache local factors only when fpm[10] requests storage.
+    # Iterative solves have nothing to cache.
     local_factors = solver_choice == :direct ?
-        _mpi_factorize_contour(A,B,mpi_state.local_Zne,comm) : nothing
+        _mpi_factorize_contour(A,B,mpi_state.local_Zne,comm;store=fpm[10]==1) : nothing
     if solver_choice == :direct && local_factors === nothing
         return FeastGeneralResult{T}(Complex{T}[],zeros(Complex{T},N,0),0,T[],
             Int(Feast_ERROR_LAPACK),T(Inf),0)
@@ -1207,7 +1254,8 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
         # Direct send/recv Allreduce into the persistent buffer — no fresh
         # receive array per refinement loop.
         MPI.Allreduce!(local_Q_proj, Q_proj, MPI.SUM, comm)
-        try
+        M = 0
+        success = _mpi_collective_try(comm) do
             # Orthonormalize the filtered subspace before the (non-Hermitian)
             # Rayleigh-Ritz: Ared = Qᴴ A Q, Bred = Qᴴ B Q. Fixes the rank-deficient
             # reduced pencil that made the raw-Q_proj path return garbage.
@@ -1234,29 +1282,40 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
                                             Emid, r, fpm, M0;
                                             contour=custom_contour ? contour : nothing)
             if M == 0
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-                break
+                return
             end
             for j in 1:M
                 qj = view(solutions, :, j)
                 nrm = norm(qj)
                 nrm > 0 && (qj ./= nrm)
             end
-            mpi_compute_complex_residuals!(A, B, lambda_vec, solutions, res_vec, M, comm)
-            epsout_val = maximum(res_vec[1:M])
-            M_found = M
-            if epsout_val <= feast_tolerance(fpm, T)
-                info_code = _feast_exit_info(true, M, M0, N)
-                break
-            elseif loop_idx == fpm[4]
-                info_code = _feast_exit_info(false, M, M0, N)
-                break
-            end
-            copyto!(Q_basis, solutions)
-        catch err
+        end
+        if !success
             info_code = Int(Feast_ERROR_LAPACK)
+            M_found = 0
             break
         end
+        M = MPI.bcast(M,root,comm)
+        if M == 0
+            info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+            M_found = 0
+            break
+        end
+        MPI.Bcast!(lambda_vec,root,comm)
+        MPI.Bcast!(solutions,root,comm)
+        if !mpi_compute_complex_residuals!(A,B,lambda_vec,solutions,res_vec,M,comm)
+            info_code = Int(Feast_ERROR_LAPACK)
+            M_found = 0
+            break
+        end
+        epsout_val = maximum(view(res_vec,1:M))
+        M_found = M
+        converged,exhausted = MPI.bcast((epsout_val<=feast_tolerance(fpm,T),loop_idx==fpm[4]),root,comm)
+        if converged || exhausted
+            info_code = _feast_exit_info(converged,M,M0,N)
+            break
+        end
+        copyto!(Q_basis,solutions)
     end
 
     M_found > 1 && feast_sort_general!(lambda_vec, solutions, res_vec, M_found)
@@ -1310,6 +1369,7 @@ function mpi_feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     end
 
     # Detect matrix type and call appropriate MPI solver
+    fpm = _ensure_feast_parameters(fpm)
     if isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
         return mpi_feast_scsrgv!(A, B, Emin, Emax, M0, fpm, comm=comm, root=root)
     else

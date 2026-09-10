@@ -8,6 +8,7 @@ export feastinit, feastinit!, feastinit_driver, feastdefault!
 export feast_srci!, feast_srcix!, feast_hrci!, feast_hrcix!, feast_grci!, feast_grcix!
 export ifeast_srci!, ifeast_hrci!, ifeast_grci!
 export feast_contour, feast_gcontour, feast_customcontour
+export feast_circle, feast_ellipse, feast_rectangle
 export feast, feast_general, feast_matvec, feast_banded, feast_set_defaults!, feast_clear_all_contours!
 export feast_parallel, pfeast_srci!, ParallelFeastState
 export pfeast_sygv!, pfeast_scsrgv!, pfeast_compute_all_contour_points!, pfeast_show_distribution
@@ -152,6 +153,7 @@ _mpi_extension_loaded() = Base.get_extension(@__MODULE__, :FeastKitMPIExt) !== n
 include("core/feast_types.jl")
 include("core/feast_parameters.jl")
 include("core/feast_tools.jl")
+include("core/feast_contour_shapes.jl")
 include("core/feast_aux.jl")
 include("parallel/feast_mpi_stubs.jl")
 include("core/feast_backend_utils.jl")

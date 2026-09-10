@@ -352,6 +352,19 @@ FeastKit.feast_grationalx
 FeastKit.feast_clear_all_contours!
 ```
 
+### Standard Contour Shapes
+
+For standard shapes without a parameter vector, use these constructors. Each
+returns a full `FeastContour` with normalized quadrature weights. See
+[Built-in Circle, Ellipse, and Box](custom_contours.md#Built-in-Circle,-Ellipse,-and-Box)
+for complete solves.
+
+```@docs
+feast_circle
+feast_ellipse
+feast_rectangle
+```
+
 ### feast_gcontour
 
 Generate circular contour for general problems.

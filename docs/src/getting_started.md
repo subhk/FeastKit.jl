@@ -396,7 +396,7 @@ Now that you understand the basics, explore these advanced topics:
 - [Performance Tips](performance.md) - Speed and memory optimization
 
 #### Advanced Features  
-- [Custom Contour Integration](custom_contours.md) - Zolotarev, Gauss-Legendre methods
+- [Custom Contour Integration](custom_contours.md) - Circle, ellipse, and box solves; Zolotarev and Gauss-Legendre methods
 - [Complex Eigenvalues](complex_eigenvalues.md) - Non-Hermitian problems
 - [Polynomial Eigenvalue Problems](polynomial_problems.md) - Quadratic and higher-order
 

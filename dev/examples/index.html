@@ -30,11 +30,11 @@ println(&quot;\nAll eigenvalues (Julia): $all_eigvals&quot;)</code></pre><pre cl
 FEAST Results:
 Status: Success
 Found 5 eigenvalues
-λ[1] = 2.2679491924311233
-λ[2] = 3.0000000000000013
+λ[1] = 2.2679491924311224
+λ[2] = 3.0
 λ[3] = 3.9999999999999996
-λ[4] = 5.000000000000005
-λ[5] = 5.7320508075688785
+λ[4] = 4.999999999999999
+λ[5] = 5.732050807568874
 
 All eigenvalues (Julia): [2.267949192431123, 3.0, 3.9999999999999996, 5.0, 5.732050807568877]</code></pre><p><strong>Expected Output:</strong> the eigenvalues of this matrix are <code>4 - 2cos(kπ/6)</code>:</p><pre><code class="nohighlight hljs">Found 5 eigenvalues
 λ[1] = 2.2679491924311224
@@ -71,16 +71,16 @@ Expected λ₁ ≈ 9.849886676738251e-6
 Expected λ₁₀ ≈ 0.000984908628465897
 
 FEAST found 10 eigenvalues:
-λ[1] = 9.849886676638274e-6 (exact: 9.849886676738251e-6, error: 9.997699283031958e-17)
-λ[2] = 3.939944968628592e-5 (exact: 3.939944968633924e-5, error: 5.331564183197468e-17)
-λ[3] = 8.864839796909539e-5 (exact: 8.864839796918211e-5, error: 8.672262127168429e-17)
-λ[4] = 0.00015759624642850792 (exact: 0.0001575962464284153, error: 9.261797058457422e-17)
-λ[5] = 0.00024624231593602824 (exact: 0.0002462423159359517, error: 7.654467337747661e-17)
-λ[6] = 0.00035458573333791934 (exact: 0.0003545857333380198, error: 1.0045133128078199e-16)
-λ[7] = 0.00048262543146379566 (exact: 0.0004826254314638234, error: 2.7755575615628914e-17)
-λ[8] = 0.0006303601491371428 (exact: 0.000630360149137088, error: 5.4752209710517974e-17)
-λ[9] = 0.0007977884311877306 (exact: 0.0007977884311878292, error: 9.855397747893235e-17)
-λ[10] = 0.0009849086284659568 (exact: 0.000984908628465897, error: 5.984795992119984e-17)</code></pre><h3 id="Example-3:-Generalized-Eigenvalue-Problem"><a class="docs-heading-anchor" href="#Example-3:-Generalized-Eigenvalue-Problem">Example 3: Generalized Eigenvalue Problem</a><a id="Example-3:-Generalized-Eigenvalue-Problem-1"></a><a class="docs-heading-anchor-permalink" href="#Example-3:-Generalized-Eigenvalue-Problem" title="Permalink"></a></h3><p><strong>Problem</strong>: Solve A<em>x = λ</em>B*x with two different matrices.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+λ[1] = 9.84988667663857e-6 (exact: 9.849886676738251e-6, error: 9.968053129878057e-17)
+λ[2] = 3.93994496862858e-5 (exact: 3.939944968633924e-5, error: 5.34376145763793e-17)
+λ[3] = 8.864839796909532e-5 (exact: 8.864839796918211e-5, error: 8.679038390746463e-17)
+λ[4] = 0.00015759624642850808 (exact: 0.0001575962464284153, error: 9.278060091044704e-17)
+λ[5] = 0.00024624231593602867 (exact: 0.0002462423159359517, error: 7.697835424647081e-17)
+λ[6] = 0.000354585733337919 (exact: 0.0003545857333380198, error: 1.0077659193252764e-16)
+λ[7] = 0.0004826254314637967 (exact: 0.0004826254314638234, error: 2.6725583551767684e-17)
+λ[8] = 0.0006303601491371424 (exact: 0.000630360149137088, error: 5.431852884152377e-17)
+λ[9] = 0.000797788431187731 (exact: 0.0007977884311878292, error: 9.812029660993815e-17)
+λ[10] = 0.0009849086284659573 (exact: 0.000984908628465897, error: 6.028164079019405e-17)</code></pre><h3 id="Example-3:-Generalized-Eigenvalue-Problem"><a class="docs-heading-anchor" href="#Example-3:-Generalized-Eigenvalue-Problem">Example 3: Generalized Eigenvalue Problem</a><a id="Example-3:-Generalized-Eigenvalue-Problem-1"></a><a class="docs-heading-anchor-permalink" href="#Example-3:-Generalized-Eigenvalue-Problem" title="Permalink"></a></h3><p><strong>Problem</strong>: Solve A<em>x = λ</em>B*x with two different matrices.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
 
 # Create matrices A (stiffness) and B (mass)
 n = 100
@@ -123,13 +123,13 @@ B: 100×100 tridiagonal (mass)
 
 Results:
 Found 8 generalized eigenvalues
-λ[1] = 0.0008062611804882793 (residual: 5.208042995042853e-16)
-λ[2] = 0.0032250445332409894 (residual: 5.743370182619821e-16)
-λ[3] = 0.007256348359423626 (residual: 6.899371182013953e-16)
-λ[4] = 0.012900166049555475 (residual: 5.196442887788886e-16)
-λ[5] = 0.020156480407888356 (residual: 5.697613604266501e-16)
+λ[1] = 0.0008062611804882761 (residual: 5.456624034065885e-16)
+λ[2] = 0.0032250445332409755 (residual: 5.31660012812809e-16)
+λ[3] = 0.007256348359423607 (residual: 7.085121038748794e-16)
+λ[4] = 0.01290016604955548 (residual: 6.127741509746408e-16)
+λ[5] = 0.02015648040788834 (residual: 5.173282719555424e-16)
 
-B-orthogonality (off-diagonal) error: 1.9854224349693466e-15</code></pre><hr/><h2 id="Scientific-Computing-Applications"><a class="docs-heading-anchor" href="#Scientific-Computing-Applications">Scientific Computing Applications</a><a id="Scientific-Computing-Applications-1"></a><a class="docs-heading-anchor-permalink" href="#Scientific-Computing-Applications" title="Permalink"></a></h2><h3 id="Example-4:-1D-Wave-Equation-(Vibrating-String)"><a class="docs-heading-anchor" href="#Example-4:-1D-Wave-Equation-(Vibrating-String)">Example 4: 1D Wave Equation (Vibrating String)</a><a id="Example-4:-1D-Wave-Equation-(Vibrating-String)-1"></a><a class="docs-heading-anchor-permalink" href="#Example-4:-1D-Wave-Equation-(Vibrating-String)" title="Permalink"></a></h3><p><strong>Problem</strong>: Find natural frequencies of a vibrating string.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, Plots
+B-orthogonality (off-diagonal) error: 1.8602085927013214e-15</code></pre><hr/><h2 id="Scientific-Computing-Applications"><a class="docs-heading-anchor" href="#Scientific-Computing-Applications">Scientific Computing Applications</a><a id="Scientific-Computing-Applications-1"></a><a class="docs-heading-anchor-permalink" href="#Scientific-Computing-Applications" title="Permalink"></a></h2><h3 id="Example-4:-1D-Wave-Equation-(Vibrating-String)"><a class="docs-heading-anchor" href="#Example-4:-1D-Wave-Equation-(Vibrating-String)">Example 4: 1D Wave Equation (Vibrating String)</a><a id="Example-4:-1D-Wave-Equation-(Vibrating-String)-1"></a><a class="docs-heading-anchor-permalink" href="#Example-4:-1D-Wave-Equation-(Vibrating-String)" title="Permalink"></a></h3><p><strong>Problem</strong>: Find natural frequencies of a vibrating string.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, Plots
 
 # Physical parameters
 L = 1.0      # String length
@@ -1096,4 +1096,4 @@ if length(all_eigenvalues) &gt; 0
 else
     println(&quot;No eigenvalues found in searched regions&quot;)
     println(&quot;Flow stability could not be determined&quot;)
-end</code></pre><hr/><p>&lt;div align=&quot;center&quot;&gt;   &lt;p&gt;&lt;strong&gt;Complete Examples Collection for FeastKit.jl&lt;/strong&gt;&lt;/p&gt;   &lt;p&gt;From basic usage to advanced scientific applications&lt;/p&gt;   ← <a href="../getting_started/">Getting Started</a> | <a href="../api_reference/">API Reference</a> → &lt;/div&gt;</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../getting_started/">« Getting Started</a><a class="docs-footer-nextpage" href="../matrix_free_interface/">Matrix-Free Interface »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Thursday 10 September 2026 12:58">Thursday 10 September 2026</span>. Using Julia version 1.13.0.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+end</code></pre><hr/><p>&lt;div align=&quot;center&quot;&gt;   &lt;p&gt;&lt;strong&gt;Complete Examples Collection for FeastKit.jl&lt;/strong&gt;&lt;/p&gt;   &lt;p&gt;From basic usage to advanced scientific applications&lt;/p&gt;   ← <a href="../getting_started/">Getting Started</a> | <a href="../api_reference/">API Reference</a> → &lt;/div&gt;</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../getting_started/">« Getting Started</a><a class="docs-footer-nextpage" href="../matrix_free_interface/">Matrix-Free Interface »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Thursday 10 September 2026 13:10">Thursday 10 September 2026</span>. Using Julia version 1.13.0.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

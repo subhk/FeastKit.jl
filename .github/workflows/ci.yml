@@ -115,12 +115,14 @@ jobs:
             run(`$(MPI.mpiexec()) -n 2 julia --project=$(env) test/test_parallel_backends.jl`)
             # Separate process: fault tests deliberately inject rank-local
             # numerical failures. Bound the run to catch collective deadlocks.
-            cmd = `$(MPI.mpiexec()) -n 2 julia --project=$(env) test/test_mpi_faults.jl`
-            p = run(pipeline(cmd, stdout=stdout, stderr=stderr); wait=false)
-            outcome = timedwait(() -> process_exited(p), 120.0)
-            outcome == :timed_out && kill(p)
-            wait(p)
-            outcome == :ok && success(p) || error("MPI fault-synchronization tests failed or timed out")
+            for script in ("test/test_mpi_faults.jl", "test/test_mpi_rhs_faults.jl")
+                cmd = `$(MPI.mpiexec()) -n 2 julia --project=$(env) $script`
+                p = run(pipeline(cmd, stdout=stdout, stderr=stderr); wait=false)
+                outcome = timedwait(() -> process_exited(p), 120.0)
+                outcome == :timed_out && kill(p)
+                wait(p)
+                outcome == :ok && success(p) || error("$script failed or timed out")
+            end
           '
 
   docs-links:

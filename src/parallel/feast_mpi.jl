@@ -190,14 +190,20 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         # not root-only) — that scales better here than idling ranks on root.
         qblk = view(Q, :, 1:active_dim)
         bq = view(BQ_loop, :, 1:active_dim)
-        B_is_identity ? copyto!(bq, qblk) : mul!(bq, B, qblk)
         qpl = view(Q_proj_local, :, 1:active_dim)
         fill!(qpl, zero(Complex{T}))
         Yv = view(Y_loop, :, 1:active_dim)
-        success = _mpi_local_projection!(qpl,local_factors,bq,mpi_state.local_Wne,Yv;
-                                         scale=2,use_threads=use_threads)
+        success = try
+            B_is_identity ? copyto!(bq, qblk) : mul!(bq, B, qblk)
+            _mpi_local_projection!(qpl,local_factors,bq,mpi_state.local_Wne,Yv;
+                                   scale=2,use_threads=use_threads)
+        catch err
+            @debug "MPI local projection preparation failed" exception=err
+            false
+        end
         if _mpi_success_count(success,comm) != nprocs
             info_code = Int(Feast_ERROR_LAPACK)
+            M_found = 0
             break
         end
         # In-place Allreduce: every rank's partial sum is replaced by the global
@@ -466,13 +472,19 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
         # Distributed contour solves: each rank applies only its local resolvents.
         qblk = view(Q, :, 1:active_dim)
         bq = view(BQ_loop, :, 1:active_dim)
-        B_is_identity ? copyto!(bq, qblk) : mul!(bq, B, qblk)
         qpl = view(Q_proj_local, :, 1:active_dim)
         fill!(qpl, zero(Complex{T}))
         Yv = view(Y_loop, :, 1:active_dim)
-        success = _mpi_local_projection!(qpl,local_factors,bq,mpi_state.local_Wne,Yv; scale=2)
+        success = try
+            B_is_identity ? copyto!(bq, qblk) : mul!(bq, B, qblk)
+            _mpi_local_projection!(qpl,local_factors,bq,mpi_state.local_Wne,Yv; scale=2)
+        catch err
+            @debug "MPI local projection preparation failed" exception=err
+            false
+        end
         if _mpi_success_count(success,comm) != nprocs
             info_code = Int(Feast_ERROR_LAPACK)
+            M_found = 0
             break
         end
 
@@ -679,6 +691,14 @@ end
 function _mpi_success_count(local_success::Bool, comm::MPI.Comm)
     flag = [local_success ? 1 : 0]
     return MPI.Allreduce(flag, MPI.SUM, comm)[1]
+end
+
+# Inner solves need headroom below the requested outer eigenpair residual.
+# Use the same precision-aware outer target as the driver, and never ask a
+# default inner solve for accuracy below machine epsilon. Explicit tolerances
+# remain a caller-controlled override.
+function _mpi_solver_tolerance(fpm, ::Type{T}, solver_tol) where T<:AbstractFloat
+    return solver_tol == 0 ? max(T(0.01)*feast_tolerance(fpm,T),eps(T)) : T(solver_tol)
 end
 
 function _mpi_distribute_complex_contour!(mpi_state::MPIFeastState{T},
@@ -984,7 +1004,7 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
     feastdefault!(fpm)
     solver_choice = _mpi_solver_choice(solver)
-    tol = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+    tol = _mpi_solver_tolerance(fpm,T,solver_tol)
 
     contour, _ = _mpi_contour(T,fpm,Emin,Emax,root,comm)
     contour = _feast_complete_hermitian_contour(contour)
@@ -1036,22 +1056,29 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
         # Each rank solves its local contour points; only the partial filtered
         # subspace (complex) is needed. The reduced pencil is rebuilt from an
         # ORTHONORMAL basis below — what the old rank-deficient moment path lacked.
-        if solver_choice == :direct
-            B_is_identity ? copyto!(BQ_loop, Q_basis) : mul!(BQ_loop, B, Q_basis)
-            local_success = _mpi_local_projection!(Q_proj_local_buf,local_factors,BQ_loop,
-                                                   mpi_state.local_Wne,Y_loop)
-            local_Q_proj = Q_proj_local_buf
-        else
-            _, _, local_Q_proj, local_success =
-                mpi_compute_complex_hermitian_moments(A, B, Q_basis,
-                                                      mpi_state.local_Zne,
-                                                      mpi_state.local_Wne, M0,
-                                                      solver_choice, tol,
-                                                      solver_maxiter, solver_restart,
-                                                      comm)
+        local_success = false
+        local_Q_proj = Q_proj_local_buf
+        try
+            if solver_choice == :direct
+                B_is_identity ? copyto!(BQ_loop, Q_basis) : mul!(BQ_loop, B, Q_basis)
+                local_success = _mpi_local_projection!(Q_proj_local_buf,local_factors,BQ_loop,
+                                                       mpi_state.local_Wne,Y_loop)
+            else
+                _, _, local_Q_proj, local_success =
+                    mpi_compute_complex_hermitian_moments(A, B, Q_basis,
+                                                          mpi_state.local_Zne,
+                                                          mpi_state.local_Wne, M0,
+                                                          solver_choice, tol,
+                                                          solver_maxiter, solver_restart,
+                                                          comm)
+            end
+        catch err
+            @debug "MPI local Hermitian projection failed" exception=err
+            local_success = false
         end
         if _mpi_success_count(local_success, comm) != MPI.Comm_size(comm)
             info_code = solver_choice == :direct ? Int(Feast_ERROR_LAPACK) : Int(Feast_ERROR_NO_CONVERGENCE)
+            M_found = 0
             break
         end
 
@@ -1182,7 +1209,7 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
     check_feast_grci_input(N, M0, Emid, r, fpm)
     feastdefault!(fpm)
     solver_choice = _mpi_solver_choice(solver)
-    tol = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+    tol = _mpi_solver_tolerance(fpm,T,solver_tol)
 
     contour, custom_contour = _mpi_contour(T,fpm,Emid,r,root,comm; general=true)
     ne = length(contour.Zne)
@@ -1230,24 +1257,31 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
 
     for loop_idx in 0:fpm[4]
         loop_count = loop_idx
-        if solver_choice == :direct
-            # Cached factorizations: apply each local resolvent to B*Q. General
-            # FEAST uses the full contour, so the weight is Wne[e] (no factor 2).
-            B_is_identity ? copyto!(BQ_loop, Q_basis) : mul!(BQ_loop, B, Q_basis)
-            local_success = _mpi_local_projection!(Q_proj_local_buf,local_factors,BQ_loop,
-                                                   mpi_state.local_Wne,Y_loop; scale=1)
-            local_Q_proj = Q_proj_local_buf
-        else
-            local_Q_proj, local_success =
-                mpi_compute_complex_general_projection(A, B, Q_basis,
-                                                       mpi_state.local_Zne,
-                                                       mpi_state.local_Wne, M0,
-                                                       solver_choice, tol,
-                                                       solver_maxiter, solver_restart,
-                                                       comm)
+        local_success = false
+        local_Q_proj = Q_proj_local_buf
+        try
+            if solver_choice == :direct
+                # Apply each local resolvent to B*Q. General FEAST uses the
+                # full contour, so the weight is Wne[e] (no factor 2).
+                B_is_identity ? copyto!(BQ_loop, Q_basis) : mul!(BQ_loop, B, Q_basis)
+                local_success = _mpi_local_projection!(Q_proj_local_buf,local_factors,BQ_loop,
+                                                       mpi_state.local_Wne,Y_loop; scale=1)
+            else
+                local_Q_proj, local_success =
+                    mpi_compute_complex_general_projection(A, B, Q_basis,
+                                                           mpi_state.local_Zne,
+                                                           mpi_state.local_Wne, M0,
+                                                           solver_choice, tol,
+                                                           solver_maxiter, solver_restart,
+                                                           comm)
+            end
+        catch err
+            @debug "MPI local general projection failed" exception=err
+            local_success = false
         end
         if _mpi_success_count(local_success, comm) != MPI.Comm_size(comm)
             info_code = solver_choice == :direct ? Int(Feast_ERROR_LAPACK) : Int(Feast_ERROR_NO_CONVERGENCE)
+            M_found = 0
             break
         end
 

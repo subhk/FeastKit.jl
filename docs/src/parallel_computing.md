@@ -313,10 +313,18 @@ julia --project -e 'using MPI; run(`$(MPI.mpiexec()) -n 8 julia --project feast_
 MPI honors custom contours registered in `fpm` on the communicator's root.
 The contour nodes and weights are broadcast to every rank, and general-problem
 eigenvalue selection uses that same geometry. A rank-local factorization or
-shifted-solve failure returns `Feast_ERROR_LAPACK` collectively.
+direct shifted-solve failure returns `Feast_ERROR_LAPACK` collectively;
+iterative projection failures return `Feast_ERROR_NO_CONVERGENCE`.
 Projected eigenproblem and distributed residual failures are also synchronized
 before ranks enter the next collective. Ranks use the root's Ritz vectors and
 stopping decision. Supply the same matrices and solver settings on all ranks.
+This synchronization also covers failures while forming the shifted-system
+right-hand side `B * Q`, before the contour solves begin.
+
+For iterative MPI solves, the default inner GMRES tolerance is one percent of
+the precision-aware outer tolerance, with a machine-epsilon floor. This leaves
+accuracy headroom for outer refinement without requesting unattainable precision
+from `ComplexF32` solves. An explicit `solver_tol` overrides this default.
 
 `fpm[10]=0` disables retained LU factors: each rank factors and solves one local
 shift at a time on each refinement sweep. This mode also uses serial contour

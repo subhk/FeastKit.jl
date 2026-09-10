@@ -446,13 +446,8 @@ problems.
 
             epsout_val = max_res
             M_found = M
-
-            if epsout_val <= eps_tol
-                break
-            end
-
-            if loop_idx == maxloop
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+            if epsout_val <= eps_tol || loop_idx == maxloop
+                info_code = _feast_exit_info(epsout_val <= eps_tol, M, M0, N)
                 break
             end
 
@@ -1246,7 +1241,8 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
             for j in 1:M
                 q_col = view(q_vectors, :, j)
                 A_matvec!(residual_vec, q_col)
-                @. residual_vec = residual_vec - lambda_vec[j] * q_col
+                B_matvec!(rhs_real, q_col)
+                @. residual_vec = residual_vec - lambda_vec[j] * rhs_real
                 # Relative residual: normalize by max(|λ|, 1)
                 res_val = norm(residual_vec) / max(abs(lambda_vec[j]), one(T))
                 res_vec[j] = res_val
@@ -1256,13 +1252,8 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
             epsout_val = max_res
             M_found = M
 
-            if epsout_val <= eps_tol
-                info_code = Int(Feast_SUCCESS)
-                break
-            end
-
-            if loop_idx == maxloop
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+            if epsout_val <= eps_tol || loop_idx == maxloop
+                info_code = _feast_exit_info(epsout_val <= eps_tol, M, M0, N)
                 break
             end
 

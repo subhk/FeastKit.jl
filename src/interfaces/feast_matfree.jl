@@ -191,6 +191,7 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
     
     work = workspace.work
     workc = workspace.workc
+    mass_rhs = similar(work)
     Aq = workspace.Aq
     Sq = workspace.Sq
     lambda = workspace.lambda
@@ -224,10 +225,13 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
             continue
             
         elseif ijob[] == Int(Feast_RCI_SOLVE)
-            # Solve linear systems: (Ze[]*B - A) * X = work
-            # Result should be stored in workc
+            # Solve (Ze[]*B - A) * Y = B*Q and store Y in workc.
             try
-                linear_solver(workc, Ze[], work)
+                # The kernel supplies Q; generalized contour projection needs B*Q.
+                for j in axes(work, 2)
+                    mul!(view(mass_rhs,:,j), B_op, view(work,:,j))
+                end
+                linear_solver(workc, Ze[], mass_rhs)
             catch err
                 @debug "Matrix-free linear solver callback failed" exception=err
                 info[] = Int(Feast_ERROR_LAPACK)
@@ -350,10 +354,12 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
             continue
             
         elseif ijob[] == Int(Feast_RCI_SOLVE)
-            # For general problems, workc contains Q0 (the RHS) and result goes back to workc
-            # Need a temporary to avoid overwriting input before reading it
+            # workc contains Q0. Form B*Q0 in separate scratch before the
+            # callback overwrites workc with the shifted solution.
             try
-                copyto!(rhs, workc)
+                for j in axes(workc, 2)
+                    mul!(view(rhs,:,j), B_op, view(workc,:,j))
+                end
                 linear_solver(workc, Ze[], rhs)
             catch e
                 @debug "Matrix-free linear solver callback failed" exception=e

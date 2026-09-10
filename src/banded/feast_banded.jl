@@ -1085,10 +1085,8 @@ required for complex-symmetric pencils.
 
             epsout_val = max_res
             M_found = M
-            epsout_val <= eps_tol && break
-
-            if loop_idx == maxloop
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+            if epsout_val <= eps_tol || loop_idx == maxloop
+                info_code = _feast_exit_info(epsout_val <= eps_tol, M, M0, N)
                 break
             end
 

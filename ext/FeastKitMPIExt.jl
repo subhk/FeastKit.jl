@@ -29,6 +29,8 @@ import FeastKit: MPIFeastState, FeastResult, FeastGeneralResult,
                  _feast_seeded_subspace!, _feast_seeded_subspace_complex!,
                  solve_shifted_iterative!, solve_dense_shifted!,
                  FEAST_KRYLOV_AVAILABLE,
+                 feast_get_custom_contour,
+                 _ensure_feast_parameters,
                  mpi_available, feast, feast_parallel_info
 
 # Entry points this extension implements.

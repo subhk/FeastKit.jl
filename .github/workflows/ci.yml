@@ -80,6 +80,7 @@ jobs:
   mpi-backend:
     name: MPI Backend
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -99,6 +100,7 @@ jobs:
         env:
           FEASTKIT_ENABLE_MPI: 'true'
           FEASTKIT_TEST_MPI: 'true'
+          JULIA_NUM_THREADS: '2'
         run: |
           julia -e '
             using Pkg

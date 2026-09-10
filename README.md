@@ -1,9 +1,23 @@
 # FeastKit.jl
 
 [![CI](https://github.com/subhk/FeastKit.jl/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/subhk/FeastKit.jl/actions/workflows/ci.yml?query=branch%3Amain)
-[![Documentation](https://img.shields.io/badge/docs-latest-blue.svg)](https://subhk.github.io/FeastKit.jl/)
+[![Stable documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://subhk.github.io/FeastKit.jl/stable/)
+[![Development documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://subhk.github.io/FeastKit.jl/dev/)
 
 A Julia implementation of the FeastKit eigenvalue solver for finding eigenvalues and eigenvectors of large-scale eigenvalue problems within a specified region.
+
+## Documentation
+
+- [Stable documentation](https://subhk.github.io/FeastKit.jl/stable/) covers the latest tagged release.
+- [Development documentation](https://subhk.github.io/FeastKit.jl/dev/) tracks `main`, including features not yet released.
+
+Use the documentation version dropdown to switch versions. If you are working
+from `main`, use `/dev/` rather than `/stable/`.
+
+For maintainers: Documenter publishes both versions to the `gh-pages` branch.
+GitHub Pages must use **Deploy from a branch → `gh-pages` → `/ (root)`** with
+the current workflow. The site's root URL may redirect to the stable version;
+use the explicit `/dev/` link for development documentation.
 
 ## Overview
 
@@ -412,6 +426,15 @@ end
 6. **HPC clusters**: Use `backend=:mpi` or `feast_hybrid()` for optimal cluster performance  
 7. **Hybrid parallelism**: Combine MPI processes with threading for maximum performance
 8. **Load balancing**: FeastKit automatically distributes contour points for optimal load balancing
+
+## Scope
+
+FeastKit focuses on the public APIs covered by the test suite rather than
+mirroring every optional routine from the original FEAST library:
+
+- Custom contour integration is supported for the FEAST interfaces documented here
+- Advanced PFEAST routines outside the documented backend matrix are out of scope
+- Matrix-free APIs use FeastKit's Julia-native operator interface
 
 ## References
 

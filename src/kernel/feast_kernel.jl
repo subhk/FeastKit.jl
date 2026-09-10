@@ -592,6 +592,7 @@ end
         end
 
         # Save initial subspace for the contour sweep
+        state.checked_subspace = fpm[5] != 1
         state.Q0 = copy(workc[:, 1:M0])
         state.Q_proj = zeros(Complex{T}, N, M0)
         state.Qb = Matrix{Complex{T}}(undef, N, M0)
@@ -786,6 +787,10 @@ end
             state.phase = FEAST_PHASE_IDLE
 
             converged = epsout[] <= state.eps
+            # As in the real kernel, verify user seeds with independent probes
+            # before accepting only the already-converged eigendirections.
+            check_subspace = converged && !state.checked_subspace && M < M0
+            check_subspace && (converged = false)
 
             if converged || loop[] >= state.maxloop
                 feast_sort!(lambda, q, res, M)
@@ -801,8 +806,15 @@ end
             fill!(zAq, zero(Complex{T}))
             fill!(zSq, zero(Complex{T}))
 
-            state.active = state.rank
-            copyto!(view(state.Q0, :, 1:state.rank), view(q, :, 1:state.rank))
+            if check_subspace
+                _feast_seeded_subspace_complex!(state.Q0)
+                copyto!(view(state.Q0, :, 1:M), view(q, :, 1:M))
+                state.active = M0
+                state.checked_subspace = true
+            else
+                state.active = state.rank
+                copyto!(view(state.Q0, :, 1:state.rank), view(q, :, 1:state.rank))
+            end
 
             state.e = 1
             fpm[50] = 1
@@ -914,6 +926,7 @@ end
 
         # work is used for real intermediate results
         fill!(work, zero(T))
+        state.checked_subspace = fpm[5] != 1
         state.Q0 = copy(workc[:, 1:M0])
         state.perm = Vector{Int}(undef, M0)
         state.workc_tmp = Matrix{Complex{T}}(undef, N, M0)
@@ -1148,6 +1161,8 @@ end
         eps_tolerance = feast_tolerance(fpm, T)
         maxloop = fpm[4]
         converged = epsout[] <= eps_tolerance
+        check_subspace = converged && !state.checked_subspace && M < M0
+        check_subspace && (converged = false)
 
         if converged || loop[] >= maxloop
             feast_sort_general!(lambda, q, res, M)
@@ -1162,15 +1177,21 @@ end
         # Start new refinement loop from the compressed Ritz basis.
         loop[] += 1
 
-        rank = state.rank
-        copyto!(view(state.Q0, :, 1:rank), view(q, :, 1:rank))
-        state.active = rank
+        if check_subspace
+            _feast_seeded_subspace_complex!(state.Q0)
+            copyto!(view(state.Q0, :, 1:M), view(q, :, 1:M))
+            state.active = M0
+            state.checked_subspace = true
+        else
+            state.active = state.rank
+            copyto!(view(state.Q0, :, 1:state.rank), view(q, :, 1:state.rank))
+        end
 
         fill!(Aq, zero(Complex{T}))
         fill!(Sq, zero(Complex{T}))
         fill!(q, zero(Complex{T}))
 
-        copyto!(view(workc, :, 1:rank), view(state.Q0, :, 1:rank))
+        copyto!(view(workc, :, 1:state.active), view(state.Q0, :, 1:state.active))
 
         # Re-cache contour for next refinement loop
         contour = feast_get_custom_contour(T, fpm)

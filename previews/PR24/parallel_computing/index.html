@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Parallel Computing · FeastKit.jl</title><meta name="title" content="Parallel Computing · FeastKit.jl"/><meta property="og:title" content="Parallel Computing · FeastKit.jl"/><meta property="twitter:title" content="Parallel Computing · FeastKit.jl"/><meta name="description" content="Documentation for FeastKit.jl."/><meta property="og:description" content="Documentation for FeastKit.jl."/><meta property="twitter:description" content="Documentation for FeastKit.jl."/><meta property="og:url" content="https://subhk.github.io/FeastKit.jl/stable/parallel_computing/"/><meta property="twitter:url" content="https://subhk.github.io/FeastKit.jl/stable/parallel_computing/"/><link rel="canonical" href="https://subhk.github.io/FeastKit.jl/stable/parallel_computing/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.63.2/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">FeastKit.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../problem_setup/">Problem Setup</a></li><li><a class="tocitem" href="../zero_to_feast/">Zero to FeastKit</a></li><li><a class="tocitem" href="../getting_started/">Getting Started</a></li><li><span class="tocitem">User Guide</span><ul><li><a class="tocitem" href="../examples/">Examples</a></li><li><a class="tocitem" href="../matrix_free_interface/">Matrix-Free Interface</a></li><li><a class="tocitem" href="../performance/">Performance Tips</a></li><li><a class="tocitem" href="../custom_contours/">Custom Contours</a></li><li><a class="tocitem" href="../complex_eigenvalues/">Complex Eigenvalues</a></li><li><a class="tocitem" href="../polynomial_problems/">Polynomial Problems</a></li><li class="is-active"><a class="tocitem" href>Parallel Computing</a><ul class="internal"><li><a class="tocitem" href="#Overview"><span>Overview</span></a></li><li><a class="tocitem" href="#Checking-Capabilities"><span>Checking Capabilities</span></a></li><li><a class="tocitem" href="#Threading-(Shared-Memory)"><span>Threading (Shared Memory)</span></a></li><li><a class="tocitem" href="#Distributed-Computing"><span>Distributed Computing</span></a></li><li><a class="tocitem" href="#MPI-Parallelization"><span>MPI Parallelization</span></a></li><li><a class="tocitem" href="#Hybrid-Parallelization"><span>Hybrid Parallelization</span></a></li><li><a class="tocitem" href="#Performance-Tuning"><span>Performance Tuning</span></a></li><li><a class="tocitem" href="#Troubleshooting"><span>Troubleshooting</span></a></li><li><a class="tocitem" href="#API-Reference"><span>API Reference</span></a></li></ul></li></ul></li><li><a class="tocitem" href="../api_reference/">API Reference</a></li><li><span class="tocitem">Project</span><ul><li><a class="tocitem" href="../contributing/">Contributing</a></li><li><a class="tocitem" href="../developer_guide/">Developer Guide</a></li><li><a class="tocitem" href="../testing/">Testing</a></li><li><a class="tocitem" href="../license/">License</a></li><li><a class="tocitem" href="../changelog/">Changelog</a></li><li><a class="tocitem" href="../bibliography/">Bibliography</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">User Guide</a></li><li class="is-active"><a href>Parallel Computing</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Parallel Computing</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/subhk/FeastKit.jl/blob/main/docs/src/parallel_computing.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Parallel-Computing"><a class="docs-heading-anchor" href="#Parallel-Computing">Parallel Computing</a><a id="Parallel-Computing-1"></a><a class="docs-heading-anchor-permalink" href="#Parallel-Computing" title="Permalink"></a></h1><p>FEAST can solve shifted systems at different contour nodes concurrently. This guide contains complete local threading, distributed-worker, MPI, and hybrid examples. Their assertions check the eigenvalues, not a promised speedup.</p><ul><li><a href="#Parallel-Computing">Parallel Computing</a></li><li class="no-marker"><ul><li><a href="#Overview">Overview</a></li><li><a href="#Checking-Capabilities">Checking Capabilities</a></li><li><a href="#Threading-(Shared-Memory)">Threading (Shared Memory)</a></li><li><a href="#Distributed-Computing">Distributed Computing</a></li><li><a href="#MPI-Parallelization">MPI Parallelization</a></li><li><a href="#Hybrid-Parallelization">Hybrid Parallelization</a></li><li><a href="#Performance-Tuning">Performance Tuning</a></li><li><a href="#Troubleshooting">Troubleshooting</a></li><li><a href="#API-Reference">API Reference</a></li></ul></li></ul><h2 id="Overview"><a class="docs-heading-anchor" href="#Overview">Overview</a><a id="Overview-1"></a><a class="docs-heading-anchor-permalink" href="#Overview" title="Permalink"></a></h2><table><tr><th style="text-align: left">Backend</th><th style="text-align: left">Supported high-level problems</th><th style="text-align: left">Required setup</th></tr><tr><td style="text-align: left"><code>:threads</code></td><td style="text-align: left">Real symmetric dense/sparse interval problems</td><td style="text-align: left">Multiple Julia threads</td></tr><tr><td style="text-align: left"><code>:distributed</code></td><td style="text-align: left">Real symmetric sparse interval problems</td><td style="text-align: left">Julia workers with FeastKit available</td></tr><tr><td style="text-align: left"><code>:mpi</code></td><td style="text-align: left">Real symmetric intervals and complex Hermitian/general dense/sparse problems</td><td style="text-align: left">MPI.jl, initialized communicator, multiple ranks</td></tr><tr><td style="text-align: left"><code>feast_hybrid</code></td><td style="text-align: left">Real symmetric MPI problems with threaded contour solves</td><td style="text-align: left">MPI plus threads on each rank</td></tr></table><p>Explicit unavailable backends raise an error. <code>backend=:auto</code> permits fallback and does not guarantee that a parallel backend will be chosen. Assembled serial solves support direct and GMRES inner solvers. Threaded/distributed and real MPI paths use direct solves; complex MPI also supports GMRES after loading Krylov.</p><p>All examples use a project environment containing FeastKit. The MPI examples also need MPI; the iterative MPI alias needs Krylov. Scripts marked with <code># docs-test:</code> are executed by <code>docs/check_parallel_examples.jl</code> in CI.</p><h2 id="Checking-Capabilities"><a class="docs-heading-anchor" href="#Checking-Capabilities">Checking Capabilities</a><a id="Checking-Capabilities-1"></a><a class="docs-heading-anchor-permalink" href="#Checking-Capabilities" title="Permalink"></a></h2><p>The report reflects the current session:</p><pre><code class="language-julia hljs">using FeastKit
+capabilities = feast_parallel_capabilities()
+@assert all(k -&gt; haskey(capabilities, k), (:threads, :distributed, :mpi))
+@assert capabilities[:threads] == (Threads.nthreads() &gt; 1)
+feast_parallel_info()  # Output reflects the current session, not fixed hardware.</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">FeastKit Parallel Computing Capabilities
+========================================
+Threading:
+  Available threads: 2
+  Status: Enabled
+
+Distributed Computing:
+  Available workers: 1
+  Worker processes: [1]
+  Status: Disabled
+
+MPI:
+  MPI initialized: No
+  Status: Disabled
+
+Recommendations:
+  Best for multi-core: Use parallel=:threads</code></pre><h2 id="Threading-(Shared-Memory)"><a class="docs-heading-anchor" href="#Threading-(Shared-Memory)">Threading (Shared Memory)</a><a id="Threading-(Shared-Memory)-1"></a><a class="docs-heading-anchor-permalink" href="#Threading-(Shared-Memory)" title="Permalink"></a></h2><h3 id="Setup"><a class="docs-heading-anchor" href="#Setup">Setup</a><a id="Setup-1"></a><a class="docs-heading-anchor-permalink" href="#Setup" title="Permalink"></a></h3><p>Start Julia with at least two threads:</p><pre><code class="language-sh hljs">julia --project --threads=2</code></pre><p><code>--threads=auto</code> can select the count from your machine. Julia thread count is separate from BLAS thread count; extra BLAS threads can oversubscribe the CPU.</p><h3 id="Usage"><a class="docs-heading-anchor" href="#Usage">Usage</a><a id="Usage-1"></a><a class="docs-heading-anchor-permalink" href="#Usage" title="Permalink"></a></h3><p>Save this as <code>feast_threads.jl</code> and run it with the setup above. The explicit threaded request requires more than one Julia thread:</p><pre><code class="language-julia hljs"># docs-test: threads
+using FeastKit, LinearAlgebra, SparseArrays
+@assert Threads.nthreads() &gt; 1 &quot;Start Julia with --threads=2 or more&quot;
+n = 200
+A = sparse(SymTridiagonal(2.0*ones(n), -ones(n-1)))
+B = spdiagm(0 =&gt; ones(n))
+expected = [2-2cos(k*π/(n+1)) for k in 1:10]
+interval = (0.0, (expected[end] + 2-2cos(11π/(n+1)))/2)
+result = feast(A, B, interval; subspace_size=12, backend=:threads)
+@assert result.converged &amp;&amp; result.M == 10
+@assert isapprox(result.values, expected; atol=1e-9)
+result_auto = feast(A, B, interval; subspace_size=12, backend=:auto)
+@assert result_auto.converged &amp;&amp; result_auto.M == 10
+println(&quot;Found $(result.M) eigenvalues with $(Threads.nthreads()) threads&quot;)</code></pre><h3 id="Direct-RCI-Interface"><a class="docs-heading-anchor" href="#Direct-RCI-Interface">Direct RCI Interface</a><a id="Direct-RCI-Interface-1"></a><a class="docs-heading-anchor-permalink" href="#Direct-RCI-Interface" title="Permalink"></a></h3><p>Manual callers own the state and buffers and service every requested product. The iteration bound below catches an incomplete RCI loop instead of hanging:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, Random
+N, M0 = 12, 4
+A = Matrix(Diagonal(collect(1.0:N)))
+B = Matrix{Float64}(I, N, N)
+Emin, Emax = 0.5, 2.5
+fpm = feastinit().fpm
+fpm[2] = 8
+state = ParallelFeastState{Float64}(fpm[2], M0, true, true)
+work = randn(MersenneTwister(42), N, M0)
+workc = zeros(ComplexF64, N, M0)
+Aq, Sq = zeros(M0, M0), zeros(M0, M0)
+lambda, q, res = zeros(M0), zeros(N, M0), zeros(M0)
+for request in 1:1000
+    pfeast_srci!(state, N, work, workc, Aq, Sq, fpm, Emin, Emax, M0, lambda, q, res)
+    if state.ijob == Int(FeastKit.Feast_RCI_PARALLEL_SOLVE)
+        pfeast_compute_all_contour_points!(state, A, B, work, M0)
+    elseif state.ijob == Int(Feast_RCI_MULT_A)
+        work[:, 1:state.mode] .= A * q[:, 1:state.mode]
+    elseif state.ijob == Int(Feast_RCI_MULT_B)
+        work[:, 1:state.mode] .= B * q[:, 1:state.mode]
+    elseif state.ijob == Int(Feast_RCI_DONE)
+        break
+    end
+end
+@assert state.ijob == Int(Feast_RCI_DONE) &amp;&amp; state.info == 0
+@assert state.mode == 2
+@assert isapprox(lambda[1:state.mode], [1.0, 2.0]; atol=1e-9)
+lambda[1:state.mode]</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2-element Vector{Float64}:
+ 1.0
+ 2.0</code></pre><article><details class="docstring" open="true"><summary id="FeastKit.feast_parallel"><a class="docstring-binding" href="#FeastKit.feast_parallel"><code>FeastKit.feast_parallel</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">feast_parallel(A, B, interval; M0=10, fpm=nothing, use_threads=true, auto_rci=true)</code></pre><p>Solve a real symmetric pencil with automatic parallel reverse communication. <code>auto_rci=false</code> is unsupported: manual callers must retain a <code>ParallelFeastState</code> and drive <code>pfeast_srci!</code> directly.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/subhk/FeastKit.jl/blob/de01aa14a23b29272dae711da512be14d0d37056/src/parallel/feast_parallel_rci.jl#L184-L190">source</a></section></details></article><article><details class="docstring" open="true"><summary id="FeastKit.pfeast_srci!"><a class="docstring-binding" href="#FeastKit.pfeast_srci!"><code>FeastKit.pfeast_srci!</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">pfeast_srci!(state, N, work, workc, Aq, Sq, fpm, Emin, Emax, M0, lambda, q, res)</code></pre><p>Parallel adapter for the real symmetric RCI kernel. On initialization, <code>work</code> holds the caller&#39;s trial subspace. Handle <code>MULT_A</code> and <code>MULT_B</code> by writing <code>A*q[:,1:state.mode]</code> or <code>B*q[:,1:state.mode]</code> into <code>work</code>, respectively. For <code>PARALLEL_SOLVE</code>, call <code>pfeast_compute_all_contour_points!</code>; the adapter then feeds those solves to the shared rank-compression/Rayleigh–Ritz kernel. With <code>use_parallel=false</code>, handle ordinary FACTORIZE/SOLVE jobs instead.</p></div><a class="docs-sourcelink" target="_blank" href="https://github.com/subhk/FeastKit.jl/blob/de01aa14a23b29272dae711da512be14d0d37056/src/parallel/feast_parallel_rci.jl#L72-L81">source</a></section></details></article><h2 id="Distributed-Computing"><a class="docs-heading-anchor" href="#Distributed-Computing">Distributed Computing</a><a id="Distributed-Computing-1"></a><a class="docs-heading-anchor-permalink" href="#Distributed-Computing" title="Permalink"></a></h2><h3 id="Setup-and-Usage"><a class="docs-heading-anchor" href="#Setup-and-Usage">Setup and Usage</a><a id="Setup-and-Usage-1"></a><a class="docs-heading-anchor-permalink" href="#Setup-and-Usage" title="Permalink"></a></h3><p>This example starts two local workers in the active project and removes only those workers when it finishes. Save it as <code>feast_distributed.jl</code> and run <code>julia --project feast_distributed.jl</code> from an environment containing FeastKit.</p><pre><code class="language-julia hljs"># docs-test: distributed
+using Distributed, FeastKit, LinearAlgebra, SparseArrays
+pids = addprocs(2; exeflags=`--project=$(Base.active_project())`)
+try
+    n = 200
+    A = sparse(SymTridiagonal(2.0*ones(n), -ones(n-1)))
+    B = spdiagm(0 =&gt; ones(n))
+    expected = [2-2cos(k*π/(n+1)) for k in 1:10]
+    interval = (0.0, (expected[end] + 2-2cos(11π/(n+1)))/2)
+    result = feast(A, B, interval; subspace_size=12, backend=:distributed)
+    @assert result.converged &amp;&amp; result.M == 10
+    @assert isapprox(result.values, expected; atol=1e-9)
+
+    # Match the quadrature task count to the workers; trapezoidal counts are flexible.
+    fpm = feastinit().fpm
+    fpm[16] = 1
+    fpm[2] = max(2*nworkers(), 8)
+    tuned = feast(A, B, interval; subspace_size=12, fpm=fpm, backend=:distributed)
+    @assert tuned.converged &amp;&amp; tuned.M == 10
+    pfeast_show_distribution(fpm[2]; use_threads=false)
+finally
+    rmprocs(pids)
+end</code></pre><p>For remote workers, replace the <code>addprocs</code> call with your reachable SSH hosts and remote Julia/project paths. This is a configuration template, not a runnable local example:</p><pre><code class="language-julia hljs">pids = addprocs([(&quot;node1&quot;, 2), (&quot;node2&quot;, 2)];
+               exeflags=`--project=/path/to/remote/project`)</code></pre><h3 id="How-It-Works"><a class="docs-heading-anchor" href="#How-It-Works">How It Works</a><a id="How-It-Works-1"></a><a class="docs-heading-anchor-permalink" href="#How-It-Works" title="Permalink"></a></h3><p>FeastKit loads itself on the selected workers and builds shifted factorizations there. Factors are reused while right-hand sides and projected results move between processes. Remote workers must have compatible Julia and package environments. The high-level distributed path currently requires sparse real symmetric inputs. The following command reports the current task distribution:</p><pre><code class="language-julia hljs">using FeastKit
+pfeast_show_distribution(16; use_threads=false)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Distributed computation for 16 contour points across 1 workers:
+  Worker 1: contour points [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]</code></pre><h2 id="MPI-Parallelization"><a class="docs-heading-anchor" href="#MPI-Parallelization">MPI Parallelization</a><a id="MPI-Parallelization-1"></a><a class="docs-heading-anchor-permalink" href="#MPI-Parallelization" title="Permalink"></a></h2><h3 id="Prerequisites-and-Setup"><a class="docs-heading-anchor" href="#Prerequisites-and-Setup">Prerequisites and Setup</a><a id="Prerequisites-and-Setup-1"></a><a class="docs-heading-anchor-permalink" href="#Prerequisites-and-Setup" title="Permalink"></a></h3><p>Install optional dependencies in the same environment used to launch scripts:</p><pre><code class="language-sh hljs">julia --project -e &#39;using Pkg; Pkg.add([&quot;MPI&quot;, &quot;Krylov&quot;])&#39;</code></pre><p>Load MPI, initialize it on every rank, and pass <code>comm</code> explicitly to FEAST. <code>FEASTKIT_ENABLE_MPI=true</code> optionally enables automatic availability detection; it is not required when an initialized communicator is supplied explicitly. Every rank must provide the same matrices, search region, and solver settings.</p><h3 id="Usage-2"><a class="docs-heading-anchor" href="#Usage-2">Usage</a><a class="docs-heading-anchor-permalink" href="#Usage-2" title="Permalink"></a></h3><p>Save this complete script as <code>feast_mpi.jl</code>:</p><pre><code class="language-julia hljs"># docs-test: mpi
+using MPI, FeastKit, LinearAlgebra, SparseArrays
+MPI.Init()
+try
+    comm = MPI.COMM_WORLD
+    n = 200
+    A = sparse(SymTridiagonal(2.0*ones(n), -ones(n-1)))
+    B = spdiagm(0 =&gt; ones(n))
+    expected = [2-2cos(k*π/(n+1)) for k in 1:10]
+    interval = (0.0, (expected[end] + 2-2cos(11π/(n+1)))/2)
+    result = feast(A, B, interval; subspace_size=12, backend=:mpi, comm=comm)
+    @assert result.converged &amp;&amp; result.M == 10
+    @assert isapprox(result.values, expected; atol=1e-9)
+
+    Az = sparse(Diagonal(ComplexF64[0.5+0.1im, 1.0+0.2im, 2.0-0.1im]))
+    Bz = spdiagm(0 =&gt; ones(ComplexF64, 3))
+    general = feast_general(Az, Bz, 1.0+0.1im, 1.5;
+                            subspace_size=3, backend=:mpi, comm=comm)
+    @assert general.converged &amp;&amp; general.M == 3
+    @assert isapprox(sort(general.values; by=real), diag(Az); atol=1e-9)
+    MPI.Comm_rank(comm) == 0 &amp;&amp; println(result.values)
+finally
+    MPI.Finalize()
+end</code></pre><p>Launch with MPI.jl&#39;s configured executable, which matches its MPI library:</p><pre><code class="language-sh hljs">julia --project -e &#39;using MPI; run(`$(MPI.mpiexec()) -n 2 julia --project feast_mpi.jl`)&#39;</code></pre><h3 id="MPI-Specific-Functions"><a class="docs-heading-anchor" href="#MPI-Specific-Functions">MPI-Specific Functions</a><a id="MPI-Specific-Functions-1"></a><a class="docs-heading-anchor-permalink" href="#MPI-Specific-Functions" title="Permalink"></a></h3><p>Save the following as <code>feast_mpi_aliases.jl</code> and launch it the same way, in a fresh process. It exercises direct MPI, real/complex PFEAST aliases, and a GMRES-backed <code>pzifeast_*</code> alias. MPI cannot be reinitialized after finalization in the same Julia process.</p><pre><code class="language-julia hljs"># docs-test: mpi_aliases
+using MPI, Krylov, FeastKit, LinearAlgebra, SparseArrays
+MPI.Init()
+try
+    comm = MPI.COMM_WORLD
+    A = spdiagm(0 =&gt; [0.5, 1.0, 2.0])
+    B = spdiagm(0 =&gt; ones(3))
+    interval, M0 = (0.0, 2.5), 3
+    fpm = feastinit().fpm
+    direct = mpi_feast(A, B, interval; M0=M0, comm=comm, fpm=copy(fpm))
+    real_alias = pdfeast_scsrgv!(A, B, interval..., M0, copy(fpm); comm=comm)
+
+    Ahd = Matrix(Diagonal(ComplexF64[0.5, 1.0, 2.0]))
+    Bhd = Matrix{ComplexF64}(I, 3, 3)
+    dense_h = pzfeast_hegv!(Ahd, Bhd, interval..., M0, copy(fpm); comm=comm)
+    sparse_h = pzfeast_hcsrgv!(sparse(Ahd), sparse(Bhd), interval..., M0,
+                              copy(fpm); comm=comm)
+    for result in (direct, real_alias, dense_h, sparse_h)
+        @assert result.converged &amp;&amp; result.M == 3
+        @assert isapprox(result.values, [0.5, 1.0, 2.0]; atol=1e-9)
+    end
+    Az = sparse(Diagonal(ComplexF64[0.5+0.1im, 1.0+0.2im, 2.0-0.1im]))
+    general = pzifeast_gcsrgv!(Az, sparse(Bhd), 1.0+0.1im, 1.5, M0,
+                              copy(fpm); comm=comm, solver_tol=1e-12)
+    @assert general.converged &amp;&amp; general.M == 3
+    @assert isapprox(sort(general.values; by=real), diag(Az); atol=1e-9)
+finally
+    MPI.Finalize()
+end</code></pre><p>MPI broadcasts custom contour nodes, weights, and optional boundary vertices from the communicator root. General-problem membership uses that geometry. Rank-local factorization or direct-solve failures return <code>Feast_ERROR_LAPACK</code> collectively; iterative projection failures return <code>Feast_ERROR_NO_CONVERGENCE</code>. Product, projection, eigensolve, and residual failures are synchronized so ranks do not diverge across collectives.</p><p>The default inner MPI GMRES tolerance is one percent of the precision-aware outer tolerance, subject to a machine-epsilon floor. Use high-level <code>solver_opts=(rtol=...,)</code> or low-level <code>solver_tol</code> to override it. Real and complex <code>mpi_feast</code> calls accept a <code>FeastParameters</code> wrapper or its raw <code>.fpm</code>.</p><p><code>fpm[10]=1</code> caches each rank&#39;s assigned factors and permits threaded reuse. <code>fpm[10]=0</code> factors shifts one at a time on each sweep, using serial contour solves within a hybrid rank to limit retained storage.</p><p>The real symmetric PFEAST aliases use the parallel Julia kernels without <code>comm</code>, and the supported MPI kernels when <code>comm</code> is supplied. Complex <code>pcfeast_*</code>/<code>pzfeast_*</code> and iterative <code>pcifeast_*</code>/<code>pzifeast_*</code> aliases cover supported dense/sparse Hermitian and general MPI problems; see the <a href="../api_reference/">API reference</a> for the precision families.</p><h2 id="Hybrid-Parallelization"><a class="docs-heading-anchor" href="#Hybrid-Parallelization">Hybrid Parallelization</a><a id="Hybrid-Parallelization-1"></a><a class="docs-heading-anchor-permalink" href="#Hybrid-Parallelization" title="Permalink"></a></h2><p>Hybrid execution combines MPI ranks with threaded solves of contour systems within each rank. MPI collectives run on the calling thread. It currently supports real symmetric problems through <code>feast_hybrid</code>, not a <code>:hybrid</code> backend keyword.</p><h3 id="Setup-2"><a class="docs-heading-anchor" href="#Setup-2">Setup</a><a class="docs-heading-anchor-permalink" href="#Setup-2" title="Permalink"></a></h3><p>Save the script below as <code>feast_hybrid.jl</code>, then run two ranks with two threads each:</p><pre><code class="language-sh hljs">julia --project -e &#39;using MPI; run(`$(MPI.mpiexec()) -n 2 julia --project --threads=2 feast_hybrid.jl`)&#39;</code></pre><h3 id="Usage-3"><a class="docs-heading-anchor" href="#Usage-3">Usage</a><a class="docs-heading-anchor-permalink" href="#Usage-3" title="Permalink"></a></h3><pre><code class="language-julia hljs"># docs-test: hybrid
+using MPI, FeastKit, LinearAlgebra, SparseArrays
+@assert Threads.nthreads() &gt; 1 &quot;Start each rank with --threads=2 or more&quot;
+MPI.Init()
+try
+    comm = MPI.COMM_WORLD
+    A = spdiagm(0 =&gt; collect(1.0:12.0))
+    B = spdiagm(0 =&gt; ones(12))
+    result = feast_hybrid(A, B, (0.5, 2.5); M0=4, comm=comm,
+                          use_threads_per_rank=true)
+    @assert result.converged &amp;&amp; result.M == 2
+    @assert isapprox(result.values, [1.0, 2.0]; atol=1e-9)
+    MPI.Comm_rank(comm) == 0 &amp;&amp; println(result.values)
+finally
+    MPI.Finalize()
+end</code></pre><h2 id="Performance-Tuning"><a class="docs-heading-anchor" href="#Performance-Tuning">Performance Tuning</a><a id="Performance-Tuning-1"></a><a class="docs-heading-anchor-permalink" href="#Performance-Tuning" title="Permalink"></a></h2><h3 id="Choosing-the-Right-Backend"><a class="docs-heading-anchor" href="#Choosing-the-Right-Backend">Choosing the Right Backend</a><a id="Choosing-the-Right-Backend-1"></a><a class="docs-heading-anchor-permalink" href="#Choosing-the-Right-Backend" title="Permalink"></a></h3><p>Measure convergence, time, and peak memory for your problem. A supported backend with more workers can still be slower because of communication, compilation, or oversubscription. Sparse fill-in often dominates factor costs.</p><h3 id="Integration-Points-vs-Workers"><a class="docs-heading-anchor" href="#Integration-Points-vs-Workers">Integration Points vs Workers</a><a id="Integration-Points-vs-Workers-1"></a><a class="docs-heading-anchor-permalink" href="#Integration-Points-vs-Workers" title="Permalink"></a></h3><p>The distributed example also demonstrates setting <code>fpm[2]</code> to at least twice the worker count. It uses trapezoidal integration to allow those counts; Gauss and Zolotarev have restricted supported counts. More nodes change accuracy and work as well as task parallelism.</p><h3 id="Benchmarking"><a class="docs-heading-anchor" href="#Benchmarking">Benchmarking</a><a id="Benchmarking-1"></a><a class="docs-heading-anchor-permalink" href="#Benchmarking" title="Permalink"></a></h3><p>This small example checks the target count before reporting timings. Use warm-up runs and representative matrices for a performance study:</p><pre><code class="language-julia hljs">using FeastKit, SparseArrays, LinearAlgebra
+n = 200
+A = sparse(SymTridiagonal(2.0*ones(n), -ones(n-1)))
+B = spdiagm(0 =&gt; ones(n))
+interval = (0.0, 1.05*(2-2cos(10π/(n+1))))
+checked = feast(A, B, interval; subspace_size=12)
+@assert checked.converged &amp;&amp; checked.M == 10
+# M0 is positional. Reports reflect this session; timings include compilation.
+feast_parallel_comparison(A, B, interval, 12)
+FeastKit.pfeast_rci_benchmark(A, B, interval, 12; compare_serial=true)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">FeastKit Parallel Backend Comparison
+==================================================
+Matrix size: 200
+Search interval: (0.0, 0.025598388775030137)
+Subspace size: 12
+Available backends:
+  Threads: 2
+  Workers: 1
+  MPI: No
+
+1. Serial execution:
+   Time: 0.003 seconds
+   Eigenvalues: 10
+
+2. Threading execution:
+   Time: 0.003 seconds
+   Eigenvalues: 10
+   Speedup: 1.17x
+Parallel RCI Performance Comparison
+=============================================
+Matrix size: 200
+Integration points: 0
+Threads available: 2
+Workers available: 1
+
+Parallel FeastKit (threaded):
+Time: 0.051 seconds
+Eigenvalues found: 10
+Convergence loops: 3
+
+Serial FeastKit:
+Time: 0.003 seconds
+Eigenvalues found: 10
+Thread speedup: 0.07x</code></pre><h3 id="Memory-Considerations"><a class="docs-heading-anchor" href="#Memory-Considerations">Memory Considerations</a><a id="Memory-Considerations-1"></a><a class="docs-heading-anchor-permalink" href="#Memory-Considerations" title="Permalink"></a></h3><p>Threads share input matrices but need per-shift factors and work buffers. Distributed and MPI processes hold their own matrix data and assigned factors. There is no fixed total-memory multiplier: fill-in, caching, and subspace size matter. Reduce subspace width only while retaining room for all target roots.</p><h2 id="Troubleshooting"><a class="docs-heading-anchor" href="#Troubleshooting">Troubleshooting</a><a id="Troubleshooting-1"></a><a class="docs-heading-anchor-permalink" href="#Troubleshooting" title="Permalink"></a></h2><h3 id="Threading-Not-Working"><a class="docs-heading-anchor" href="#Threading-Not-Working">Threading Not Working</a><a id="Threading-Not-Working-1"></a><a class="docs-heading-anchor-permalink" href="#Threading-Not-Working" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Check thread count
+println(Threads.nthreads())  # Should be &gt; 1
+
+# Solution: Restart Julia with threads
+# julia --threads=8</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2</code></pre><h3 id="Distributed-Workers-Not-Found"><a class="docs-heading-anchor" href="#Distributed-Workers-Not-Found">Distributed Workers Not Found</a><a id="Distributed-Workers-Not-Found-1"></a><a class="docs-heading-anchor-permalink" href="#Distributed-Workers-Not-Found" title="Permalink"></a></h3><pre><code class="language-julia hljs">using Distributed
+println(&quot;Additional workers available: &quot;, nprocs() &gt; 1)
+# If false, use the complete Setup and Usage example above to add local workers.</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Additional workers available: false</code></pre><h3 id="MPI-Initialization-Fails"><a class="docs-heading-anchor" href="#MPI-Initialization-Fails">MPI Initialization Fails</a><a id="MPI-Initialization-Fails-1"></a><a class="docs-heading-anchor-permalink" href="#MPI-Initialization-Fails" title="Permalink"></a></h3><pre><code class="language-bash hljs"># Install MPI in the same project used to launch the script.
+julia --project -e &#39;using Pkg; Pkg.add(&quot;MPI&quot;)&#39;
+# Run the complete example through the launcher selected by MPI.jl.
+julia --project -e &#39;using MPI; run(`$(MPI.mpiexec()) -n 2 julia --project feast_mpi.jl`)&#39;</code></pre><h3 id="Performance-Not-Scaling"><a class="docs-heading-anchor" href="#Performance-Not-Scaling">Performance Not Scaling</a><a id="Performance-Not-Scaling-1"></a><a class="docs-heading-anchor-permalink" href="#Performance-Not-Scaling" title="Permalink"></a></h3><ol><li><strong>Check linear solver time</strong>: If solving <code>(z*B - A)*Y = X</code> dominates, parallel overhead may be significant</li><li><strong>Increase problem size</strong>: Small problems have too much communication overhead</li><li><strong>Use matrix-free</strong>: For very large problems, matrix-free with parallel linear solvers scales better</li></ol><p>Needs a multi-threaded session.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, SparseArrays
+A = spdiagm(0 =&gt; collect(1.0:40.0))
+B = spdiagm(0 =&gt; ones(40))
+interval = (0.5, 3.5)
+if Threads.nthreads() &gt; 1
+    # Warm up each path before timing; this small example makes no speedup claim.
+    feast(A, B, interval; subspace_size=6, backend=:serial)
+    feast(A, B, interval; subspace_size=6, backend=:threads)
+    t_serial = @elapsed result_serial = feast(A, B, interval; subspace_size=6, backend=:serial)
+    t_parallel = @elapsed result_parallel = feast(A, B, interval; subspace_size=6, backend=:threads)
+    @assert result_serial.converged &amp;&amp; result_parallel.converged
+    @assert result_parallel.M == result_serial.M == 3
+    @assert isapprox(result_parallel.values, result_serial.values; atol=1e-9)
+    println(&quot;Speedup: &quot;, t_serial/t_parallel)
+else
+    println(&quot;Start Julia with --threads=2 or more to compare these paths.&quot;)
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Speedup: 0.8237292020207931</code></pre><hr/><h2 id="API-Reference"><a class="docs-heading-anchor" href="#API-Reference">API Reference</a><a id="API-Reference-1"></a><a class="docs-heading-anchor-permalink" href="#API-Reference" title="Permalink"></a></h2><h3 id="High-Level-Functions"><a class="docs-heading-anchor" href="#High-Level-Functions">High-Level Functions</a><a id="High-Level-Functions-1"></a><a class="docs-heading-anchor-permalink" href="#High-Level-Functions" title="Permalink"></a></h3><p>Signature catalogue – <code>A</code>, <code>B</code>, <code>interval</code>, <code>M0</code> and the RCI buffers are yours:</p><pre><code class="language-julia hljs"># Automatic backend selection
+feast(A, B, interval; backend=:auto)
+feast(A, B, interval; backend=:threads)
+feast(A, B, interval; backend=:distributed)
+feast(A, B, interval; backend=:mpi, comm=MPI.COMM_WORLD)
+
+# Direct parallel interface
+feast_parallel(A, B, interval; use_threads=true)
+mpi_feast(A, B, interval; comm=comm)
+feast_hybrid(A, B, interval; comm=comm, use_threads_per_rank=true)</code></pre><h3 id="State-Management"><a class="docs-heading-anchor" href="#State-Management">State Management</a><a id="State-Management-1"></a><a class="docs-heading-anchor-permalink" href="#State-Management" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Parallel RCI state
+state = ParallelFeastState{Float64}(ne, M0, use_parallel, use_threads)
+
+# RCI functions
+pfeast_srci!(state, N, work, workc, Aq, Sq, fpm, Emin, Emax, M0, lambda, q, res)
+pfeast_compute_all_contour_points!(state, A, B, work, M0)</code></pre><h3 id="Utilities"><a class="docs-heading-anchor" href="#Utilities">Utilities</a><a id="Utilities-1"></a><a class="docs-heading-anchor-permalink" href="#Utilities" title="Permalink"></a></h3><pre><code class="language-julia hljs"># Check capabilities
+feast_parallel_capabilities()
+feast_parallel_info()
+mpi_available()
+
+# Distribution helpers
+pfeast_show_distribution(ne; use_threads=true)
+determine_parallel_backend(parallel, comm)</code></pre><hr/><p><strong>Scale your eigenvalue computations!</strong></p><p><a href="../performance/">Performance Tips</a> · <a href="../examples/">Examples</a> · <a href="../api_reference/">API Reference</a></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../polynomial_problems/">« Polynomial Problems</a><a class="docs-footer-nextpage" href="../api_reference/">API Reference »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Tuesday 22 September 2026 01:03">Tuesday 22 September 2026</span>. Using Julia version 1.13.0.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

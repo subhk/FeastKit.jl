@@ -5,14 +5,10 @@ This guide will get you up and running with FeastKit.jl in minutes. Whether you'
 For a code-aligned checklist covering matrix assumptions, storage, contours,
 solver options, and result validation, start with [Problem Setup](problem_setup.md).
 
-## Table of Contents
-
-1. [Installation](#installation)
-2. [First Steps](#first-steps)  
-3. [Basic Usage Patterns](#basic-usage-patterns)
-4. [Understanding Results](#understanding-results)
-5. [Common Workflows](#common-workflows)
-6. [Next Steps](#next-steps)
+```@contents
+Pages = ["getting_started.md"]
+Depth = 2
+```
 
 ---
 
@@ -46,6 +42,7 @@ using FeastKit, LinearAlgebra
 # has to reach past 3 to contain both.
 A = [2.0 -1.0; -1.0 2.0]
 result = feast(A, (0.5, 3.5))
+@assert result.converged && result.M == 2
 
 println("Installation successful! Found $(result.M) eigenvalues.")
 ```
@@ -91,6 +88,8 @@ println("Searching for eigenvalues in [$Emin, $Emax]")
 # Step 3: Run FeastKit
 # M0 = trial-subspace size; leave room beyond the expected eigenvalue count
 result = feast(A, (Emin, Emax), M0=10)
+@assert result.converged && result.M == 6
+@assert isapprox(result.values, filter(λ -> Emin < λ < Emax, exact.(1:n)); atol=1e-9)
 
 println("FeastKit completed:")
 println("  Status: $(result.info == 0 ? "Success" : "Error")")
@@ -111,10 +110,9 @@ end
 
 ### Understanding What Happened
 
-FeastKit searched only in `[0.5, 1.5]` — it didn't compute all eigenvalues  
-Found eigenvalues efficiently using contour integration  
-Verified convergence — `result.info == 0` means success  
-Provided eigenvectors too — stored in `result.q`
+FeastKit searched in `[0.8094, 1.1846]` and returned the six enclosed
+eigenvalues. The example checks them against the known spectrum and verifies
+`result.converged`. The corresponding eigenvectors are columns of `result.q`.
 
 ---
 
@@ -124,22 +122,18 @@ Provided eigenvectors too — stored in `result.q`
 
 For problems of the form **A⋅x = λ⋅x**:
 
-```julia
-using FeastKit
-
-# Your matrix (dense, sparse, whatever!)
-A = your_matrix()
-
-# Find eigenvalues in an interval
-result = feast(A, (Emin, Emax), M0=20)
-
-# Access results
-eigenvalues = result.lambda[1:result.M]
-eigenvectors = result.q[:, 1:result.M]
+```@example pattern_standard
+using FeastKit, LinearAlgebra
+A = Matrix(Diagonal([1.0, 2.0, 3.0, 4.0]))
+result = feast(A, (0.5, 2.5); subspace_size=3)
+@assert result.converged && result.M == 2
+eigenvalues, eigenvectors = result.values, result.vectors
+@assert isapprox(eigenvalues, [1.0, 2.0]; atol=1e-10)
+eigenvalues
 ```
 
 **Real-world example:**
-```julia
+```@example pattern_sparse
 using FeastKit, SparseArrays
 
 # Large sparse matrix from discretized PDE
@@ -151,81 +145,77 @@ A = spdiagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))
 # still contain ~900 others.
 result = feast(A, (0.0, 1.04e-5), M0=12)
 println("Smallest eigenvalues: $(result.lambda[1:result.M])")
+@assert result.converged && result.M == 10
+@assert isapprox(result.values, [2-2cos(k*π/(n+1)) for k in 1:10]; atol=1e-9)
 ```
 
 ### Pattern 2: Generalized Eigenvalue Problem
 
 For problems of the form **A⋅x = λ⋅B⋅x**:
 
-```julia
-# Two matrices A and B
-A = your_stiffness_matrix()
-B = your_mass_matrix()  
-
-# Solve generalized problem
-result = feast(A, B, (Emin, Emax), M0=15)
+```@example pattern_generalized
+using FeastKit, LinearAlgebra
+B = Matrix(Diagonal([2.0, 3.0, 4.0]))
+A = B * Diagonal([1.0, 2.0, 4.0])
+result = feast(A, B, (0.5, 2.5); subspace_size=3)
+@assert result.converged && result.M == 2
+@assert isapprox(result.values, [1.0, 2.0]; atol=1e-10)
+result.values
 ```
 
 **Real-world example:**
-```julia
-using FeastKit
+```@example pattern_frequencies
+using FeastKit, LinearAlgebra
 
 # Structural dynamics: K⋅u = ω²⋅M⋅u
-K = stiffness_matrix()  # Stiffness
-M = mass_matrix()       # Mass
+M = Matrix(Diagonal([2.0, 3.0, 4.0]))
+K = M * Diagonal((2π .* [20.0, 50.0, 150.0]).^2)
 
 # Find natural frequencies between 10 and 100 Hz
 ω²_min, ω²_max = (2π*10)^2, (2π*100)^2
-result = feast(K, M, (ω²_min, ω²_max), M0=20)
+result = feast(K, M, (ω²_min, ω²_max); subspace_size=3)
+@assert result.converged && result.M == 2
 
 frequencies_Hz = sqrt.(result.lambda[1:result.M]) / (2π)
+@assert isapprox(frequencies_Hz, [20.0, 50.0]; atol=1e-8)
 println("Natural frequencies: $frequencies_Hz Hz")
 ```
 
 ### Pattern 3: Matrix-Free for Large Problems
 
-When your matrix is too large to store:
+Load `Krylov` for built-in iterative solves. This small stencil example checks
+the operator against its known spectrum. For larger problems, provide a
+structured shifted solve or a suitable preconditioner; see the
+[matrix-free guide](matrix_free_interface.md).
 
-```julia
-# Define matrix-vector multiplication
+```@example pattern_matfree
+using FeastKit, Krylov, LinearAlgebra
+n = 12
 function A_multiply!(y, x)
-    # Your custom A*x computation here
-    # Example: finite difference stencil
-    n = length(x)
-    y[1] = 2*x[1] - x[2]
-    for i in 2:n-1
-        y[i] = -x[i-1] + 2*x[i] - x[i+1]
-    end
-    y[n] = -x[n-1] + 2*x[n]
+    y .= 2 .* x
+    y[1:end-1] .-= x[2:end]
+    y[2:end] .-= x[1:end-1]
+    return y
 end
-
-# Create operator
-n = 1_000_000  # Very large!
-A_op = LinearOperator{Float64}(A_multiply!, (n, n), issymmetric=true)
-
-# Solve exactly the same way
-result = feast(A_op, (Emin, Emax), M0=10, solver=:gmres)
+A_op = LinearOperator{Float64}(A_multiply!, (n, n); issymmetric=true)
+result = feast(A_op, (0.0, 0.6); subspace_size=4, tol=1e-9,
+               solver=:gmres, solver_opts=(rtol=1e-12, maxiter=200, restart=16))
+@assert result.converged && result.M == 3
+@assert isapprox(result.values, [2-2cos(k*π/(n+1)) for k in 1:3]; atol=1e-8)
+result.values
 ```
 
 ### Pattern 4: Complex Eigenvalues
 
 For non-symmetric matrices with complex eigenvalues:
 
-```julia
-using FeastKit
-
-# Non-symmetric matrix
-A = your_nonsymmetric_matrix()
-B = Matrix(I, size(A)...)  # Identity matrix
-
-# Define circular search region in complex plane
-center = 1.0 + 0.5im     # Center point  
-radius = 2.0             # Search radius
-
-result = feast_general(A, B, center, radius, M0=15)
-
-# Complex eigenvalues
-complex_eigenvalues = result.lambda[1:result.M]
+```@example pattern_complex
+using FeastKit, LinearAlgebra
+A = [0.0 -1.0; 1.0 0.0]  # Real nonsymmetric, with eigenvalues ±im
+result = feast_general(A, 0.0+1.0im, 0.5; subspace_size=2)
+@assert result.converged && result.M == 1
+@assert isapprox(only(result.values), 1im; atol=1e-9)
+result.values
 ```
 
 ---
@@ -237,7 +227,7 @@ complex_eigenvalues = result.lambda[1:result.M]
 Symmetric/Hermitian solves return `FeastResult`; general solves return
 `FeastGeneralResult`. Both expose these fields:
 
-```julia
+```@example first
 result = feast(A, (Emin, Emax), M0=10)
 
 # Eigenvalues and eigenvectors
@@ -254,7 +244,7 @@ result.res       # Individual residuals
 
 ### Interpreting Status Codes
 
-```julia
+```@example first
 if result.info == 0
     println("Success! Found $(result.M) eigenvalues")
 elseif result.info == 1
@@ -270,10 +260,11 @@ end
 
 ### Quality Assessment
 
-```julia
+```@example first
+@assert result.converged && result.M > 0
 # Check convergence quality
 println("Final residual: $(result.epsout)")
-println("Max individual residual: $(maximum(result.res[1:result.M]))")
+println("Max individual residual: $(maximum(result.res; init=0.0))")
 
 # Verify eigenvalues are in target interval
 in_interval = [Emin <= λ <= Emax for λ in result.lambda[1:result.M]]
@@ -283,6 +274,7 @@ println("All eigenvalues in interval: $(all(in_interval))")
 Q = result.q[:, 1:result.M]
 orthogonality_error = norm(Q'*Q - I)
 println("Orthogonality error: $orthogonality_error")
+@assert all(in_interval) && orthogonality_error < 1e-8
 ```
 
 ---
@@ -293,53 +285,52 @@ println("Orthogonality error: $orthogonality_error")
 
 **Problem**: You need the 10 eigenvalues closest to 5.0
 
-```julia
+```@example closest_eigenvalues
 using FeastKit, LinearAlgebra
-
-# A matrix whose spectrum straddles 5.0
-n = 200
-W = Matrix(Diagonal(range(0.0, 10.0; length=n)))
-
-# Strategy: widen a narrow interval around 5.0 until it holds 10 eigenvalues,
-# keeping M0 at least that large -- M0 below the count means FEAST cannot
-# converge, whatever the tolerance.
+W = Matrix(Diagonal(collect(range(0.0, 10.0; length=200))))
 center = 5.0
-width = 0.1
-inside(w) = count(λ -> center - w <= λ <= center + w, diag(W))
-while inside(width) < 10
-    width *= 1.5
-end
-
-result = feast(W, (center - width, center + width), M0 = 2 * inside(width))
-
-if result.M >= 10
-    closest_10 = result.lambda[1:10]
-    println("10 eigenvalues closest to 5.0: $closest_10")
-else
-    println("Found only $(result.M) eigenvalues, try wider interval")
-end
+# This example has a known spectrum, so the search can be bounded in advance.
+widths = [0.1 * 1.5^k for k in 0:20]
+inside(w) = count(λ -> center-w < λ < center+w, diag(W))
+index = findfirst(w -> inside(w) >= 10, widths)
+index === nothing && error("No candidate interval holds ten eigenvalues")
+width = widths[index]
+result = feast(W, (center-width, center+width); subspace_size=2*inside(width))
+@assert result.converged && result.M >= 10
+closest_10 = result.values[sortperm(abs.(result.values .- center))[1:10]]
+expected = diag(W)[sortperm(abs.(diag(W) .- center))[1:10]]
+@assert isapprox(sort(closest_10), sort(expected); atol=1e-9)
+closest_10
 ```
 
 ### Workflow 2: Eigenvalue Counting
 
 **Problem**: How many eigenvalues are in `[0, 1]`?
 
-```julia
+```@example count_eigenvalues
+using FeastKit, LinearAlgebra
+A = Matrix(Diagonal([0.1, 0.4, 0.9, 2.0]))
 # Use FeastKit to count eigenvalues
-result = feast(A, (0.0, 1.0), M0=100)  # Large M0 for counting
+result = feast(A, (0.0, 1.0), M0=4)  # Large M0 for counting
 
 println("Number of eigenvalues in [0,1]: $(result.M)")
 
-# For more precise counting, use the rational function
-rational_values = feast_rational(test_points, 0.0, 1.0, fpm)
-# Values near 1.0 indicate eigenvalues nearby
+# A stochastic estimate can help size the subspace before solving.
+estimate = feast_estimate_count(A, (0.0, 1.0); nprobe=16)
+# The rational filter alone does not see A and cannot count its eigenvalues.
+# A reported count from a solve is meaningful only after checking convergence.
+@assert result.converged result.message
+@assert result.M == 3
 ```
 
 ### Workflow 3: Parameter Tuning
 
 **Problem**: FeastKit isn't converging well
 
-```julia
+```@example tuning_workflow
+using FeastKit, LinearAlgebra
+A = Matrix(Diagonal(collect(1.0:40.0)))
+Emin, Emax = 0.5, 3.5
 # Step 1: Check if eigenvalues exist in your interval
 bounds = feast_validate_interval(A, (Emin, Emax))
 println("Estimated eigenvalue range: $bounds")
@@ -358,28 +349,24 @@ result = feast(A, (Emin, Emax), M0=20, fpm=fpm)
 fpm[16] = 2     # 0=Gauss-Legendre, 1=trapezoidal, 2=Zolotarev
 fpm[2] = 12     # Half-contour integration points
 result_zolotarev = feast(A, (Emin, Emax); M0=20, fpm=fpm)
+@assert result.converged && result_zolotarev.converged
+@assert result.M == result_zolotarev.M == 3
 ```
 
 ### Workflow 4: Large-Scale Problems
 
-**Problem**: Matrix has millions of unknowns
+**Problem**: You need to understand storage before scaling up
 
-```julia
-# Convert to matrix-free 
-function matvec!(y, x)
-    # Your efficient A*x implementation
-    # Use BLAS, threading, GPU, etc.
-end
+Exercise a small instance first. The following continuation measures only the
+returned result; it does not measure peak memory during a large solve.
 
-A_op = LinearOperator{Float64}(matvec!, (n, n), issymmetric=true)
-
-# Use appropriate iterative solver
-result = feast(A_op, (Emin, Emax), M0=10,
-              solver=:gmres,  # or :bicgstab
-              solver_opts=(rtol=1e-6, maxiter=1000))
-
-# Monitor memory usage
-println("Memory used: $(Base.summarysize(result) / 1e6) MB")
+```@example pattern_matfree
+# Continue with the operator from Pattern 3. Measure result storage separately
+# from solver workspaces, factors, and peak process memory.
+result = feast(A_op, (0.0, 0.6); subspace_size=4, tol=1e-9,
+               solver=:gmres, solver_opts=(rtol=1e-12, maxiter=200, restart=16))
+@assert result.converged && result.M == 3
+println("Returned result storage: $(Base.summarysize(result) / 1e6) MB")
 ```
 
 ---
@@ -403,12 +390,12 @@ Now that you understand the basics, explore these advanced topics:
 #### Real Applications
 - [Structural Dynamics](examples.md) - Vibration analysis
 - [Quantum Mechanics](examples.md) - Electronic structure
-- [Fluid Dynamics](examples.md) - Stability analysis
-- [Network Analysis](examples.md) - Graph eigenvalues
+- [Convection–Diffusion](complex_eigenvalues.md) - A nonsymmetric discretized operator
 
 ### Quick Reference Card
 
-Keep this handy while coding:
+Signature templates: supply `A`, `B`, the region, and your `matvec!` callback.
+Load `Krylov` before using a built-in iterative solver.
 
 ```julia
 # Basic usage
@@ -440,7 +427,6 @@ end
 
 ---
 
-<div align="center">
-  <p><strong>Congratulations! You're now ready to use FeastKit.jl effectively.</strong></p>
-  Explore the [API Reference](api_reference.md) · See more [Examples](examples.md)
-</div>
+**Congratulations! You're now ready to use FeastKit.jl effectively.**
+
+Explore the [API Reference](api_reference.md) · See more [Examples](examples.md)

@@ -1,169 +1,54 @@
-# High-level Feast interfaces for easy use
-# These provide simplified interfaces to the Feast algorithms
-
-const FEAST_PARAMETERS_LENGTH = 64
-
-@inline function _ensure_feast_parameters(fpm::Union{Vector{Int},FeastParameters,Nothing})
-    # High-level APIs accept nothing, a raw fpm vector, or the wrapper type. The
-    # solver kernels always receive the concrete Vector{Int} expected by FEAST.
-    if fpm === nothing
-        params = zeros(Int, FEAST_PARAMETERS_LENGTH)
-        feastinit!(params)
-        return params
-    end
-    vec = fpm isa FeastParameters ? fpm.fpm : fpm
-    length(vec) >= FEAST_PARAMETERS_LENGTH ||
-        throw(ArgumentError("fpm vector must have length ≥ $(FEAST_PARAMETERS_LENGTH)"))
-    return vec
-end
-
-@inline function _normalize_parallel(parallel::Union{Bool,Symbol})
-    parallel === true && return :auto
-    parallel === false && return :serial
-    parallel isa Symbol && return parallel
-    throw(ArgumentError("Invalid parallel option: $parallel"))
-end
-
-function _normalize_backend(parallel::Union{Bool,Symbol,Nothing},
-                            backend::Union{Symbol,Nothing})
-    # `parallel` is the legacy keyword and `backend` is the explicit replacement.
-    # Accept both only when they describe the same execution mode.
-    if backend !== nothing
-        requested = backend
-        if parallel !== nothing
-            legacy_requested = _normalize_parallel(parallel)
-            legacy_requested == requested ||
-                throw(ArgumentError("Conflicting backend requests: backend=$requested and parallel=$legacy_requested"))
-        end
-    elseif parallel !== nothing
-        requested = _normalize_parallel(parallel)
-    else
-        requested = :serial
-    end
-
-    requested in (:serial, :auto, :threads, :distributed, :mpi) ||
-        throw(ArgumentError("Unknown backend: $requested. Use :serial, :auto, :threads, :distributed, or :mpi"))
-    return requested
-end
-
-function _allow_backend_fallback(parallel::Union{Bool,Symbol,Nothing},
-                                 backend::Union{Symbol,Nothing},
-                                 strict_backend::Bool)
-    strict_backend && return false
-    backend === :auto && return true
-    backend !== nothing && return false
-    parallel === true && return true
-    parallel === :auto && return true
-    return false
-end
-
-function _materialize_matrix(A::AbstractMatrix)
-    # Kernels dispatch on Matrix and SparseMatrixCSC. Lazy wrappers such as
-    # Symmetric/Hermitian are converted while preserving sparse storage.
-    if A isa Matrix || A isa SparseMatrixCSC
-        return A
-    elseif A isa Symmetric
-        parent(A) isa SparseMatrixCSC && return SparseMatrixCSC(A)
-        return Matrix(A)
-    elseif A isa Hermitian
-        parent(A) isa SparseMatrixCSC && return SparseMatrixCSC(A)
-        return Matrix(A)
-    else
-        return Matrix(A)
-    end
-end
-
-@inline function _execute_feast(A, B, interval, backend, M0, fpm, comm, use_threads, allow_backend_fallback)
-    # Centralize backend execution so all high-level Hermitian/symmetric methods
-    # share the same fallback semantics.
-    if backend != :serial
-        try
-            return feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads;
-                                      strict_backend=!allow_backend_fallback)
-        catch e
-            allow_backend_fallback || rethrow(e)
-            @warn "Backend $backend failed; falling back to serial execution" exception=e
-        end
-    end
-    return _feast_run_serial(A, B, interval, M0, fpm)
-end
-
-function _feast_run_serial(A, B, interval, M0, fpm)
-    return feast_serial(A, B, interval, M0, fpm)
-end
-
-@inline function _execute_feast_general(A, B, center, radius, backend, M0, fpm, comm, use_threads, allow_backend_fallback)
-    # General non-Hermitian problems currently have MPI and serial paths only;
-    # thread/distributed requests intentionally fall back through one branch.
-    if backend == :mpi && _mpi_backend_ready(comm)
-        if ((A isa SparseMatrixCSC && B isa SparseMatrixCSC) ||
-            (A isa Matrix && B isa Matrix)) &&
-           eltype(A) <: Complex && eltype(B) <: Complex
-            try
-                if comm === nothing
-                    return mpi_feast_general(A, B, center, radius; M0=M0, fpm=fpm)
-                else
-                    return mpi_feast_general(A, B, center, radius; M0=M0, fpm=fpm, comm=comm)
-                end
-            catch e
-                allow_backend_fallback || rethrow(e)
-                @warn "MPI backend for general problems failed; falling back to serial execution" exception=e
-            end
-        else
-            msg = "MPI backend for general problems requires dense or sparse complex matrices"
-            allow_backend_fallback || throw(ArgumentError(msg))
-            @warn "$msg; falling back to serial execution"
-        end
-    elseif backend != :serial
-        msg = "Threaded/distributed execution for general problems is not yet available"
-        allow_backend_fallback || throw(ArgumentError(msg))
-        @warn "$msg; falling back to serial execution"
-    end
-    return _feast_run_general_serial(A, B, center, radius, M0, fpm)
-end
-
-function _feast_run_general_serial(A, B, center, radius, M0, fpm)
-    return feast_general_serial(A, B, center, radius, M0, fpm)
-end
-
-@inline _real_component_type(::Type{Complex{T}}) where T<:Real = T
-@inline _real_component_type(::Type{T}) where T<:Real = T
-
-# Search-interval endpoints should not have to match the matrix element type
-# exactly. `feast(A, (0, 1))` and `feast(A, (0.0, 1))` are the natural things to
-# write, and feast_general already promotes its center/radius the same way.
-@inline _feast_interval_type(::Type{T}) where T<:AbstractFloat = T
-@inline _feast_interval_type(::Type{<:Integer}) = Float64
-@inline _feast_interval_type(::Type{T}) where T<:Real = float(T)
-
-function _feast_promote_interval(A::AbstractMatrix, interval::Tuple{Real,Real})
-    T = _feast_interval_type(_real_component_type(eltype(A)))
-    return T(interval[1]), T(interval[2])
-end
-
-function _ensure_complex_matrix(A::AbstractMatrix)
-    materialized = _materialize_matrix(A)
-    return eltype(materialized) <: Complex ? materialized : Complex.(materialized)
-end
-
-function _materialize_matrix_eltype(A::AbstractMatrix, ::Type{T}) where T
-    materialized = _materialize_matrix(A)
-    return eltype(materialized) === T ? materialized : T.(materialized)
-end
+# Public assembled symmetric, Hermitian, and general eigenproblem entry points.
 
 # Main Feast interface functions
+"""
+    feast(A, [B,] interval; subspace_size=10, tol=1e-12, maxiter=20,
+          quadrature_points=8, solver=:direct, solver_opts=(;), kwargs...)
+
+Compute symmetric/Hermitian eigenpairs in `interval`. `subspace_size` (legacy
+alias `M0`) should exceed the expected eigenvalue count. `tol` rounds down to
+a decimal power in `[1e-16, 1]`; Float32 retains its precision floor. Node counts
+follow the integration rule configured in `fpm`. Named options cannot conflict
+with explicit `fpm` entries and use a copy when overriding its settings.
+
+Use `subspace_size=:auto` with an optional `max_subspace_size` cap for count
+estimation and bounded growth. Pass `initial_subspace=previous.vectors` for
+serial or matrix-free warm starts. `mixed_precision=true` enables Float32
+residual correction solves with Float64 residual checks on serial dense
+Float64/ComplexF64 direct problems (`fpm[42]=1`, default 0).
+
+Use `solver=:gmres` after loading Krylov for iterative shifted solves, with
+`solver_opts=(rtol=..., maxiter=..., restart=...)`. Outer `maxiter` limits FEAST
+refinement; `solver_opts.maxiter` limits each inner solve. Serial assembled
+drivers support both solvers; complex MPI drivers also support GMRES. Explicit
+unsupported backends raise an error; `backend=:auto` permits serial fallback.
+
+The result provides `values`, `vectors`, `converged`, and a status `message`,
+alongside the original FEAST fields. Check `converged` before using eigenpairs.
+"""
 function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
-               interval::Tuple{T,T}; M0::Int = 10,
+               interval::Tuple{T,T}; M0::Union{Int,Nothing} = nothing,
                fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
+               subspace_size=nothing, tol=nothing, maxiter=nothing,
+               initial_subspace=nothing, max_subspace_size=nothing, mixed_precision=nothing,
+               quadrature_points=nothing, solver::Symbol=:direct,
+               solver_opts::NamedTuple=NamedTuple(),
                backend::Union{Symbol, Nothing} = nothing,
                parallel::Union{Bool, Symbol, Nothing} = nothing,
                strict_backend::Bool = false,
                use_threads::Bool = true,
                comm = nothing) where T<:Real
+    if subspace_size === :auto
+        return _feast_auto_solve(A, B, interval, (; fpm, tol, maxiter, quadrature_points, solver, solver_opts, initial_subspace, mixed_precision, backend, parallel, strict_backend, use_threads, comm);
+                                 M0=M0, max_subspace_size=max_subspace_size, general=false)
+    end
+    max_subspace_size === nothing || throw(ArgumentError("max_subspace_size requires subspace_size=:auto"))
     # Main Feast interface for real symmetric generalized eigenvalue problems
     T <: Integer && return feast(float.(A), float.(B),
                                  (float(interval[1]), float(interval[2]));
                                  M0=M0, fpm=fpm, backend=backend, parallel=parallel,
+                                 subspace_size=subspace_size, tol=tol, maxiter=maxiter, initial_subspace=initial_subspace, max_subspace_size=max_subspace_size, mixed_precision=mixed_precision,
+                                 quadrature_points=quadrature_points, solver=solver, solver_opts=solver_opts,
                                  strict_backend=strict_backend, use_threads=use_threads,
                                  comm=comm)
     size(A, 1) == size(A, 2) || throw(ArgumentError("A must be square"))
@@ -173,13 +58,11 @@ function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
 
     feast_validate_interval(A, interval)
 
-    params = _ensure_feast_parameters(fpm)
-    N = size(A, 1)
-    M0 = min(M0, N)
-    requested_backend = _normalize_backend(parallel, backend)
-    allow_backend_fallback = _allow_backend_fallback(parallel, backend, strict_backend)
-    backend_choice = _select_parallel_backend(requested_backend, comm;
-                                              allow_fallback=allow_backend_fallback)
+    (; params, solver_options, M0, backend_choice, allow_backend_fallback) =
+        _feast_prepare_assembled(A; M0=M0, subspace_size=subspace_size, fpm=fpm,
+                                tol=tol, maxiter=maxiter, quadrature_points=quadrature_points,
+                                solver=solver, solver_opts=solver_opts, parallel=parallel,
+                                backend=backend, strict_backend=strict_backend, comm=comm, mixed_precision=mixed_precision, initial_subspace=initial_subspace)
 
     # Materialization happens after validation so user-facing errors still refer
     # to the original matrix shape and symmetry expectations.
@@ -187,17 +70,26 @@ function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     B_exec = _materialize_matrix(B)
 
     return _execute_feast(A_exec, B_exec, interval, backend_choice, M0, params,
-                          comm, use_threads, allow_backend_fallback)
+                          comm, use_threads, allow_backend_fallback; solver_options=solver_options)
 end
 
 function feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
-               interval::Tuple{T,T}; M0::Int = 10,
+               interval::Tuple{T,T}; M0::Union{Int,Nothing} = nothing,
                fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
+               subspace_size=nothing, tol=nothing, maxiter=nothing,
+               initial_subspace=nothing, max_subspace_size=nothing, mixed_precision=nothing,
+               quadrature_points=nothing, solver::Symbol=:direct,
+               solver_opts::NamedTuple=NamedTuple(),
                backend::Union{Symbol, Nothing} = nothing,
                parallel::Union{Bool, Symbol, Nothing} = nothing,
                strict_backend::Bool = false,
                use_threads::Bool = true,
                comm = nothing) where T<:Real
+    if subspace_size === :auto
+        return _feast_auto_solve(A, B, interval, (; fpm, tol, maxiter, quadrature_points, solver, solver_opts, initial_subspace, mixed_precision, backend, parallel, strict_backend, use_threads, comm);
+                                 M0=M0, max_subspace_size=max_subspace_size, general=false)
+    end
+    max_subspace_size === nothing || throw(ArgumentError("max_subspace_size requires subspace_size=:auto"))
     # Feast interface for complex Hermitian generalized eigenvalue problems
     size(A, 1) == size(A, 2) || throw(ArgumentError("A must be square"))
     size(B) == size(A) || throw(ArgumentError("B must match the size of A"))
@@ -206,32 +98,41 @@ function feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
 
     feast_validate_interval(A, interval)
 
-    params = _ensure_feast_parameters(fpm)
-    N = size(A, 1)
-    M0 = min(M0, N)
-    requested_backend = _normalize_backend(parallel, backend)
-    allow_backend_fallback = _allow_backend_fallback(parallel, backend, strict_backend)
-    backend_choice = _select_parallel_backend(requested_backend, comm;
-                                              allow_fallback=allow_backend_fallback)
+    (; params, solver_options, M0, backend_choice, allow_backend_fallback) =
+        _feast_prepare_assembled(A; M0=M0, subspace_size=subspace_size, fpm=fpm,
+                                tol=tol, maxiter=maxiter, quadrature_points=quadrature_points,
+                                solver=solver, solver_opts=solver_opts, parallel=parallel,
+                                backend=backend, strict_backend=strict_backend, comm=comm, mixed_precision=mixed_precision, initial_subspace=initial_subspace)
 
     A_exec = _materialize_matrix(A)
     B_exec = _materialize_matrix(B)
 
     return _execute_feast(A_exec, B_exec, interval, backend_choice, M0, params,
-                          comm, use_threads, allow_backend_fallback)
+                          comm, use_threads, allow_backend_fallback; solver_options=solver_options)
 end
 
 function feast(A::AbstractMatrix{T}, interval::Tuple{T,T};
-               M0::Int = 10, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
+               M0::Union{Int,Nothing} = nothing, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
+               subspace_size=nothing, tol=nothing, maxiter=nothing,
+               initial_subspace=nothing, max_subspace_size=nothing, mixed_precision=nothing,
+               quadrature_points=nothing, solver::Symbol=:direct,
+               solver_opts::NamedTuple=NamedTuple(),
                backend::Union{Symbol, Nothing} = nothing,
                parallel::Union{Bool, Symbol, Nothing} = nothing,
                strict_backend::Bool = false,
                use_threads::Bool = true, comm = nothing) where T<:Real
+    if subspace_size === :auto
+        return _feast_auto_solve(A, nothing, interval, (; fpm, tol, maxiter, quadrature_points, solver, solver_opts, initial_subspace, mixed_precision, backend, parallel, strict_backend, use_threads, comm);
+                                 M0=M0, max_subspace_size=max_subspace_size, general=false)
+    end
+    max_subspace_size === nothing || throw(ArgumentError("max_subspace_size requires subspace_size=:auto"))
     # Feast interface for standard real symmetric eigenvalue problems (B = I)
     # No FEAST path can run in integer arithmetic: the tolerance is 10^-fpm[3]
     # and the contour is complex. Promote and re-enter.
     T <: Integer && return feast(float.(A), (float(interval[1]), float(interval[2]));
                                  M0=M0, fpm=fpm, backend=backend, parallel=parallel,
+                                 subspace_size=subspace_size, tol=tol, maxiter=maxiter, initial_subspace=initial_subspace, max_subspace_size=max_subspace_size, mixed_precision=mixed_precision,
+                                 quadrature_points=quadrature_points, solver=solver, solver_opts=solver_opts,
                                  strict_backend=strict_backend, use_threads=use_threads,
                                  comm=comm)
     N = size(A, 1)
@@ -239,103 +140,112 @@ function feast(A::AbstractMatrix{T}, interval::Tuple{T,T};
     issymmetric(A) || throw(ArgumentError("feast expects a symmetric real matrix A; use feast_general for non-symmetric problems"))
     feast_validate_interval(A, interval)
 
-    params = _ensure_feast_parameters(fpm)
-    M0 = min(M0, N)
-    requested_backend = _normalize_backend(parallel, backend)
-    allow_backend_fallback = _allow_backend_fallback(parallel, backend, strict_backend)
-    backend_choice = _select_parallel_backend(requested_backend, comm;
-                                              allow_fallback=allow_backend_fallback)
+    (; params, solver_options, M0, backend_choice, allow_backend_fallback) =
+        _feast_prepare_assembled(A; M0=M0, subspace_size=subspace_size, fpm=fpm,
+                                tol=tol, maxiter=maxiter, quadrature_points=quadrature_points,
+                                solver=solver, solver_opts=solver_opts, parallel=parallel,
+                                backend=backend, strict_backend=strict_backend, comm=comm, mixed_precision=mixed_precision, initial_subspace=initial_subspace)
     A_exec = _materialize_matrix(A)
 
     if backend_choice == :serial
         if A_exec isa Matrix
-            return feast_syev!(A_exec, interval[1], interval[2], M0, params)
+            return feast_syev!(A_exec, interval[1], interval[2], M0, params; solver_options...)
         elseif A_exec isa SparseMatrixCSC
-            return feast_scsrev!(A_exec, interval[1], interval[2], M0, params)
+            return feast_scsrev!(A_exec, interval[1], interval[2], M0, params; solver_options...)
         end
     end
 
     B = A_exec isa SparseMatrixCSC ? spdiagm(0 => fill(one(T), N)) : Matrix{T}(I, N, N)
     return _execute_feast(A_exec, B, interval, backend_choice, M0, params,
-                          comm, use_threads, allow_backend_fallback)
+                          comm, use_threads, allow_backend_fallback; solver_options=solver_options)
 end
 
 function feast(A::AbstractMatrix{Complex{T}}, interval::Tuple{T,T};
-               M0::Int = 10, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
+               M0::Union{Int,Nothing} = nothing, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
+               subspace_size=nothing, tol=nothing, maxiter=nothing,
+               initial_subspace=nothing, max_subspace_size=nothing, mixed_precision=nothing,
+               quadrature_points=nothing, solver::Symbol=:direct,
+               solver_opts::NamedTuple=NamedTuple(),
                backend::Union{Symbol, Nothing} = nothing,
                parallel::Union{Bool, Symbol, Nothing} = nothing,
                strict_backend::Bool = false,
                use_threads::Bool = true, comm = nothing) where T<:Real
+    if subspace_size === :auto
+        return _feast_auto_solve(A, nothing, interval, (; fpm, tol, maxiter, quadrature_points, solver, solver_opts, initial_subspace, mixed_precision, backend, parallel, strict_backend, use_threads, comm);
+                                 M0=M0, max_subspace_size=max_subspace_size, general=false)
+    end
+    max_subspace_size === nothing || throw(ArgumentError("max_subspace_size requires subspace_size=:auto"))
     # Feast interface for standard complex Hermitian eigenvalue problems (B = I)
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     ishermitian(A) || throw(ArgumentError("feast expects a Hermitian matrix A when using real intervals; call feast_general for non-Hermitian problems"))
     feast_validate_interval(A, interval)
 
-    params = _ensure_feast_parameters(fpm)
-    M0 = min(M0, N)
-    requested_backend = _normalize_backend(parallel, backend)
-    allow_backend_fallback = _allow_backend_fallback(parallel, backend, strict_backend)
-    backend_choice = _select_parallel_backend(requested_backend, comm;
-                                              allow_fallback=allow_backend_fallback)
+    (; params, solver_options, M0, backend_choice, allow_backend_fallback) =
+        _feast_prepare_assembled(A; M0=M0, subspace_size=subspace_size, fpm=fpm,
+                                tol=tol, maxiter=maxiter, quadrature_points=quadrature_points,
+                                solver=solver, solver_opts=solver_opts, parallel=parallel,
+                                backend=backend, strict_backend=strict_backend, comm=comm, mixed_precision=mixed_precision, initial_subspace=initial_subspace)
     A_exec = _materialize_matrix(A)
 
     if backend_choice == :serial
         if A_exec isa Matrix
-            return feast_heev!(A_exec, interval[1], interval[2], M0, params)
+            return feast_heev!(A_exec, interval[1], interval[2], M0, params; solver_options...)
         elseif A_exec isa SparseMatrixCSC
-            return feast_hcsrev!(A_exec, interval[1], interval[2], M0, params)
+            return feast_hcsrev!(A_exec, interval[1], interval[2], M0, params; solver_options...)
         end
     end
 
     identity_vals = fill(one(Complex{T}), N)
     B = A_exec isa SparseMatrixCSC ? spdiagm(0 => identity_vals) : Matrix{Complex{T}}(I, N, N)
     return _execute_feast(A_exec, B, interval, backend_choice, M0, params,
-                          comm, use_threads, allow_backend_fallback)
+                          comm, use_threads, allow_backend_fallback; solver_options=solver_options)
 end
 
+"""
+    feast_general(A, [B,] center, radius; kwargs...)
+
+Compute general eigenpairs inside a circular complex region. Accepts the same
+named options as [`feast`](@ref), with `quadrature_points` setting the full
+contour count (default 16). Returns `FeastGeneralResult`. For other full contour
+shapes, pass a `FeastContour` directly to `feast(A, contour)`.
+"""
 function feast_general(A::AbstractMatrix, B::AbstractMatrix,
-                       center::Complex{T}, radius::T; M0::Int = 10,
+                       center::Complex{T}, radius::T; M0::Union{Int,Nothing} = nothing,
                        fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
+                       subspace_size=nothing, tol=nothing, maxiter=nothing,
+                       initial_subspace=nothing, max_subspace_size=nothing, mixed_precision=nothing,
+                       quadrature_points=nothing, solver::Symbol=:direct,
+                       solver_opts::NamedTuple=NamedTuple(),
                        backend::Union{Symbol, Nothing} = nothing,
                        parallel::Union{Bool, Symbol, Nothing} = nothing,
                        strict_backend::Bool = false,
                        use_threads::Bool = true,
                        comm = nothing) where T<:Real
+    if subspace_size === :auto
+        return _feast_auto_solve(A, B, (center, radius), (; fpm, tol, maxiter, quadrature_points, solver, solver_opts, initial_subspace, mixed_precision, backend, parallel, strict_backend, use_threads, comm);
+                                 M0=M0, max_subspace_size=max_subspace_size, general=true)
+    end
+    max_subspace_size === nothing || throw(ArgumentError("max_subspace_size requires subspace_size=:auto"))
     # Feast interface for general (non-Hermitian) eigenvalue problems
     # Uses circular contour in complex plane
 
     size(A, 1) == size(A, 2) || throw(ArgumentError("A must be square"))
     size(B) == size(A) || throw(ArgumentError("B must match the size of A"))
 
-    A_materialized = _materialize_matrix(A)
-    B_materialized = _materialize_matrix(B)
-    N = size(A_materialized, 1)
-    M0 = min(M0, N)
+    N = size(A, 1)
 
-    params = _ensure_feast_parameters(fpm)
-    requested_backend = _normalize_backend(parallel, backend)
-    allow_backend_fallback = _allow_backend_fallback(parallel, backend, strict_backend)
-    backend_choice = _select_parallel_backend(requested_backend, comm;
-                                              allow_fallback=allow_backend_fallback)
+    (; params, solver_options, M0, backend_choice, allow_backend_fallback) =
+        _feast_prepare_assembled(A; M0=M0, subspace_size=subspace_size, fpm=fpm,
+                                tol=tol, maxiter=maxiter, quadrature_points=quadrature_points,
+                                solver=solver, solver_opts=solver_opts, parallel=parallel,
+                                backend=backend, strict_backend=strict_backend, comm=comm, mixed_precision=mixed_precision, initial_subspace=initial_subspace, general=true)
 
-    real_type = promote_type(_real_component_type(eltype(A_materialized)),
-                             _real_component_type(eltype(B_materialized)),
-                             _real_component_type(typeof(center)),
-                             T)
-    complex_type = Complex{real_type}
-
-    A_exec = _materialize_matrix_eltype(A_materialized, complex_type)
-    B_exec = _materialize_matrix_eltype(B_materialized, complex_type)
-
-    center_exec = complex_type(center)
-    radius_exec = convert(real_type, radius)
-    radius_exec > zero(real_type) ||
-        throw(ArgumentError("Radius must be positive, got $radius"))
+    (; A_exec, B_exec, center_exec, radius_exec) = _feast_prepare_general_matrices(A, B, center, radius)
 
     return _execute_feast_general(A_exec, B_exec, center_exec, radius_exec,
                                   backend_choice, M0, params, comm, use_threads,
-                                  allow_backend_fallback)
+                                  allow_backend_fallback; solver_options=solver_options)
 end
 
 function feast_general(A::AbstractMatrix, B::AbstractMatrix,
@@ -347,51 +257,49 @@ function feast_general(A::AbstractMatrix, B::AbstractMatrix,
 end
 
 function feast_general(A::AbstractMatrix, center::Complex{T}, radius::T;
-                       M0::Int = 10, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
+                       M0::Union{Int,Nothing} = nothing, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
+                       subspace_size=nothing, tol=nothing, maxiter=nothing,
+                       initial_subspace=nothing, max_subspace_size=nothing, mixed_precision=nothing,
+                       quadrature_points=nothing, solver::Symbol=:direct,
+                       solver_opts::NamedTuple=NamedTuple(),
                        backend::Union{Symbol, Nothing} = nothing,
                        parallel::Union{Bool, Symbol, Nothing} = nothing,
                        strict_backend::Bool = false,
                        use_threads::Bool = true,
                        comm = nothing) where T<:Real
+    if subspace_size === :auto
+        return _feast_auto_solve(A, nothing, (center, radius), (; fpm, tol, maxiter, quadrature_points, solver, solver_opts, initial_subspace, mixed_precision, backend, parallel, strict_backend, use_threads, comm);
+                                 M0=M0, max_subspace_size=max_subspace_size, general=true)
+    end
+    max_subspace_size === nothing || throw(ArgumentError("max_subspace_size requires subspace_size=:auto"))
     # Feast interface for standard general eigenvalue problems (B = I)
 
     size(A, 1) == size(A, 2) || throw(ArgumentError("A must be square"))
 
-    A_materialized = _materialize_matrix(A)
-    N = size(A_materialized, 1)
-    M0 = min(M0, N)
+    N = size(A, 1)
 
-    params = _ensure_feast_parameters(fpm)
-    requested_backend = _normalize_backend(parallel, backend)
-    allow_backend_fallback = _allow_backend_fallback(parallel, backend, strict_backend)
-    backend_choice = _select_parallel_backend(requested_backend, comm;
-                                              allow_fallback=allow_backend_fallback)
+    (; params, solver_options, M0, backend_choice, allow_backend_fallback) =
+        _feast_prepare_assembled(A; M0=M0, subspace_size=subspace_size, fpm=fpm,
+                                tol=tol, maxiter=maxiter, quadrature_points=quadrature_points,
+                                solver=solver, solver_opts=solver_opts, parallel=parallel,
+                                backend=backend, strict_backend=strict_backend, comm=comm, mixed_precision=mixed_precision, initial_subspace=initial_subspace, general=true)
 
-    real_type = promote_type(_real_component_type(eltype(A_materialized)),
-                             _real_component_type(typeof(center)),
-                             T)
-    complex_type = Complex{real_type}
-    A_exec = _materialize_matrix_eltype(A_materialized, complex_type)
-
-    center_exec = complex_type(center)
-    radius_exec = convert(real_type, radius)
-    radius_exec > zero(real_type) ||
-        throw(ArgumentError("Radius must be positive, got $radius"))
+    (; A_exec, center_exec, radius_exec) = _feast_prepare_general_matrices(A, nothing, center, radius)
 
     if backend_choice == :serial
         if A_exec isa Matrix
-            return feast_geev!(A_exec, center_exec, radius_exec, M0, params)
+            return feast_geev!(A_exec, center_exec, radius_exec, M0, params; solver_options...)
         elseif A_exec isa SparseMatrixCSC
-            return feast_gcsrev!(A_exec, center_exec, radius_exec, M0, params)
+            return feast_gcsrev!(A_exec, center_exec, radius_exec, M0, params; solver_options...)
         end
     end
 
     B_exec = A_exec isa SparseMatrixCSC ?
-             spdiagm(0 => fill(one(complex_type), N)) :
-             Matrix{complex_type}(I, N, N)
+             spdiagm(0 => fill(one(eltype(A_exec)), N)) :
+             Matrix{eltype(A_exec)}(I, N, N)
     return _execute_feast_general(A_exec, B_exec, center_exec, radius_exec,
                                   backend_choice, M0, params, comm, use_threads,
-                                  allow_backend_fallback)
+                                  allow_backend_fallback; solver_options=solver_options)
 end
 
 function feast_general(A::AbstractMatrix, center::Complex{Tc}, radius::Tr; kwargs...) where {Tc<:Real, Tr<:Real}
@@ -400,307 +308,6 @@ function feast_general(A::AbstractMatrix, center::Complex{Tc}, radius::Tr; kwarg
     radius_promoted = convert(T, radius)
     return feast_general(A, center_promoted, radius_promoted; kwargs...)
 end
-
-function feast_banded(A::Matrix{T}, kla::Int, interval::Tuple{T,T};
-                     B::Union{Matrix{T}, Nothing} = nothing, klb::Int = 0,
-                     M0::Int = 10, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing) where T<:Real
-    # Feast interface for real symmetric banded matrices
-
-    Emin, Emax = interval
-
-    # Initialize Feast parameters if not provided
-    params = _ensure_feast_parameters(fpm)
-
-    if B === nothing
-        # Standard eigenvalue problem - create identity in banded format
-        N = size(A, 2)
-        B_banded = zeros(T, 1, N)
-        B_banded[1, :] .= one(T)
-        return feast_sbgv!(copy(A), B_banded, kla, 0, Emin, Emax, M0, params)
-    else
-        # Generalized eigenvalue problem
-        return feast_sbgv!(copy(A), copy(B), kla, klb, Emin, Emax, M0, params)
-    end
-end
-
-function feast_banded(A::Matrix{Complex{T}}, kla::Int, interval::Tuple{T,T};
-                     B::Union{Matrix{Complex{T}}, Nothing} = nothing, klb::Int = 0,
-                     M0::Int = 10, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing) where T<:Real
-    # Feast interface for complex Hermitian banded matrices
-
-    Emin, Emax = interval
-
-    # Initialize Feast parameters if not provided
-    params = _ensure_feast_parameters(fpm)
-
-    if B === nothing
-        # Standard eigenvalue problem
-        return feast_hbev!(copy(A), kla, Emin, Emax, M0, params)
-    else
-        # Generalized eigenvalue problem
-        return feast_hbgv!(copy(A), copy(B), kla, klb, Emin, Emax, M0, params)
-    end
-end
-
-# Convenience functions with different interfaces
-function eigvals_feast(A::AbstractMatrix, interval::Tuple; kwargs...)
-    # Return only eigenvalues
-    result = feast(A, interval; kwargs...)
-    return result.lambda
-end
-
-function eigen_feast(A::AbstractMatrix, interval::Tuple; kwargs...)
-    # Return eigenvalues and eigenvectors as Eigen object
-    result = feast(A, interval; kwargs...)
-    return Eigen(result.lambda, result.q)
-end
-
-function eigvals_feast(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple; kwargs...)
-    # Return only eigenvalues for generalized problem
-    result = feast(A, B, interval; kwargs...)
-    return result.lambda
-end
-
-function eigen_feast(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple; kwargs...)
-    # Return eigenvalues and eigenvectors for generalized problem
-    result = feast(A, B, interval; kwargs...)
-    return Eigen(result.lambda, result.q)
-end
-
-# Polynomial eigenvalue problems
-function feast_polynomial(coeffs::Vector{<:AbstractMatrix{Complex{T}}},
-                         center::Complex{T}, radius::T; M0::Int = 10,
-                         fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing) where T<:Real
-    # Feast for polynomial eigenvalue problems
-    # P(λ) = coeffs[1] + λ*coeffs[2] + λ²*coeffs[3] + ...
-    
-    # Initialize Feast parameters if not provided
-    if fpm === nothing
-        fpm = zeros(Int, 64)
-        feastinit!(fpm)
-    end
-    
-    d = length(coeffs) - 1  # Degree of polynomial
-    # The companion linearization is dense; accept the public AbstractMatrix
-    # contract by materializing sparse and structured coefficients here.
-    dense_coeffs = Matrix{Complex{T}}[Matrix{Complex{T}}(A) for A in coeffs]
-    return feast_pep!(dense_coeffs, d, center, radius, M0, _ensure_feast_parameters(fpm))
-end
-
-# Matrix-free interfaces
-function feast_matvec(A_mul!::Function, B_mul!::Function, N::Int, 
-                     interval::Tuple{T,T}; M0::Int = 10,
-                     fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing) where T<:Real
-    # Feast with matrix-free operations
-    # A_mul!(y, x) computes y = A*x
-    # B_mul!(y, x) computes y = B*x
-    
-    Emin, Emax = interval
-    
-    # Initialize Feast parameters if not provided
-    if fpm === nothing
-        fpm = zeros(Int, 64)
-        feastinit!(fpm)
-    end
-    
-    return feast_sparse_matvec!(A_mul!, B_mul!, N, Emin, Emax, M0, _ensure_feast_parameters(fpm))
-end
-
-# Advanced configuration functions
-function feast_set_defaults!(fpm::Vector{Int};
-                            print_level::Int = 1,
-                            integration_points::Int = 8,
-                            tolerance_exp::Int = 12,
-                            max_refinement::Int = 20)
-    # Set common Feast parameters with user-friendly names
-    # Validate against the same constraints as feastdefault!
-
-    length(fpm) >= 64 || throw(ArgumentError("fpm array must have at least 64 elements"))
-
-    print_level <= 1 ||
-        throw(ArgumentError("print_level must be 0, 1, or negative for file output, got $print_level"))
-
-    integration_points > 0 ||
-        throw(ArgumentError("integration_points must be positive, got $integration_points"))
-
-    0 <= tolerance_exp <= 16 ||
-        throw(ArgumentError("tolerance_exp must be between 0 and 16, got $tolerance_exp"))
-
-    max_refinement > 0 ||
-        throw(ArgumentError("max_refinement must be positive, got $max_refinement"))
-
-    fpm[1] = print_level
-    fpm[2] = integration_points
-    fpm[3] = tolerance_exp
-    fpm[4] = max_refinement
-
-    return fpm
-end
-
-function feast_custom_contour(nodes::Vector{Complex{T}},
-                             A::AbstractMatrix, B::AbstractMatrix,
-                             interval::Tuple{T,T};
-                             M0::Int = 10,
-                             fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing) where T<:Real
-    # Feast with custom integration contour
-    # Computes trapezoidal weights from nodes, registers as custom contour, then runs feast
-
-    params = _ensure_feast_parameters(fpm)
-    contour = feast_customcontour(nodes, params)
-
-    return with_custom_contour(params, contour) do
-        feast(A, B, interval; M0=M0, fpm=params)
-    end
-end
-
-function feast_custom_contour(nodes::Vector{Complex{T}},
-                             A::AbstractMatrix,
-                             interval::Tuple{T,T};
-                             M0::Int = 10,
-                             fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing) where T<:Real
-    N = size(A, 1)
-    B = isa(A, SparseMatrixCSC) ? spdiagm(0 => fill(one(eltype(A)), N)) :
-        Matrix{eltype(A)}(I, N, N)
-    return feast_custom_contour(nodes, A, B, interval; M0=M0, fpm=fpm)
-end
-
-# Utility functions for result analysis
-function feast_summary(io::IO, result::FeastResult)
-    # Print summary of Feast results to the provided IO
-    println(io, "FeastKit Eigenvalue Solution Summary")
-    println(io, "="^40)
-    println(io, "Eigenvalues found: ", result.M)
-    println(io, "Final residual: ", result.epsout)
-    println(io, "Refinement loops: ", result.loop)
-    println(io, "Exit status: ", result.info == 0 ? "Success" : "Error $(result.info)")
-    if result.M > 0
-        println(io, "\nEigenvalues:")
-        for i in 1:result.M
-            println(io, "  λ[$i] = ", result.lambda[i], "  (residual: ", result.res[i], ")")
-        end
-    end
-    return nothing
-end
-
-function feast_summary(result::FeastResult)
-    feast_summary(stdout, result)
-end
-
-# Non-Hermitian solves return a FeastGeneralResult, whose eigenvalues are
-# complex. Without these methods `feast_summary(feast_general(...))` was a
-# MethodError even though the docs present the function generically.
-function feast_summary(io::IO, result::FeastGeneralResult)
-    println(io, "FeastKit Eigenvalue Solution Summary (non-Hermitian)")
-    println(io, "="^40)
-    println(io, "Eigenvalues found: ", result.M)
-    println(io, "Final residual: ", result.epsout)
-    println(io, "Refinement loops: ", result.loop)
-    println(io, "Exit status: ", result.info == 0 ? "Success" : "Error $(result.info)")
-    if result.M > 0
-        println(io, "\nEigenvalues:")
-        for i in 1:result.M
-            println(io, "  λ[$i] = ", result.lambda[i], "  (residual: ", result.res[i], ")")
-        end
-    end
-    return nothing
-end
-
-function feast_summary(result::FeastGeneralResult)
-    feast_summary(stdout, result)
-end
-
-# Compatibility shim: allow `redirect_stdout(io::IOBuffer) do ... end` with IOBuffer
-# Remove previous IOBuffer redirection shim; tests now use IO-based summary.
-
-# Gershgorin circle bounds: O(nnz) for sparse, O(N²) for dense
-function _gershgorin_bounds(A::SparseMatrixCSC{TV, Ti}) where {TV, Ti}
-    T = real(eltype(A))
-    N = size(A, 1)
-    # Accumulate off-diagonal row sums by iterating over stored nonzeros (O(nnz))
-    radii = zeros(T, N)
-    rv = rowvals(A)
-    nz = nonzeros(A)
-    for col in 1:N
-        for idx in nzrange(A, col)
-            row = rv[idx]
-            if row != col
-                radii[row] += abs(nz[idx])
-            end
-        end
-    end
-    min_est = typemax(T)
-    max_est = typemin(T)
-    for i in 1:N
-        center = real(A[i, i])
-        min_est = min(min_est, center - radii[i])
-        max_est = max(max_est, center + radii[i])
-    end
-    return (min_est, max_est)
-end
-
-function _gershgorin_bounds(A::AbstractMatrix)
-    T = real(eltype(A))
-    N = size(A, 1)
-    min_est = typemax(T)
-    max_est = typemin(T)
-    for i in 1:N
-        center = real(A[i, i])
-        radius = zero(T)
-        for j in 1:N
-            if j != i
-                radius += abs(A[i, j])
-            end
-        end
-        min_est = min(min_est, center - radius)
-        max_est = max(max_est, center + radius)
-    end
-    return (min_est, max_est)
-end
-
-function feast_validate_interval(A::AbstractMatrix{T}, interval::Tuple{T,T}) where T<:Real
-    Emin, Emax = interval
-    if Emin >= Emax
-        throw(ArgumentError("Invalid interval: Emin must be less than Emax"))
-    end
-
-    min_est, max_est = _gershgorin_bounds(A)
-
-    if Emax < min_est || Emin > max_est
-        @warn "Search interval [$Emin, $Emax] may not contain eigenvalues. " *
-              "Estimated eigenvalue range: [$(min_est), $(max_est)]"
-    end
-
-    return (min_est, max_est)
-end
-
-function feast_validate_interval(A::AbstractMatrix{Complex{T}}, interval::Tuple{T,T}) where T<:Real
-    Emin, Emax = interval
-    if Emin >= Emax
-        throw(ArgumentError("Invalid interval: Emin must be less than Emax"))
-    end
-
-    min_est, max_est = _gershgorin_bounds(A)
-
-    if Emax < min_est || Emin > max_est
-        @warn "Search interval [$Emin, $Emax] may not contain eigenvalues. " *
-              "Estimated eigenvalue range: [$(min_est), $(max_est)]"
-    end
-
-    return (min_est, max_est)
-end
-
-# --- Interval / element-type promotion -------------------------------------
-#
-# The typed methods above require the interval endpoints to match the matrix's
-# real element type exactly, so `feast(A, (0, 1))` was a MethodError. These
-# fallbacks convert the endpoints (and an integer-valued matrix) and forward.
-
-# An integer-valued matrix has no typed method to fall through to, so promote
-# its element type here as well -- forwarding only the interval would recurse
-# straight back into this method.
-@inline _feast_promote_eltype(A::AbstractMatrix) =
-    eltype(A) <: Integer ? _materialize_matrix_eltype(A, Float64) :
-    eltype(A) <: Complex{<:Integer} ? _materialize_matrix_eltype(A, ComplexF64) : A
 
 function feast(A::AbstractMatrix, interval::Tuple{Real,Real}; kwargs...)
     Ap = _feast_promote_eltype(A)
@@ -716,9 +323,4 @@ function feast(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{Real,Real};
         Bp = _materialize_matrix_eltype(Bp, TE)
     end
     return feast(Ap, Bp, _feast_promote_interval(Ap, interval); kwargs...)
-end
-
-function feast_banded(A::Matrix, kla::Int, interval::Tuple{Real,Real}; kwargs...)
-    Ap = _feast_promote_eltype(A)
-    return feast_banded(Ap, kla, _feast_promote_interval(Ap, interval); kwargs...)
 end

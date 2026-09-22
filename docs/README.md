@@ -1,184 +1,75 @@
 # FeastKit.jl Documentation
 
-This directory contains the complete documentation for FeastKit.jl. It is configured to be served directly from the repository via GitHub Pages using the `docs/` folder on the `main` branch (no separate gh-pages branch).
+The website is built with Documenter.jl from `docs/src/`. Navigation and build
+settings live in `docs/make.jl`; dependencies are listed in `docs/Project.toml`.
+Generated HTML is written to `docs/build/` and is not committed.
 
-## Documentation Structure
+## Build locally
 
-```
-docs/
-├── index.md                    # Main landing page
-├── getting_started.md          # Tutorial for new users
-├── api_reference.md           # Complete API documentation
-├── examples.md               # Comprehensive examples
-├── matrix_free_interface.md  # Matrix-free methods guide
-├── performance.md            # Performance optimization
-├── custom_contours.md        # Advanced contour integration
-├── _config.yml              # GitHub Pages (Jekyll) configuration
-└── assets/                  # Optional images/static assets (add as needed)
+Run from the repository root:
+
+```sh
+julia --project=docs -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate()'
+julia --project=docs --threads=2 docs/make.jl
 ```
 
-## Quick Start
+Open `docs/build/index.html`. Local builds do not publish. The docs environment
+loads Krylov so iterative examples can execute; ordinary direct FEAST solves
+do not require it.
 
-### Publish on GitHub Pages (from main/docs)
+`@example` blocks execute during the build, and doctests are enabled. Broken
+examples and internal references fail the build. Exported docstrings omitted
+from the manual also fail the build, so add them to the API reference. Plain
+`julia` blocks are signatures, templates, or examples requiring the stated
+external setup; they are not automatically executed by Documenter.
 
-1) In your GitHub repository: Settings → Pages  
-2) Source: Deploy from a branch → Branch: `main`, Folder: `/docs`  
-3) Save. The site will be available at `https://<username>.github.io/<repo>/`
+## Verify parallel examples
 
-## Build Options
+The standalone scripts in the parallel guide are executed directly from the
+Markdown source. From the repository root:
 
-### Configure site metadata
-
-Edit `docs/_config.yml` and set:
-- `url`: `https://<username>.github.io`
-- `baseurl`: `/<repo>` (e.g. `/FeastKit.jl`)
-- `repository`: `<username>/<repo>`
-
-## Documentation Features
-
-### What you get
-- Clear landing page, getting-started guide, “Zero to FeastKit” walkthrough
-- API overview and examples
-- Advanced topic stubs you can expand over time
-
-## Content Overview
-
-| Page | Purpose | Target Audience |
-|------|---------|----------------|
-| **Home** | Overview, quick start | All users |
-| **Getting Started** | Step-by-step tutorial | New users |
-| **Examples** | Working code examples | All users |
-| **API Reference** | Complete function docs | Developers |
-| **Matrix-Free** | Large-scale problems | Advanced users |
-| **Performance** | Optimization guide | Performance-focused users |
-| **Custom Contours** | Advanced techniques | Experts |
-
-## ✨ Key Features Documented
-
-### Core FEAST Algorithm
-- Standard and generalized eigenvalue problems
-- Real symmetric and complex Hermitian matrices
-- Non-Hermitian general eigenvalue problems
-- Polynomial eigenvalue problems
-
-### Matrix-Free Interface
-- `LinearOperator` and `MatrixVecFunction` types
-- Iterative solver integration (GMRES, CG, BiCGSTAB)
-- Custom linear solver callbacks
-- Memory-efficient large-scale computations
-
-### Advanced Contour Integration  
-- Gauss-Legendre, Trapezoidal, and Zolotarev methods
-- Custom contour shapes (rectangular, star, lens)
-- Adaptive contour placement
-- Multi-level strategies for complex eigenvalue distributions
-
-### Performance Optimization
-- Memory usage analysis and optimization
-- Parallel computing (shared and distributed memory)
-- Problem-specific optimizations
-- Benchmarking and profiling tools
-
-### Real-World Applications
-- Structural dynamics and vibration analysis
-- Quantum mechanics and electronic structure
-- Fluid dynamics stability analysis
-- PDE eigenvalue problems
-
-## Customization
-
-### Configuration
-Update `_config.yml` to change:
-- Site metadata and repository links
-- Theme and plugin settings supported by GitHub Pages
-
-## Deployment Options
-
-### GitHub Pages (Automatic)
-1. Push documentation to `docs/` folder
-2. Enable Pages in repository settings
-3. Choose `docs/` folder as source
-4. Documentation automatically builds and deploys
-
-### Custom Hosting
-If you prefer to host elsewhere, any static-site host that supports Jekyll can serve `docs/` directly.
-
-## Testing
-
-```bash
-# Test all documentation
-make test
-
-# Check for broken links
-make test | grep "Broken link"
-
-# Spell check (requires aspell)
-make spell
-
-# Validate configuration
-make validate-config
+```sh
+julia --project=docs --threads=2 docs/check_parallel_examples.jl threads
+julia --project=docs --threads=2 docs/check_parallel_examples.jl distributed
 ```
 
-## Analytics and Metrics
+The distributed example creates and removes two local workers. For MPI, use an
+environment containing this checkout, MPI, and Krylov. Each mode must run in
+fresh processes; the MPI library cannot be reinitialized after finalization:
 
-### Built-in Analytics
-- **Google Analytics** integration (configure in `mkdocs.yml`)
-- **Search analytics** via MkDocs
-- **Page view tracking** 
-
-### Documentation Metrics
-```bash
-# Generate documentation statistics
-make stats
-
-# Output:
-# Files: 8
-# Total lines: 2847
-# Total words: 19264
-# Total characters: 142851
+```sh
+julia --project -e 'using MPI; for mode in ("mpi", "mpi_aliases", "hybrid"); run(`$(MPI.mpiexec()) -n 2 julia --project --threads=2 docs/check_parallel_examples.jl $mode`); end'
 ```
 
-## Contributing to Documentation
+CI runs these examples with two threads, two local workers, or two MPI ranks.
+Remote SSH host configuration and application-specific matrix assembly are
+explicit templates; they require the reader's infrastructure or model.
+Package installation commands and API signatures are not solver examples.
 
-### Content Guidelines
-1. **Clear structure** with logical headings
-2. **Working examples** with expected outputs  
-3. **Performance tips** where relevant
-4. **Cross-references** to related sections
-5. **Mathematical notation** for algorithms
+## Publishing
 
-### Style Guidelines
-1. **Concise explanations** with examples
-2. **Code blocks** with proper syntax highlighting
-3. **Admonitions** for tips, warnings, notes
-4. **Tables** for parameter documentation
-5. **Consistent formatting** across all pages
+[The documentation workflow](../.github/workflows/pages.yml) develops FeastKit
+from the checked-out repository, builds the site, and enables `deploydocs`
+with `FEASTKIT_DOCS_DEPLOY=true`. Documenter publishes to the `gh-pages` branch.
+GitHub Pages should serve that branch's root, rather than `main/docs`.
 
-### Adding New Content
-1. Create new `.md` file in `docs/`
-2. Add to navigation in `mkdocs.yml`
-3. Include cross-references from existing pages
-4. Test locally with `make serve`
-5. Submit pull request
+Main-branch builds update the development documentation; version tags produce
+versioned documentation and the stable alias. Pull-request preview publishing
+requires the workflow's configured credentials and permissions. A local edit
+or build does not change the live site.
 
-## Troubleshooting
+- [Development documentation](https://subhk.github.io/FeastKit.jl/dev/)
+- [Stable documentation](https://subhk.github.io/FeastKit.jl/stable/)
 
-### Common Issues
+## Contributing
 
-**Pages not updating**:
-- Verify GitHub Pages is set to `main` + `/docs`
-- Check `_config.yml` `url` and `baseurl` are correct
-- Wait a few minutes; Pages builds are asynchronous
+Edit the relevant page in `docs/src/`, and add new pages to `docs/make.jl`.
+Use small, deterministic `@example` blocks with assertions for solver behavior.
+Check `result.converged` and verify the expected eigenvalues instead of only
+printing a result. State when code needs multiple processes or an optional
+package. Keep the public signatures and numerical conventions aligned with
+`src/` and the API tests.
 
-### Getting Help
-
-- **Documentation Issues**: [GitHub Issues](https://github.com/your-repo/FeastKit.jl/issues)
-- **MkDocs Help**: [MkDocs Documentation](https://www.mkdocs.org/)
-- **Material Theme**: [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/)
-
----
-
-<div align="center">
-  <p><strong>Build beautiful, comprehensive documentation for FeastKit.jl</strong></p>
-  <p><a href="https://subhk.github.io/FeastKit.jl">View Live Documentation</a></p>
-</div>
+Run the local build before submitting changes. The package test suite also
+executes selected documentation snippets in `test/docs/examples.jl`
+and checks the named and checked APIs in their dedicated regression files.

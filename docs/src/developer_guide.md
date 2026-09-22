@@ -2,13 +2,10 @@
 
 This guide provides an overview of the FeastKit.jl project layout, codebase architecture, and development workflow.
 
-## Table of Contents
-
-- [Project Layout](#project-layout)
-- [Codebase Architecture](#codebase-architecture)
-- [Module Structure](#module-structure)
-- [Development Workflow](#development-workflow)
-- [Code Style Guidelines](#code-style-guidelines)
+```@contents
+Pages = ["developer_guide.md"]
+Depth = 2
+```
 
 ---
 
@@ -16,11 +13,12 @@ This guide provides an overview of the FeastKit.jl project layout, codebase arch
 
 ```
 FeastKit.jl/
-├── Project.toml          # Package manifest and dependencies
-├── Manifest.toml         # Dependency lock file
+├── Project.toml          # Package metadata and dependencies
+├── Manifest.toml         # Generated local resolution (gitignored)
 ├── README.md             # Project overview
 ├── LICENSE               # License file
 ├── src/                  # Main source code
+├── ext/                  # Optional Krylov/MPI package extensions
 ├── test/                 # Test suite
 ├── docs/                 # Documentation (Documenter.jl)
 ├── examples/             # Usage examples
@@ -35,37 +33,64 @@ The source code is organized into modular directories by functionality:
 
 ```
 src/
-├── FeastKit.jl                    # Main module (exports, initialization)
-├── deprecations.jl                # Deprecated function handling
-│
-├── core/                          # Core types and utilities
-│   ├── feast_types.jl             # Type definitions (FeastResult, FeastContour, etc.)
-│   ├── feast_parameters.jl        # Parameter handling and initialization
-│   ├── feast_tools.jl             # Core FEAST algorithm tools
-│   ├── feast_aux.jl               # Auxiliary/helper functions
-│   └── feast_backend_utils.jl     # Parallel backend utilities
-│
-├── kernel/                        # Core algorithm implementation
-│   └── feast_kernel.jl            # FEAST kernel (contour integration, RCI)
-│
-├── dense/                         # Dense matrix solvers
-│   └── feast_dense.jl             # feast_sygv!, feast_heev!, feast_gegv!, etc.
-│
-├── sparse/                        # Sparse matrix solvers
-│   └── feast_sparse.jl            # feast_scsrgv!, feast_hcsrgv!, etc.
-│
-├── banded/                        # Banded matrix solvers
-│   └── feast_banded.jl            # feast_sbgv!, feast_hbgv!, feast_gbgv!, etc.
-│
-├── interfaces/                    # User-facing interfaces
-│   ├── feast_interfaces.jl        # High-level feast(), feast_general()
-│   └── feast_matfree.jl           # Matrix-free interface (LinearOperator)
-│
-└── parallel/                      # Parallel computation backends
-    ├── feast_parallel.jl          # Threaded/distributed parallel FEAST
-    ├── feast_parallel_rci.jl      # Parallel RCI (Reverse Communication Interface)
-    ├── feast_mpi.jl               # MPI-based parallel FEAST
-    └── feast_mpi_interface.jl     # MPI high-level interface
+├── FeastKit.jl                    # Public exports and dependency-ordered includes
+├── deprecations.jl                # Compatibility aliases
+├── core/
+│   ├── feast_types.jl             # Results, workspaces, and RCI state
+│   ├── feast_parameters.jl        # Legacy FEAST controls
+│   ├── feast_tools.jl             # Numerical helpers
+│   ├── feast_aux.jl               # Contour and auxiliary routines
+│   ├── feast_contour_shapes.jl    # Circle, ellipse, rectangle
+│   ├── feast_rci_drivers.jl       # Shared serial real/Hermitian drivers
+│   ├── feast_initial_subspace.jl  # Private seed copying and normalization
+│   ├── feast_mixed_precision.jl   # Residual inverse correction and LU fallback
+│   ├── feast_backend_policy.jl   # Availability, compatibility, fallback policy
+│   └── feast_backend_utils.jl    # Serial storage dispatch and capability reports
+├── kernel/                       # RCI state machines
+├── dense/                        # Dense storage drivers
+├── sparse/                       # Sparse storage drivers
+├── banded/                       # Banded storage drivers
+├── interfaces/
+│   ├── feast_options.jl          # Named controls and solver option validation
+│   ├── feast_preparation.jl      # Shared setup, materialization, scalar promotion
+│   ├── feast_auto_subspace.jl    # Count estimate and bounded retries
+│   ├── feast_validation.jl       # Interval validation and spectral bounds
+│   ├── feast_interfaces.jl       # Assembled feast() and feast_general()
+│   ├── feast_banded_interface.jl # Banded convenience calls
+│   ├── feast_polynomial_interface.jl # Assembled polynomial convenience calls
+│   ├── feast_matfree.jl          # Matrix-free public entry points
+│   ├── feast_contour_interface.jl # Contour convenience calls
+│   ├── feast_results.jl          # Display, summaries, and checked wrappers
+│   └── feast_precision_aliases.jl # FEAST-compatible aliases
+├── matrixfree/
+│   ├── operators.jl             # Operator types and multiplication methods
+│   ├── workspace.jl             # Workspace allocation
+│   ├── solvers.jl               # Shifted iterative solver factories
+│   ├── rci_drivers.jl           # Matrix-free RCI execution
+│   └── polynomial.jl            # Companion operators and polynomial solves
+└── parallel/
+    ├── feast_backend_execution.jl # Backend execution and runtime fallback
+    ├── feast_parallel.jl         # Threaded/distributed include manifest
+    ├── shared.jl                 # Moment storage and contour distribution
+    ├── dense.jl                  # Dense factorization and driver
+    ├── sparse.jl                 # Sparse/worker factorization and driver
+    ├── dense_moments.jl          # Dense contour-point calculations
+    ├── sparse_moments.jl         # Sparse contour-point calculations
+    ├── diagnostics.jl            # Distribution reporting and benchmarks
+    ├── feast_parallel_rci.jl     # Parallel RCI state machine
+    ├── feast_parallel_comparison.jl # Backend comparison utilities
+    ├── feast_mpi_stubs.jl        # Optional MPI entry-point declarations
+    ├── feast_mpi.jl              # MPI include manifest, loaded by extension
+    ├── feast_mpi_interface.jl    # Hybrid execution wrapper
+    └── mpi/                      # MPI implementation, inside FeastKitMPIExt
+        ├── shared.jl             # Collective guards and contour setup
+        ├── real_dense.jl         # Dense real driver, moments, residuals
+        ├── real_sparse.jl        # Sparse real driver, moments, residuals
+        ├── complex_projection.jl # Complex projections and residuals
+        ├── hermitian.jl          # Complex Hermitian driver
+        ├── general.jl            # General complex driver
+        ├── interfaces.jl         # Public MPI wrappers
+        └── runtime.jl            # MPI lifecycle and benchmarks
 ```
 
 ---
@@ -92,7 +117,7 @@ Defines fundamental data structures:
 Parameter initialization and management:
 
 - `feastinit!(fpm)` - Initialize parameter array
-- `feastdefault!(fpm)` - Reset to defaults
+- `feastdefault!(fpm)` - Validate settings and fill unset defaults
 - `feast_set_defaults!(fpm; ...)` - Set parameters by name
 
 ### Kernel (`src/kernel/feast_kernel.jl`)
@@ -117,7 +142,7 @@ Direct solvers for dense matrices:
 
 ### Sparse Solvers (`src/sparse/feast_sparse.jl`)
 
-Solvers for sparse matrices (CSR format):
+Solvers for Julia `SparseMatrixCSC` matrices (the FEAST-compatible names retain `csr`):
 
 | Function | Problem Type |
 |----------|--------------|
@@ -136,7 +161,12 @@ Solvers for banded matrices:
 | `feast_hbgv!`, `feast_hbev!` | Complex Hermitian banded |
 | `feast_gbgv!`, `feast_gbev!` | General banded |
 
-### High-Level Interfaces (`src/interfaces/feast_interfaces.jl`)
+### High-Level Interfaces (`src/interfaces/`)
+
+Public wrappers call shared preparation in `feast_preparation.jl`. Named controls
+and inner-solver options are validated once, while each entry point retains its
+problem-specific symmetry and shape checks. Standard problems keep their
+specialized storage drivers.
 
 User-friendly wrappers:
 
@@ -146,7 +176,12 @@ User-friendly wrappers:
 - `feast_banded(A, kl, interval; ...)` - Banded matrices
 - `eigvals_feast(...)`, `eigen_feast(...)` - LinearAlgebra-style interfaces
 
-### Matrix-Free Interface (`src/interfaces/feast_matfree.jl`)
+### Matrix-Free Interface (`src/matrixfree/`)
+
+Operator definitions, workspaces, shifted solvers, RCI drivers, and polynomial
+linearization have separate files. Public overloads live in
+`src/interfaces/feast_matfree.jl` and use the same named-option preparation as
+assembled and banded overloads.
 
 For large-scale problems without explicit matrices:
 
@@ -154,7 +189,7 @@ For large-scale problems without explicit matrices:
 |---------------|-------------|
 | `MatrixFreeOperator{T}` | Abstract operator type |
 | `LinearOperator{T}` | Concrete matrix-free operator |
-| `MatrixVecFunction{T}` | Operator with data storage |
+| `MatrixVecFunction{T}` | Callback wrapper; capture payload data in its callable |
 | `feast_matfree_srci!` | Matrix-free RCI for symmetric |
 | `feast_matfree_grci!` | Matrix-free RCI for general |
 | `create_iterative_solver` | Create Krylov solver |
@@ -165,10 +200,22 @@ Multiple parallel backends:
 
 | File | Description |
 |------|-------------|
-| `feast_parallel.jl` | Threaded/distributed FEAST (`feast_parallel()`) |
+| `feast_parallel.jl` | Loads shared, dense, sparse, moment, and diagnostic implementations |
 | `feast_parallel_rci.jl` | Parallel RCI state machine (`pfeast_srci!`) |
-| `feast_mpi.jl` | MPI FEAST (`mpi_feast()`) |
-| `feast_mpi_interface.jl` | MPI high-level interface (`feast_hybrid()`) |
+| `feast_mpi.jl` | Loads the `mpi/` implementation inside `FeastKitMPIExt` |
+| `feast_mpi_stubs.jl` | MPI declarations; implementations load through `FeastKitMPIExt` |
+
+Backend rules live in `core/feast_backend_policy.jl`: request normalization,
+resource availability, supported problem/storage/solver combinations, and strict
+versus automatic fallback. `parallel/feast_backend_execution.jl` invokes the
+selected driver and handles runtime failures. Add compatibility rules to the
+policy file and exercise them through public API tests.
+
+All ordinary implementation files share the `FeastKit` module; splitting files
+does not introduce new public namespaces. MPI implementation files share the
+extension module and load only when the optional MPI dependency is loaded.
+Numerical iteration and collective synchronization remain in the driver files.
+
 
 ---
 
@@ -200,37 +247,32 @@ using FeastKit
 # Full test suite
 julia --project -e 'using Pkg; Pkg.test()'
 
-# Specific test file
-julia --project test/runtests.jl
-
-# With threading
-julia --project --threads=auto test/runtests.jl
+# With threading (Pkg.test also installs test-only dependencies)
+julia --project --threads=auto -e 'using Pkg; Pkg.test()'
 ```
 
 ### Building Documentation
 
 ```bash
-cd docs
-
-# Install doc dependencies
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
-
-# Build documentation locally
-julia --project=. make.jl
-
-# Serve locally (requires LiveServer.jl)
-julia --project=. -e 'using LiveServer; serve(dir="build")'
+# From the repository root:
+julia --project=docs -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate()'
+julia --project=docs --threads=2 docs/make.jl
 ```
 
-Documentation is automatically deployed to GitHub Pages on push to `main`.
+Open `docs/build/index.html` locally. The documentation workflow publishes
+main-branch and tagged builds; local builds do not publish.
 
 ### Running Examples
 
-```julia
-# From project root
-include("examples/feast/run_feast_examples.jl")
-include("examples/matrix_free_examples.jl")
-include("examples/custom_contour_integration.jl")
+Run these files as programs. `include` loads their definitions but does not
+invoke the script entry points. The docs environment supplies Krylov for the
+matrix-free examples.
+
+```sh
+# From the repository root, after preparing the docs environment above:
+julia --project=docs --threads=2 examples/feast/run_feast_examples.jl
+julia --project=docs --threads=2 examples/matrix_free_examples.jl
+julia --project=docs --threads=2 examples/custom_contour_integration.jl
 ```
 
 ---
@@ -250,14 +292,14 @@ Follow FEAST convention for solver functions:
 ```julia
 # Standard: feast_<type><format>[x]!
 # Examples:
-feast_sygv!(A, B, ...)   # Symmetric, generalized, dense
-feast_scsrgv!(A, B, ...) # Symmetric, CSR sparse, generalized
-feast_hbev!(A, ...)      # Hermitian, banded, standard
+feast_sygv!(A, B, Emin, Emax, M0, fpm)   # Symmetric, generalized, dense
+feast_scsrgv!(A, B, Emin, Emax, M0, fpm) # Symmetric, CSC storage, generalized
+feast_hbev!(AB, k, Emin, Emax, M0, fpm) # Hermitian, banded, standard
 ```
 
 Suffix meanings:
-- No suffix: Use default parameters
-- `x` suffix: Expert interface with custom parameters
+- Ordinary drivers accept the FEAST parameter vector `fpm`.
+- `x` variants accept explicit contour nodes and weights as additional arguments.
 
 ### Error Handling
 
@@ -271,16 +313,21 @@ end
 ### Type Stability
 
 Ensure type-stable code paths:
-```julia
+```@example developer_type_stability
+using LinearAlgebra
 # Explicit type parameters and a workspace with a concrete element type
-function solve(A::Matrix{T}, b::Vector{T}) where {T<:Real}
+function solve(A::Matrix{T}, b::Vector{T}) where {T<:AbstractFloat}
     workspace = zeros(T, length(b))
     ldiv!(workspace, lu(A), b)
     return workspace
 end
+@assert solve([2.0 0.0; 0.0 4.0], [2.0, 8.0]) == [1.0, 2.0]
 ```
 
 ### Documentation
+
+This is a docstring/implementation template, not another solver definition to
+add to a user script. Replace the body and example for the function you write.
 
 Use docstrings for public functions:
 ````julia
@@ -364,22 +411,14 @@ end
 
 ---
 
-## File Statistics
+## Source Inventory
 
-| Directory | Files | Approximate Lines |
-|-----------|-------|-------------------|
-| `src/core/` | 5 | ~2,100 |
-| `src/kernel/` | 1 | ~1,200 |
-| `src/dense/` | 1 | ~1,100 |
-| `src/sparse/` | 1 | ~1,500 |
-| `src/banded/` | 1 | ~650 |
-| `src/interfaces/` | 2 | ~1,300 |
-| `src/parallel/` | 4 | ~2,300 |
-| **Total** | **16** | **~9,200** |
+The include order in `src/FeastKit.jl` is the authoritative module inventory.
+Optional package integrations live in `ext/`. Use `rg --files src ext` to list
+current files; static file and line counts become stale as solvers evolve.
 
 ---
 
-<div align="center">
-  <p><strong>Ready to contribute?</strong> See <a href="contributing.md">Contributing Guidelines</a></p>
-  <a href="testing.md">Testing Guide</a> · <a href="api_reference.md">API Reference</a>
-</div>
+**Ready to contribute?** See [Contributing Guidelines](contributing.md)
+
+[Testing Guide](testing.md) · [API Reference](api_reference.md)

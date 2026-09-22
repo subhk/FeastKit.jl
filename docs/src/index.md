@@ -11,10 +11,13 @@
 FeastKit.jl is a Julia implementation of the **FEAST eigenvalue algorithm**, a powerful numerical method for finding eigenvalues and eigenvectors of large sparse matrices within specified intervals or regions. Unlike traditional methods that compute all eigenvalues, FeastKit allows you to:
 
 - Target specific eigenvalues in intervals `[Emin, Emax]` or complex regions
-- Handle very large problems (millions of unknowns) efficiently
+- Work with dense, sparse, banded, and matrix-free inputs
 - Work matrix-free without storing explicit matrices
 - Leverage parallelization for high-performance computing
 - Use custom contour integration for optimal convergence
+
+Use the site's version selector to match your installed package. The development
+site follows `main`; stable documentation follows published version tags.
 
 ### Key Features
 
@@ -35,7 +38,7 @@ FeastKit.jl is a Julia implementation of the **FEAST eigenvalue algorithm**, a p
 
 ```julia
 using Pkg
-Pkg.add("FeastKit")  # When available from registry
+Pkg.add("FeastKit")
 
 # Or for development:
 Pkg.add(url="https://github.com/subhk/FeastKit.jl")
@@ -44,20 +47,22 @@ Pkg.add(url="https://github.com/subhk/FeastKit.jl")
 ### Your First FeastKit Calculation
 
 ```@example quickstart
-using FeastKit, LinearAlgebra
+using FeastKit, LinearAlgebra, SparseArrays
 
-# Create a test matrix (1000x1000 tridiagonal)
+# Create a sparse 1000x1000 tridiagonal matrix
 n = 1000
-A = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))
+A = sparse(SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1)))
 
 # Find eigenvalues near λ = 1. The eigenvalues here are 2 - 2cos(kπ/(n+1)),
 # spaced about 3e-3 apart near λ = 1, so this window holds 8 of them. M0 must
 # exceed the number of eigenvalues in the interval unless using the full space;
 # saturation or non-convergence means the subspace/region needs adjustment.
-result = feast(A, (0.9801, 1.0182), M0=10)
+result = feast(A, (0.9801, 1.0182); subspace_size=10, tol=1e-10)
+@assert result.converged result.message
+@assert result.M == 8
 
 println("Found $(result.M) eigenvalues:")   # 8
-println(result.lambda[1:result.M])
+println(result.values)
 ```
 
 **That's it!** FeastKit found the eigenvalues in your target interval.
@@ -106,7 +111,9 @@ function tridiagonal_solve!(Y, z, X)
 end
 
 # Solve the same way!
-result = feast(A_op, (0.9801, 1.0182), M0=10, solver=tridiagonal_solve!)
+result = feast(A_op, (0.9801, 1.0182); subspace_size=10, solver=tridiagonal_solve!)
+@assert result.converged result.message
+@assert result.M == 8
 
 println("Found $(result.M) eigenvalues, info = $(result.info)")
 ```
@@ -119,87 +126,57 @@ println("Found $(result.M) eigenvalues, info = $(result.info)")
 
 ```@example dense
 using FeastKit, LinearAlgebra
-
-# Create a random symmetric matrix
-n = 500
-A = randn(n, n)
-A = A + A'  # Make symmetric
-
-# Find eigenvalues near zero
-result = feast(A, (-1.0, 1.0), M0=20)
-
-println("Eigenvalues near zero:")
-for i in 1:result.M
-    println("λ[$i] = $(result.lambda[i])")
-end
+n = 40
+A = Matrix(SymTridiagonal(2.0 * ones(n), -ones(n-1)))
+interval = (0.0, 0.2)
+expected = filter(λ -> interval[1] < λ < interval[2], eigvals(Symmetric(A)))
+result = feast(A, interval; subspace_size=8)
+@assert result.converged && result.M == length(expected)
+@assert isapprox(result.values, expected; atol=1e-10)
+result.values
 ```
 
 ### Sparse Matrix Problems
 
 ```@example sparse
 using FeastKit, SparseArrays, LinearAlgebra
-
-# Large sparse symmetric matrix
 n = 5000
-A = sprand(n, n, 0.001)  # 0.1% density
-A = A + A' + 5*I         # Make symmetric positive definite
-
-# Bracket the top of the spectrum, which is well separated from the bulk near
-# 5. Estimate it first rather than guessing an interval width.
-function power_iteration_max(S, N)
-    v = randn(N)
-    for _ in 1:100
-        v = S * v
-        v ./= norm(v)
-    end
-    return dot(v, S * v)
-end
-λ_max = power_iteration_max(A, n)
-
-result = feast(A, (λ_max - 0.1, λ_max + 0.1), M0=8)
-
-println("Largest eigenvalue: $(result.lambda[1:result.M])")
+A = spdiagm(-1 => -ones(n-1), 0 => 2ones(n), 1 => -ones(n-1))
+# The exact discrete-Laplacian spectrum lets us isolate the largest eigenvalue.
+λ_max = 2 - 2cos(n*π/(n+1))
+λ_next = 2 - 2cos((n-1)*π/(n+1))
+interval = ((λ_max + λ_next)/2, λ_max + (λ_max - λ_next)/2)
+result = feast(A, interval; subspace_size=4)
+@assert result.converged && result.M == 1
+@assert isapprox(only(result.values), λ_max; atol=1e-9)
+result.values
 ```
 
 ### Generalized Eigenvalue Problem
 
 ```@example generalized
-using FeastKit, LinearAlgebra
-
-# Create matrices A and B
-n = 1000
-A = SymTridiagonal(2.0 * ones(n), -1.0 * ones(n-1))
-B = SymTridiagonal(3.0 * ones(n), -0.5 * ones(n-1))
-
-# Solve A*x = λ*B*x. The pencil's spectrum runs from ~0 to 1 across 1000
-# eigenvalues, so target the low end rather than a broad slice: (0.1, 0.8)
-# would contain 461 of them and no M0 of 15 could resolve that.
-result = feast(A, B, (0.0, 0.00032), M0=15)
-
-println("Generalized eigenvalues: $(result.lambda[1:result.M])")   # 8
+using FeastKit, LinearAlgebra, SparseArrays
+n = 200
+A = sparse(SymTridiagonal(2.0 * ones(n), -ones(n-1)))
+B = sparse(SymTridiagonal(3.0 * ones(n), -0.5 * ones(n-1)))
+# Both tridiagonal matrices share the discrete sine eigenvectors.
+λ(k) = (2 - 2cos(k*π/(n+1))) / (3 - cos(k*π/(n+1)))
+interval = (0.0, (λ(8) + λ(9))/2)
+result = feast(A, B, interval; subspace_size=12)
+@assert result.converged && result.M == 8
+@assert isapprox(result.values, λ.(1:8); atol=1e-10)
+result.values
 ```
 
 ### Complex Non-Hermitian Problems
 
 ```@example general
 using FeastKit, LinearAlgebra
-
-# Non-symmetric matrix with complex eigenvalues
-n = 200
-A = randn(ComplexF64, n, n)
-B = Matrix{ComplexF64}(I, n, n)
-
-# Search in circular region
-center = 0.0 + 0.0im
-radius = 2.0
-
-result = feast_general(A, B, center, radius, M0=15)
-
-println("Complex eigenvalues:")
-for i in 1:result.M
-    λ = result.lambda[i]
-    println("λ[$i] = $(real(λ)) + $(imag(λ))im")
-end
+A = ComplexF64[0.5+0.1im 0.2 0; 0 1.0-0.2im 0.3; 0 0 3.0+1.0im]
+result = feast_general(A, 0.0+0.0im, 2.0; subspace_size=3)
+@assert result.converged && result.M == 2
+@assert isapprox(sort(result.values; by=real), [0.5+0.1im, 1.0-0.2im]; atol=1e-9)
+result.values
 ```
 
 ---
@@ -226,6 +203,8 @@ The FEAST algorithm uses **contour integration** in the complex plane to extract
 
 ### Search Regions
 
+Signature templates using your matrices and search bounds:
+
 **Real Intervals**: For symmetric/Hermitian matrices
 ```julia
 result = feast(A, (Emin, Emax), M0=10)
@@ -238,7 +217,8 @@ result = feast_general(A, B, center, radius, M0=10)
 
 **Custom Contours**: For advanced users
 ```julia
-contour = feast_contour_expert(Emin, Emax, 16, 2, 100)  # Zolotarev integration
+contour = feast_rectangle(-1, 1, -0.5, 0.5)
+result = feast(A, contour; subspace_size=10)
 ```
 
 ---
@@ -249,23 +229,23 @@ contour = feast_contour_expert(Emin, Emax, 16, 2, 100)  # Zolotarev integration
 
 | Parameter | Description | Typical Values | Impact |
 |-----------|-------------|----------------|---------|
-| `M0` | Max eigenvalues to find | 10-50 | Memory usage, accuracy |
-| `ne` | Integration points | 8-32 | Accuracy vs speed |
+| `subspace_size` (`M0`) | Trial-subspace capacity | 10-50 | Memory usage, accuracy |
+| `quadrature_points` | Half-contour count for intervals; full count for general solves | 8-32 | Accuracy vs speed |
 | `tol` | Convergence tolerance | 1e-12 | Accuracy vs iterations |
 | `maxiter` | Max refinement loops | 20-100 | Convergence robustness |
 
 ### Memory Usage
 
-| Problem Size | Standard FeastKit | Matrix-Free FeastKit |
-|--------------|----------------|-------------------|
-| 1,000 × 1,000 | ~24 MB | ~1 MB |
-| 10,000 × 10,000 | ~2.4 GB | ~10 MB |
-| 100,000 × 100,000 | ~240 GB | ~100 MB |
+FEAST stores several `N × subspace_size` workspaces and smaller projected
+matrices. Dense matrix storage and cached shifted factorizations add quadratic
+memory; sparse LU factors may have substantial fill-in. Matrix-free iterative
+solves add Krylov-basis and callback storage. There is no fixed memory total
+based on `N` alone. See the [performance guide](performance.md).
 
 ### Performance Tips
 
 - Use matrix-free for large problems
-- Choose appropriate solvers: CG for SPD, GMRES for general
+- Use direct factorization or GMRES for assembled inputs; matrix-free also supports BiCGSTAB or a callback. CG is unsupported for complex shifted systems.
 - Tune integration points: More points = better accuracy, slower
 - Enable parallelization for very large problems
 - Use custom contours for challenging geometries
@@ -279,13 +259,18 @@ contour = feast_contour_expert(Emin, Emax, 16, 2, 100)  # Zolotarev integration
 **Cause**: Search interval doesn't contain eigenvalues
 
 **Solutions**:
-```julia
+```@example home_bounds
+using FeastKit, LinearAlgebra
+A = Matrix(Diagonal([1.0, 2.0, 3.0, 4.0]))
+Emin, Emax = 0.5, 2.5
 # Check eigenvalue bounds first
 bounds = feast_validate_interval(A, (Emin, Emax))
 println("Estimated eigenvalue range: $bounds")
 
-# Use a broader interval
-result = feast(A, (bounds[1], bounds[2]), M0=10)
+# For a small reference problem, search the full range with a full subspace.
+# For large problems, split the range and estimate each enclosed count.
+result = feast(A, (bounds[1] - 0.1, bounds[2] + 0.1); subspace_size=size(A, 1))
+@assert result.converged && result.M == 4
 ```
 
 ### Linear solver not converging
@@ -293,14 +278,18 @@ result = feast(A, (bounds[1], bounds[2]), M0=10)
 **Cause**: Iterative solver issues in matrix-free mode
 
 **Solutions**:
-```julia
-# Increase solver tolerance and iterations
-result = feast(A_op, interval,
-              solver=:gmres,
-              solver_opts=(rtol=1e-4, maxiter=2000, restart=50))
-
-# Try different solver
-result = feast(A_op, interval, solver=:bicgstab)
+```@example home_inner_solvers
+using FeastKit, Krylov, LinearAlgebra
+entries = collect(1.0:12.0)
+A_op = LinearOperator{Float64}((y, x) -> (y .= entries .* x), (12, 12);
+                              issymmetric=true)
+interval = (0.5, 2.5)
+for solver in (:gmres, :bicgstab)
+    result = feast(A_op, interval; subspace_size=4, tol=1e-9, solver=solver,
+                   solver_opts=(rtol=1e-12, maxiter=500, restart=16))
+    @assert result.converged && result.M == 2
+    @assert isapprox(result.values, [1.0, 2.0]; atol=1e-8)
+end
 ```
 
 ### Memory allocation failed
@@ -308,13 +297,20 @@ result = feast(A_op, interval, solver=:bicgstab)
 **Cause**: Problem too large for available memory
 
 **Solutions**:
-```julia
-# Switch to matrix-free interface
-A_op = LinearOperator{Float64}(A_mul!, size(A))
-result = feast(A_op, interval, M0=10)
-
-# Reduce M0 (trial-subspace size), keeping room for all target eigenvalues
-result = feast(A, interval, M0=5)  # Instead of M0=20
+```@example home_memory
+using FeastKit, Krylov, LinearAlgebra
+# Check the callback on a small problem before scaling it up.
+entries = collect(1.0:12.0)
+A = Matrix(Diagonal(entries))
+A_op = LinearOperator{Float64}((y, x) -> (y .= entries .* x), size(A);
+                              issymmetric=true)
+interval = (0.5, 2.5)
+result = feast(A_op, interval; subspace_size=4, tol=1e-9,
+               solver_opts=(rtol=1e-12, maxiter=500, restart=16))
+@assert result.converged && result.M == 2
+# A smaller subspace must still hold every targeted eigenvalue.
+result_small = feast(A, interval; subspace_size=3)
+@assert result_small.converged && result_small.M == 2
 ```
 
 ### Getting Help

@@ -6,15 +6,10 @@ FeastKit.jl supports polynomial eigenvalue problems (PEPs) of the form:
 
 This guide covers the theory, implementation, and practical usage of FeastKit's polynomial eigenvalue solvers.
 
-## Table of Contents
-
-- [Overview](#overview)
-- [Mathematical Background](#mathematical-background)
-- [Basic Usage](#basic-usage)
-- [Problem Types](#problem-types)
-- [Examples](#examples)
-- [Advanced Topics](#advanced-topics)
-- [Troubleshooting](#troubleshooting)
+```@contents
+Pages = ["polynomial_problems.md"]
+Depth = 2
+```
 
 ---
 
@@ -82,24 +77,31 @@ The contour C encloses the eigenvalues of interest.
 Coefficient matrices may use dense, sparse, or structured storage. This
 convenience interface materializes them as dense matrices and builds a dense
 companion problem; sparse input does not make this particular solver sparse.
-For large problems, use the matrix-free polynomial interface.
+For large problems, use the matrix-free polynomial interface. Coefficients
+must have complex floating-point elements for this high-level assembled call.
+Its `M0` is multiplied by the degree when sizing the companion subspace;
+choose `M0 ≤ n`. The matrix-free convenience call uses `M0` (or
+`subspace_size`) directly in the `degree*n` companion space. The assembled
+polynomial wrapper accepts `M0` and `fpm`; it does not accept the named
+linear-solver controls added to `feast` and `feast_general`.
 
-```julia
+```@example polynomial_basic
 using FeastKit, LinearAlgebra
 
-# Define polynomial matrices [A₀, A₁, A₂, ...]
-n = 50
-A0 = randn(ComplexF64, n, n)
-A1 = randn(ComplexF64, n, n)
-A2 = randn(ComplexF64, n, n)
-coeffs = [A0, A1, A2]  # Quadratic: A0 + λ*A1 + λ²*A2
+# P(λ) = λ²I - diag(1, 4, 9), with roots ±1, ±2, ±3.
+coeffs = [Matrix(Diagonal(ComplexF64[-1, -4, -9])),
+          zeros(ComplexF64, 3, 3), Matrix{ComplexF64}(I, 3, 3)]
 
-# Search region (circular contour)
-center = 0.0 + 0.0im
-radius = 2.0
+# Select the positive roots 1 and 2.
+center, radius = 1.5 + 0.0im, 0.75
+fpm = zeros(Int, 64)
+feastinit!(fpm)
+fpm[8] = 32
+fpm[16] = 1
 
-# Solve
-result = feast_polynomial(coeffs, center, radius, M0=30)
+result = feast_polynomial(coeffs, center, radius; M0=3, fpm=fpm)
+@assert result.converged
+@assert isapprox(sort(real.(result.values)), [1.0, 2.0]; atol=1e-9)
 
 println("Found $(result.M) eigenvalues:")
 for i in 1:min(5, result.M)
@@ -111,7 +113,7 @@ end
 
 Returns `FeastGeneralResult` with complex eigenvalues:
 
-```julia
+```@example polynomial_basic
 result.lambda  # Complex eigenvalues
 result.q       # Eigenvectors
 result.M       # Number found
@@ -127,65 +129,79 @@ result.epsout  # Residual
 
 For real symmetric or complex Hermitian coefficient matrices:
 
-```julia
-# Symmetric coefficient matrices. The drivers dispatch on Vector{Matrix{T}},
-# so materialize the Symmetric wrappers.
-K = Matrix(Symmetric(randn(n, n)))
-C = Matrix(Symmetric(randn(n, n)))
-M = Matrix(Symmetric(randn(n, n) + 5I))
-
-coeffs = [K, C, M]
-
-# Use symmetric solver. Even with symmetric coefficients the search region is
-# a disc in the complex plane, because a quadratic in λ has complex roots.
-result = feast_sypev!(coeffs, 2, center, radius, M0, fpm)
+```@example polynomial_symmetric_drivers
+using FeastKit, LinearAlgebra
+coeffs = [Matrix(Diagonal([-1.0, -4.0, -9.0])), zeros(3, 3),
+          Matrix{Float64}(I, 3, 3)]
+fpm = feastinit().fpm
+fpm[8] = 32
+fpm[16] = 1
+real_result = feast_sypev!(coeffs, 2, 1.5+0.0im, 0.75, 3, copy(fpm))
+complex_coeffs = [ComplexF64.(C) for C in coeffs]
+hermitian_result = feast_hepev!(complex_coeffs, 2, 1.5+0.0im, 0.75, 3, copy(fpm))
+for result in (real_result, hermitian_result)
+    @assert result.converged && result.M == 2
+    @assert isapprox(sort(real.(result.values)), [1.0, 2.0]; atol=1e-9)
+end
+real_result.values
 ```
 
-### Real Symmetric with Real Eigenvalues
+### Undamped Vibrations
 
-When M, C, K are real symmetric and eigenvalues are real:
+For positive definite stiffness `K` and mass `M`, the undamped polynomial
+`K + λ²M` has imaginary roots `λ = ±iω`. Real symmetric coefficients alone
+do not imply real polynomial eigenvalues. To solve for real frequencies
+instead, formulate `K - ω²M`.
 
-```julia
-using FeastKit
+```@example polynomial_undamped
+using FeastKit, LinearAlgebra
 
-# Undamped system: with C = 0 the eigenvalues come in ± pairs on the real axis
-K = Matrix(Symmetric(randn(n, n) + 10I))
-C = zeros(n, n)  # No damping
-M = Matrix(Symmetric(randn(n, n) + 5I))
+K = Matrix(Diagonal([1.0, 4.0, 9.0]))
+C = zeros(3, 3)
+M = Matrix{Float64}(I, 3, 3)
+fpm = zeros(Int, 64)
+feastinit!(fpm)
+fpm[8] = 32
+fpm[16] = 1
 
-# A disc covering the positive real eigenvalues. Centre it away from the
-# origin so it does not enclose a root and its negative at the same time.
-result = feast_sypev!([K, C, M], 2, 1.05 + 0.0im, 0.95, M0, fpm)
+# Select the roots i and 2i.
+result = feast_sypev!([K, C, M], 2, 0.0 + 1.5im, 0.75, 3, fpm)
+@assert result.converged
+@assert isapprox(sort(result.values; by=imag), [1.0im, 2.0im]; atol=1e-9)
+sort(imag.(result.values))  # Angular frequencies in this example
 ```
 
 ### General Complex Problems
 
 For non-Hermitian coefficient matrices:
 
-```julia
-# General complex matrices
-A0 = randn(ComplexF64, n, n)
-A1 = randn(ComplexF64, n, n)
-A2 = randn(ComplexF64, n, n)
-
-# Circular contour search
-result = feast_gepev!([A0, A1, A2], 2, center, radius, M0, fpm)
+```@example polynomial_general_driver
+using FeastKit, LinearAlgebra
+# Upper-triangular P(λ) has diagonal entries λ²-1, λ²-4, λ²-9.
+A0 = ComplexF64[-1 0.1im 0; 0 -4 0.2; 0 0 -9]
+A1 = zeros(ComplexF64, 3, 3)
+A2 = Matrix{ComplexF64}(I, 3, 3)
+fpm = feastinit().fpm
+fpm[8] = 32
+fpm[16] = 1
+result = feast_gepev!([A0, A1, A2], 2, 1.5+0.0im, 0.75, 3, fpm)
+@assert result.converged && result.M == 2
+@assert isapprox(sort(real.(result.values)), [1.0, 2.0]; atol=1e-9)
+result.values
 ```
 
 ### Sparse Polynomial Problems
 
 For large-scale problems with sparse coefficient matrices:
 
-```julia
+```@example polynomial_basic
 using SparseArrays
-
-# Sparse coefficient matrices
-K = sprandn(n, n, 0.01) + 10I
-C = sprandn(n, n, 0.01)
-M = sprandn(n, n, 0.01) + 5I
-
-# Sparse solver
-result = feast_scsrpev!([K, C, M], 2, center, radius, M0, fpm)
+# Continue with the diagonal coefficients from Basic Usage, stored sparsely.
+sparse_coeffs = [sparse(real.(C)) for C in coeffs]
+sparse_result = feast_scsrpev!(sparse_coeffs, 2, center, radius, 3, copy(fpm))
+@assert sparse_result.converged && sparse_result.M == 2
+@assert isapprox(sort(real.(sparse_result.values)), [1.0, 2.0]; atol=1e-9)
+sparse_result.values
 ```
 
 ---
@@ -194,11 +210,11 @@ result = feast_scsrpev!([K, C, M], 2, center, radius, M0, fpm)
 
 ### Example 1: Damped Vibration Problem
 
-```julia
+```@example polynomial_damped
 using FeastKit, LinearAlgebra
 
 # Damped vibration: (λ²M + λC + K)x = 0
-n = 100
+n = 8
 
 # Physical matrices
 K = SymTridiagonal(4*ones(n), -ones(n-1))  # Stiffness
@@ -210,43 +226,48 @@ K_c = Complex.(Matrix(K))
 M_c = Complex.(Matrix(M))
 C_c = Complex.(Matrix(C))
 
-# The quadratic λ²+0.1kλ+k = 0 puts every eigenvalue on |λ| = √k with k in
-# [2, 6], so there is nothing near the origin at all and radius 3 would enclose
-# all 2n = 200 of them. Target a small disc on that ring instead.
-result = feast_polynomial([K_c, C_c, M_c], -0.15+2.0im, 0.08, M0=18)
+# Select the eight roots in the upper half-plane.
+result = feast_polynomial([K_c, C_c, M_c], 0.0+2.0im, 1.0; M0=n)
+@assert result.converged
+k = eigvals(K)
+expected = -0.05 .* k .+ im .* sqrt.(k .- 0.0025 .* k.^2)
+@assert isapprox(sort(result.values; by=imag), expected; atol=1e-8)
 
 # Analyze results
 for i in 1:min(5, result.M)
     λ = result.lambda[i]
-    ω = sqrt(-λ)  # Natural frequency (approximately)
-    ζ = real(λ) / (2 * abs(imag(ω)))  # Damping ratio
-    println("Mode $i: λ = $λ")
+    ω_n = abs(λ)              # Undamped natural angular frequency
+    ω_d = abs(imag(λ))        # Damped angular frequency
+    ζ = -real(λ) / abs(λ)     # Damping ratio for this proportional damping
+    println("Mode $i: ω_n = $ω_n, ω_d = $ω_d, ζ = $ζ")
 end
 ```
 
 ### Example 2: Gyroscopic System
 
-```julia
+```@example polynomial_gyroscopic
 using FeastKit, LinearAlgebra
 
 # Gyroscopic system: (λ²M + λG + K)x = 0
 # G is skew-symmetric (gyroscopic matrix)
 
-n = 50
-K = Symmetric(randn(n, n) + 10I)
-M = Symmetric(randn(n, n) + 5I)
+n = 2
+K = Matrix(Diagonal([1.0, 4.0]))
+M = Matrix{Float64}(I, n, n)
 
 # Skew-symmetric gyroscopic matrix
-G = randn(n, n)
-G = G - G'  # Make skew-symmetric
+G = [0.0 -0.2; 0.2 0.0]
 
 # Convert to complex
 coeffs = [Complex.(K), Complex.(G), Complex.(M)]
 
-# Eigenvalues are (nearly) imaginary for undamped gyroscopic systems and spread
-# over |λ| up to ~14, so pick a disc on the imaginary axis rather than one large
-# enough to swallow the whole spectrum.
-result = feast_polynomial(coeffs, 0.0+1.0im, 0.3, M0=20)
+# Positive definite K and M with skew-symmetric G give imaginary roots here.
+result = feast_polynomial(coeffs, 0.0+1.5im, 0.8; M0=n)
+@assert result.converged
+# det(P(λ)) = λ⁴ + 5.04λ² + 4.
+expected = im .* sqrt.([(5.04 - sqrt(5.04^2 - 16))/2,
+                       (5.04 + sqrt(5.04^2 - 16))/2])
+@assert isapprox(sort(result.values; by=imag), expected; atol=1e-8)
 
 println("Gyroscopic eigenvalues (should be imaginary):")
 for i in 1:min(5, result.M)
@@ -255,60 +276,74 @@ for i in 1:min(5, result.M)
 end
 ```
 
-### Example 3: Acoustic Waveguide
+### Example 3: Spatial Wavenumbers
 
-```julia
-using FeastKit, SparseArrays
+The one-dimensional problem `-u'' = k²u` with zero endpoint values gives
+`(K - k²M)x = 0` after discretization. The polynomial eigenvalue is already
+the wavenumber `k`.
 
-# Helmholtz equation in waveguide: (k² M + K)x = 0
-# k is wavenumber (eigenvalue)
+```@example polynomial_wavenumbers
+using FeastKit, SparseArrays, LinearAlgebra
 
-n = 200
+n = 16
 h = 1.0 / (n + 1)
 
-# Finite element matrices
+# Difference stiffness and lumped mass on a unit interval
 K = spdiagm(-1 => -ones(n-1)/h, 0 => 2*ones(n)/h, 1 => -ones(n-1)/h)
 M = spdiagm(0 => h * ones(n))
 
-# This is quadratic in k: (k²M + 0*k + K)x = 0
+# This is quadratic in k: (K - k²M)x = 0.
 K_c = sparse(Complex.(K))
-M_c = sparse(Complex.(M))
-zero_mat = sparse(zeros(ComplexF64, n, n))
+M_c = sparse(Complex.(-M))
+zero_mat = spzeros(ComplexF64, n, n)
+fpm = zeros(Int, 64)
+feastinit!(fpm)
+fpm[8] = 32
+fpm[16] = 1
 
-# Find propagating wavenumbers
-result = feast_hcsrpev!([K_c, zero_mat, M_c], 2, 25.0 + 0.0im, 25.0, 20, fpm)
+# Find the first two positive wavenumbers using a sparse companion pencil.
+result = feast_hcsrpev!([K_c, zero_mat, M_c], 2, 4.5 + 0.0im, 2.5, n, fpm)
+@assert result.converged
+expected = [2/h * sin(j*π/(2*(n+1))) for j in 1:2]
+@assert isapprox(sort(real.(result.values)), expected; atol=1e-8)
 
 println("Propagating wavenumbers:")
 for i in 1:result.M
-    k = sqrt(result.lambda[i])
+    k = result.lambda[i]
     println("  k[$i] = $k")
 end
 ```
 
 ### Example 4: Delay System Approximation
 
-```julia
+This is a local Taylor approximation of the exponential near `λτ = 0`;
+its roots are not automatically accurate eigenvalues of the delay equation.
+Check them against the original characteristic equation for the application.
+
+```@example polynomial_delay
 using FeastKit, LinearAlgebra
 
 # Delay differential equation approximated as polynomial
 # ẋ(t) = A₀x(t) + A₁x(t-τ)
 # Characteristic equation involves exponentials, approximate with polynomials
 
-n = 20
-τ = 1.0
+n = 1
+τ = 0.1
 
-A0 = -2.0 * I(n) + 0.5 * randn(n, n)
-A1 = 0.3 * randn(n, n)
+A0 = fill(-2.0, n, n)
+A1 = fill(0.3, n, n)
 
-# Padé approximation of e^{-λτ} gives polynomial eigenvalue problem
-# For simplicity, use Taylor expansion: e^{-λτ} ≈ 1 - λτ + (λτ)²/2 - ...
+# Taylor expansion: e^{-λτ} ≈ 1 - λτ + (λτ)²/2
 
-# Resulting polynomial (truncated)
+# From (A0 + exp(-λ*τ)*A1 - λ*I)x = 0, truncated at order two
 P0 = Complex.(A0 + A1)
-P1 = Complex.(-τ * A1)
+P1 = Complex.(-Matrix{Float64}(I, n, n) - τ * A1)
 P2 = Complex.(τ^2/2 * A1)
 
-result = feast_polynomial([P0, P1, P2], 0.0+0.0im, 5.0, M0=30)
+result = feast_polynomial([P0, P1, P2], -1.0+0.0im, 2.0; M0=n)
+@assert result.converged
+expected = (1.03 - sqrt(1.03^2 + 4*0.0015*1.7)) / (2*0.0015)
+@assert isapprox(result.values, [expected]; atol=1e-8)
 
 println("Approximate delay system eigenvalues:")
 for i in 1:min(5, result.M)
@@ -322,17 +357,23 @@ end
 
 ### Scaling and Conditioning
 
-Polynomial problems are often ill-conditioned. Use scaling:
+Balancing coefficient norms can improve numerical scaling, but does not
+guarantee a well-conditioned polynomial. Transform the search region as well
+as the coefficients, and recover eigenvalues in the original units:
 
-```julia
-# Fan-Patel-Zhou scaling
+```@example polynomial_scaling
+using FeastKit, LinearAlgebra
+
+# Simple endpoint-norm scaling: Q(μ) = δ * P(γ*μ)
 function scale_pep(coeffs)
     p = length(coeffs) - 1
     norms = [norm(A) for A in coeffs]
 
-    # Compute optimal scaling factors
-    γ = (norms[1] / norms[end])^(1/(2p))
-    δ = 2 / (norms[1] + norms[end] * γ^(2p))
+    # Balance the constant and highest-degree coefficient norms.
+    p >= 1 && norms[1] > 0 && norms[end] > 0 ||
+        throw(ArgumentError("Scaling requires nonzero endpoint coefficients"))
+    γ = (norms[1] / norms[end])^(1/p)
+    δ = 1 / norms[1]
 
     # Scale coefficient matrices
     scaled = similar(coeffs)
@@ -343,46 +384,65 @@ function scale_pep(coeffs)
     return scaled, γ, δ
 end
 
-# Apply scaling
+# P(λ) = λ²I - diag(100, 400, 900), with positive roots 10, 20, 30.
+coeffs = [Matrix(Diagonal(ComplexF64[-100, -400, -900])),
+          zeros(ComplexF64, 3, 3), Matrix{ComplexF64}(I, 3, 3)]
+center, radius = 15.0 + 0.0im, 7.5
+fpm = zeros(Int, 64)
+feastinit!(fpm)
+fpm[8] = 32
+fpm[16] = 1
 scaled_coeffs, γ, δ = scale_pep(coeffs)
-result = feast_polynomial(scaled_coeffs, center*γ, radius*γ, M0=M0)
+result = feast_polynomial(scaled_coeffs, center/γ, radius/γ; M0=3, fpm=fpm)
+@assert result.converged
 
 # Recover original eigenvalues
-result.lambda ./= γ
+original_values = γ .* result.values
+@assert isapprox(sort(real.(original_values)), [10.0, 20.0]; atol=1e-8)
+for (j, λ) in enumerate(original_values)
+    Pλ = sum(λ^k * coeffs[k+1] for k in 0:2)
+    @assert norm(Pλ * result.vectors[:, j]) < 1e-7
+end
+original_values
 ```
 
 ### Infinite Eigenvalues
 
-Polynomial problems may have eigenvalues at infinity:
+A regular polynomial with a singular leading coefficient has eigenvalues at
+infinity, which a finite FEAST contour does not target. If the polynomial is
+singular for every λ, the ordinary eigenvalue interpretation does not apply:
 
-```julia
-# If Aₚ is singular, there are infinite eigenvalues
-# These are not found by FEAST (which searches finite regions)
-
-# Check for infinite eigenvalues:
-if rank(coeffs[end]) < size(coeffs[end], 1)
-    @warn "Leading coefficient is singular - infinite eigenvalues exist"
-end
+```@example polynomial_infinite
+using LinearAlgebra
+# A regular degree-one polynomial P(λ) = diag(λ, 1).
+# The leading coefficient is singular: one root is finite, one is at infinity.
+A0 = Matrix(Diagonal([0.0, 1.0]))
+A1 = Matrix(Diagonal([1.0, 0.0]))
+reference = eigvals(-A0, A1)
+@assert rank(A1) == 1
+@assert count(isfinite, reference) == 1 && count(isinf, reference) == 1
+reference
 ```
 
 ### Integration Parameters
 
-```julia
+```@example polynomial_basic
 fpm = zeros(Int, 64)
 feastinit!(fpm)
 
-fpm[2] = 16   # Integration points (more for polynomials)
+fpm[8] = 32   # Full-contour integration points
 fpm[3] = 12   # Tolerance
 fpm[4] = 30   # Iterations
 
-result = feast_polynomial(coeffs, center, radius, M0=M0, fpm=fpm)
+result = feast_polynomial(coeffs, center, radius, M0=3, fpm=fpm)
+@assert result.converged && result.M == 2
 ```
 
 ### Companion Linearization (Comparison)
 
 For debugging, compare with linearized problem:
 
-```julia
+```@example polynomial_basic
 using LinearAlgebra
 
 function companion_linearize(coeffs)
@@ -410,16 +470,20 @@ end
 # Compare results
 A_lin, B_lin = companion_linearize(coeffs)
 λ_linearized = eigvals(A_lin, B_lin)
+@assert isapprox(sort(real.(λ_linearized)), [-3.0, -2.0, -1.0, 1.0, 2.0, 3.0]; atol=1e-9)
 ```
 
 ---
 
 ## Troubleshooting
 
+The following examples continue the coefficients and search region from Basic
+Usage. The scaling snippet continues the separate Scaling and Conditioning example.
+
 ### No Eigenvalues Found
 
 1. **Check search region**: Eigenvalues may be elsewhere
-```julia
+```@example polynomial_basic
 # Linearize and find all eigenvalues for reference
 A_lin, B_lin = companion_linearize(coeffs)
 λ_all = eigvals(A_lin, B_lin)
@@ -427,24 +491,28 @@ println("All eigenvalues: $λ_all")
 ```
 
 2. **Expand search region**
-```julia
-result = feast_polynomial(coeffs, center, 2*radius, M0=M0)
+```@example polynomial_basic
+# Increase the radius without putting a root on the boundary.
+result = feast_polynomial(coeffs, center, 1.75; M0=3)
+@assert result.converged && result.M == 3
+@assert isapprox(sort(real.(result.values)), [1.0, 2.0, 3.0]; atol=1e-9)
+result.values
 ```
 
 ### Poor Accuracy
 
 1. **Scale the problem**
-```julia
+```@example polynomial_scaling
 scaled_coeffs, γ, δ = scale_pep(coeffs)
 ```
 
 2. **Increase integration points**
-```julia
-fpm[2] = 24  # More quadrature points
+```@example polynomial_basic
+fpm[8] = 48  # Full-contour quadrature points
 ```
 
 3. **Check condition number**
-```julia
+```@example polynomial_basic
 for (i, A) in enumerate(coeffs)
     println("Condition of A[$i]: $(cond(A))")
 end
@@ -455,17 +523,18 @@ end
 If eigenvalues appear that shouldn't exist:
 
 1. **Check residual**: True eigenvalues have small residuals
-```julia
+```@example polynomial_basic
 for i in 1:result.M
     λ = result.lambda[i]
     x = result.q[:, i]
     P_λ = sum(λ^k * coeffs[k+1] for k in 0:length(coeffs)-1)
     residual = norm(P_λ * x)
+    @assert residual < 1e-8
     println("λ[$i]: residual = $residual")
 end
 ```
 
-2. **Increase M0**: May be picking up nearby eigenvalues
+2. **Check convergence**: Increase `M0` if the search subspace is saturated
 3. **Refine search region**: Use smaller radius
 
 ---
@@ -475,8 +544,9 @@ end
 ### Main Functions
 
 A polynomial eigenvalue problem is always searched over a **disc in the complex
-plane**, never a real interval: every driver takes a complex `center` and a real
-`radius`, and every one takes the degree `degree` explicitly.
+plane**, never a real interval: the calls below take a complex `center` and a
+real `radius`. Low-level drivers also take `degree` explicitly; the high-level
+wrapper infers it from the coefficient vector.
 
 ```julia
 # High-level interface (keyword arguments)
@@ -560,6 +630,8 @@ fpm[16] = 1     # trapezoidal, the accurate rule on a circle
 
 # A disc holding 2 and 3 but neither -2 nor -3.
 good = feast_srcipev!(coeffs, 2, 2.5 + 0.0im, 1.0, 3, copy(fpm))
+@assert good.converged
+@assert isapprox(sort(real.(good.values)), [2.0, 3.0]; atol=1e-8)
 sort(real.(good.lambda[1:good.M]))
 ```
 
@@ -568,7 +640,8 @@ negative, and the method has nothing to work with:
 
 ```@example poly-contour
 bad = feast_srcipev!(coeffs, 2, 0.0 + 0.0im, 4.0, 3, copy(fpm))
-bad.M   # 0
+@assert !bad.converged
+bad.M   # Symmetric-root cancellation can leave no usable moment directions
 ```
 
 The linearizing drivers (`feast_gepev!`, `feast_scsrpev!`, …) build a companion
@@ -598,8 +671,7 @@ points (`fpm[8]`) before raising the loop count (`fpm[4]`).
 | `coeffs` | `Vector{AbstractMatrix}` | Coefficient matrices [A₀, A₁, ..., Aₚ] |
 | `center` | `Complex` | Center of search circle |
 | `radius` | `Real` | Radius of search circle |
-| `Emin, Emax` | `Real` | Search interval (symmetric problems) |
-| `M0` | `Int` | Maximum eigenvalues to find |
+| `M0` | `Int` | Probe width; companion drivers use `degree*M0` columns |
 | `fpm` | `Vector{Int}` | FEAST parameters |
 
 ---
@@ -612,7 +684,6 @@ points (`fpm[8]`) before raising the loop count (`fpm[4]`).
 
 ---
 
-<div align="center">
-  <p><strong>Solving polynomial eigenvalue problems with FeastKit.jl</strong></p>
-  <a href="examples.md">Examples</a> · <a href="complex_eigenvalues.md">Complex Eigenvalues</a> · <a href="api_reference.md">API Reference</a>
-</div>
+**Solving polynomial eigenvalue problems with FeastKit.jl**
+
+[Examples](examples.md) · [Complex Eigenvalues](complex_eigenvalues.md) · [API Reference](api_reference.md)

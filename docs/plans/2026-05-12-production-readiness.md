@@ -42,14 +42,14 @@ Expected: all serial, matrix-free, allocation, backend API, and production gate 
 
 Run:
 ```bash
-JULIA_DEPOT_PATH=/private/tmp/julia_depot_backend:/Users/subha/.julia FEASTKIT_TEST_DISTRIBUTED=true /Applications/Julia-1.10.0.app/Contents/Resources/julia/bin/julia -p 2 --project test/test_parallel_backends.jl
+JULIA_DEPOT_PATH=/private/tmp/julia_depot_backend:/Users/subha/.julia FEASTKIT_TEST_DISTRIBUTED=true /Applications/Julia-1.10.0.app/Contents/Resources/julia/bin/julia -p 2 --project test/backends/execution.jl
 ```
 
 Expected: distributed backend tests pass.
 
 Run:
 ```bash
-JULIA_DEPOT_PATH=/private/tmp/julia_depot_backend:/Users/subha/.julia FEASTKIT_TEST_MPI=true FEASTKIT_ENABLE_MPI=true DYLD_FALLBACK_LIBRARY_PATH=/Applications/Julia-1.10.0.app/Contents/Resources/julia/lib/julia:/Users/subha/.julia/artifacts/b820a0a437e8501d06a17439abd84feaa5b6cca3/lib:/Users/subha/.julia/artifacts/0a4714a5cb9f46e0867e7c6c3a26521447f8fae0/lib:/Users/subha/.julia/artifacts/a5796fc0c827dab12e5ca4ac2ff5b8fd48e26c1b/lib:/Users/subha/.julia/artifacts/f822b53e59145a4dfdceef194142de78ce8e510b/lib:/Applications/Julia-1.10.0.app/Contents/Resources/julia/bin/../lib/julia:/Applications/Julia-1.10.0.app/Contents/Resources/julia/bin/../lib:/Users/subha/lib:/usr/local/lib:/lib:/usr/lib /Users/subha/.julia/artifacts/f822b53e59145a4dfdceef194142de78ce8e510b/bin/mpiexec -n 2 /Applications/Julia-1.10.0.app/Contents/Resources/julia/bin/julia --project test/test_parallel_backends.jl
+JULIA_DEPOT_PATH=/private/tmp/julia_depot_backend:/Users/subha/.julia FEASTKIT_TEST_MPI=true FEASTKIT_ENABLE_MPI=true DYLD_FALLBACK_LIBRARY_PATH=/Applications/Julia-1.10.0.app/Contents/Resources/julia/lib/julia:/Users/subha/.julia/artifacts/b820a0a437e8501d06a17439abd84feaa5b6cca3/lib:/Users/subha/.julia/artifacts/0a4714a5cb9f46e0867e7c6c3a26521447f8fae0/lib:/Users/subha/.julia/artifacts/a5796fc0c827dab12e5ca4ac2ff5b8fd48e26c1b/lib:/Users/subha/.julia/artifacts/f822b53e59145a4dfdceef194142de78ce8e510b/lib:/Applications/Julia-1.10.0.app/Contents/Resources/julia/bin/../lib/julia:/Applications/Julia-1.10.0.app/Contents/Resources/julia/bin/../lib:/Users/subha/lib:/usr/local/lib:/lib:/usr/lib /Users/subha/.julia/artifacts/f822b53e59145a4dfdceef194142de78ce8e510b/bin/mpiexec -n 2 /Applications/Julia-1.10.0.app/Contents/Resources/julia/bin/julia --project test/backends/execution.jl
 ```
 
 Expected: MPI backend tests pass on each rank.
@@ -145,7 +145,7 @@ git commit -m "feat: add polynomial IFEAST aliases"
 - Modify: `src/parallel/feast_mpi_interface.jl`
 - Modify: `src/parallel/feast_parallel.jl`
 - Modify: `src/interfaces/feast_precision_aliases.jl`
-- Test: `test/test_parallel_backends.jl`
+- Test: `test/backends/execution.jl`
 - Docs: `docs/src/parallel_computing.md`
 - Docs: `docs/feast_parity_report.md`
 

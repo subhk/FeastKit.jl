@@ -20,7 +20,8 @@ function _next_contour_id()
 end
 
 function _copy_contour(contour::FeastContour{T}) where T<:Real
-    return FeastContour{T}(copy(contour.Zne), copy(contour.Wne))
+    vertices = contour.vertices === nothing ? nothing : copy(contour.vertices)
+    return FeastContour{T}(copy(contour.Zne), copy(contour.Wne), vertices)
 end
 
 function feast_distribution_type(N::Int,
@@ -321,7 +322,7 @@ function _feast_reorder_by_gcontour!(lambda::AbstractVector{Complex{T}},
     tail = M0
     @inbounds for i in 1:M0
         inside = contour === nothing ? feast_inside_gcontour(lambda[i], Emid, r; fpm=fpm) :
-                                       _feast_inside_polygon(lambda[i], contour.Zne)
+                                       _feast_inside_custom_contour(lambda[i], contour)
         if inside
             ninside += 1
             perm[ninside] = i
@@ -400,7 +401,8 @@ function feast_get_custom_contour(::Type{T}, fpm::Vector{Int}) where T<:Real
             return contour
         else
             return FeastContour{T}(Complex{T}.(contour.Zne),
-                                   Complex{T}.(contour.Wne))
+                                   Complex{T}.(contour.Wne),
+                                   contour.vertices === nothing ? nothing : Complex{T}.(contour.vertices))
         end
     end
 end
@@ -459,13 +461,18 @@ function _feast_inside_polygon(z::Complex{T}, nodes::AbstractVector{Complex{T}})
     return inside
 end
 
+function _feast_inside_custom_contour(z::Complex{T}, contour::FeastContour{T}) where T<:Real
+    vertices = contour.vertices === nothing ? contour.Zne : contour.vertices
+    return _feast_inside_polygon(z, vertices)
+end
+
 function _feast_inside_general_region(z::Number, center::Complex{T}, radius::T,
                                       fpm::Vector{Int}) where T<:Real
     # LAPACK may return real Ritz values for a complex pencil with real spectrum.
     point = Complex{T}(z)
     contour = feast_get_custom_contour(T, fpm)
     return contour === nothing ? feast_inside_gcontour(point, center, radius; fpm=fpm) :
-                                 _feast_inside_polygon(point, contour.Zne)
+                                 _feast_inside_custom_contour(point, contour)
 end
 
 """

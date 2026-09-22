@@ -336,9 +336,7 @@ end
                 @inbounds for i in 1:N
                     residual[i] = AQ[i, j] - lambda[j] * work[i, j]
                 end
-                qnorm = norm(view(q, :, j))
-                denom = max(abs(lambda[j]), one(T)) * max(qnorm, eps(T))
-                res[j] = norm(residual) / denom
+                res[j] = _feast_scaled_residual(residual, view(work, :, j), lambda[j])
             end
             epsout[] = maximum(res[1:M])
             state.phase = FEAST_PHASE_IDLE
@@ -779,9 +777,7 @@ end
                 @inbounds for i in 1:N
                     residual[i] = AQ[i, j] - lambda[j] * workc[i, j]
                 end
-                qnorm = norm(view(q, :, j))
-                denom = max(abs(lambda[j]), one(T)) * max(qnorm, eps(T))
-                res[j] = norm(residual) / denom
+                res[j] = _feast_scaled_residual(residual, view(workc, :, j), lambda[j])
             end
             epsout[] = maximum(res[1:M])
             state.phase = FEAST_PHASE_IDLE
@@ -1147,9 +1143,7 @@ end
             @inbounds for i in 1:N
                 residual[i] = AQ[i, j] - lambda[j] * workc[i, j]
             end
-            qnorm = norm(view(q, :, j))
-            denom = max(abs(lambda[j]), one(T)) * max(qnorm, eps(T))
-            res[j] = norm(residual) / denom
+            res[j] = _feast_scaled_residual(residual, view(workc, :, j), lambda[j])
         end
 
         max_res = zero(T)

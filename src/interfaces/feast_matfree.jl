@@ -1,440 +1,3 @@
-# Matrix-Free Feast Interface
-# Provides callbacks for matrix-vector operations instead of explicit matrices
-
-using LinearAlgebra
-using SparseArrays
-
-"""
-    MatrixFreeOperator{T}
-
-Abstract type for matrix-free operators.
-"""
-abstract type MatrixFreeOperator{T} end
-
-"""
-    MatrixVecFunction{T}
-
-Matrix-free operator defined by a matrix-vector multiplication function.
-
-# Fields
-- `mul!`: Function with signature `mul!(y, op, x)` that computes `y = op * x`
-- `size`: Size of the operator as `(m, n)`
-- `issymmetric`: Whether the operator is symmetric
-- `ishermitian`: Whether the operator is Hermitian  
-- `isposdef`: Whether the operator is positive definite
-"""
-struct MatrixVecFunction{T,F} <: MatrixFreeOperator{T}
-    mul!::F
-    size::Tuple{Int, Int}
-    issymmetric::Bool
-    ishermitian::Bool
-    isposdef::Bool
-end
-
-function MatrixVecFunction{T}(mul!::F, size::Tuple{Int, Int};
-                              issymmetric::Bool = false,
-                              ishermitian::Bool = false,
-                              isposdef::Bool = false) where {T,F}
-    return MatrixVecFunction{T,F}(mul!, size, issymmetric, ishermitian, isposdef)
-end
-
-# Convenience constructors
-MatrixVecFunction(mul!::F, size::Tuple{Int, Int}; kwargs...) where F =
-    MatrixVecFunction{Float64}(mul!, size; kwargs...)
-
-"""
-    LinearOperator{T}
-
-Matrix-free operator that supports multiple operations.
-
-# Fields
-- `A_mul!`: Function `(y, x) -> y = A*x`
-- `At_mul!`: Function `(y, x) -> y = A'*x` (optional)
-- `Ac_mul!`: Function `(y, x) -> y = A†*x` (optional)
-- `solve!`: Function `(y, z, x) -> y = (z*I - A)\\x` (linear solver)
-- `size`: Operator size
-- `issymmetric`, `ishermitian`, `isposdef`: Properties
-"""
-struct LinearOperator{T,FA,FT,FC,FS} <: MatrixFreeOperator{T}
-    A_mul!::FA
-    At_mul!::FT
-    Ac_mul!::FC
-    solve!::FS
-    size::Tuple{Int, Int}
-    issymmetric::Bool
-    ishermitian::Bool
-    isposdef::Bool
-end
-
-function LinearOperator{T}(A_mul!::FA, size::Tuple{Int, Int};
-                           At_mul!::FT = nothing,
-                           Ac_mul!::FC = nothing,
-                           solve!::FS = nothing,
-                           issymmetric::Bool = false,
-                           ishermitian::Bool = false,
-                           isposdef::Bool = false) where {T,FA,FT,FC,FS}
-    return LinearOperator{T,FA,FT,FC,FS}(A_mul!, At_mul!, Ac_mul!, solve!, size,
-                                        issymmetric, ishermitian, isposdef)
-end
-
-LinearOperator(A_mul!::FA, size::Tuple{Int, Int}; kwargs...) where FA =
-    LinearOperator{Float64}(A_mul!, size; kwargs...)
-
-# Interface functions
-Base.size(op::MatrixFreeOperator) = op.size
-Base.size(op::MatrixFreeOperator, dim::Int) = op.size[dim]
-LinearAlgebra.issymmetric(op::MatrixFreeOperator) = op.issymmetric
-LinearAlgebra.ishermitian(op::MatrixFreeOperator) = op.ishermitian
-LinearAlgebra.isposdef(op::MatrixFreeOperator) = op.isposdef
-Base.eltype(::MatrixFreeOperator{T}) where T = T
-Base.eltype(::Type{<:MatrixFreeOperator{T}}) where T = T
-
-# Matrix-vector multiplication
-function LinearAlgebra.mul!(y::AbstractVector, op::MatrixVecFunction, x::AbstractVector)
-    op.mul!(y, op, x)
-    return y
-end
-
-function LinearAlgebra.mul!(y::AbstractVector, op::LinearOperator, x::AbstractVector)
-    op.A_mul!(y, x)
-    return y
-end
-
-# Transpose multiplication
-function LinearAlgebra.mul!(y::AbstractVector, 
-                           At::LinearAlgebra.Transpose{T, <:LinearOperator{T}}, 
-                           x::AbstractVector) where T
-    op = At.parent
-    if op.At_mul! !== nothing
-        op.At_mul!(y, x)
-    elseif op.issymmetric
-        op.A_mul!(y, x)
-    else
-        throw(ArgumentError("Transpose not available for this operator"))
-    end
-    return y
-end
-
-# Adjoint multiplication  
-function LinearAlgebra.mul!(y::AbstractVector,
-                           Ac::LinearAlgebra.Adjoint{T, <:LinearOperator{T}},
-                           x::AbstractVector) where T
-    op = Ac.parent
-    if op.Ac_mul! !== nothing
-        op.Ac_mul!(y, x)
-    elseif op.ishermitian
-        op.A_mul!(y, x)
-    elseif op.issymmetric && T <: Real
-        op.A_mul!(y, x)
-    else
-        throw(ArgumentError("Adjoint not available for this operator"))
-    end
-    return y
-end
-
-"""
-    feast_matfree_srci!(A_op, B_op, interval, M0; kwargs...)
-
-Matrix-free Feast RCI for real symmetric eigenvalue problems.
-
-# Arguments
-- `A_op`: Matrix-free operator for A
-- `B_op`: Matrix-free operator for B  
-- `interval`: Search interval (Emin, Emax)
-- `M0`: Maximum number of eigenvalues to find
-
-# Keyword Arguments
-- `fpm`: Feast parameters vector
-- `linear_solver`: Function `(y, z, X) -> Y` where `Y = (z*B - A)\\X`
-- `workspace`: Pre-allocated workspace matrices
-- `maxiter`: Maximum refinement iterations
-- `tol`: Convergence tolerance
-
-# Returns
-- `FeastResult` with eigenvalues and eigenvectors
-"""
-function feast_matfree_srci!(A_op::MatrixFreeOperator{T}, 
-                            B_op::MatrixFreeOperator{T},
-                            interval::Tuple{T, T}, M0::Int;
-                            fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
-                            linear_solver::Union{Function, Nothing} = nothing,
-                            workspace::Union{NamedTuple, Nothing} = nothing,
-                            maxiter::Int = 20,
-                            tol::T = T(1e-12)) where T<:Real
-    
-    Emin, Emax = interval
-    N = size(A_op, 1)
-    
-    # Validate operators
-    if size(A_op) != size(B_op) || size(A_op, 1) != size(A_op, 2)
-        throw(DimensionMismatch("A_op and B_op must be square and same size"))
-    end
-    
-    # Initialize Feast parameters
-    if fpm === nothing
-        fpm = zeros(Int, 64)
-        feastinit!(fpm)
-        fpm[3] = round(Int, -log10(tol))  # Set tolerance
-        fpm[4] = maxiter  # Set max iterations
-    end
-
-    # Reject a bad N/M0/interval here, the way every other entry point does. The
-    # kernel also refuses them, but by reporting an info code rather than
-    # throwing, which would make this interface disagree with the rest.
-    fpm_vec = fpm isa FeastParameters ? fpm.fpm : fpm
-    check_feast_srci_input(N, M0, Emin, Emax, fpm_vec)
-    
-    # Allocate workspace if not provided
-    if workspace === nothing
-        workspace = allocate_matfree_workspace(T, N, M0)
-    end
-    
-    work = workspace.work
-    workc = workspace.workc
-    mass_rhs = similar(work)
-    Aq = workspace.Aq
-    Sq = workspace.Sq
-    lambda = workspace.lambda
-    q = workspace.q
-    res = workspace.res
-    
-    # Initialize RCI variables
-    ijob = Ref(-1)  # Initialize
-    Ze = Ref(zero(Complex{T}))
-    epsout = Ref(zero(T))
-    loop = Ref(0)
-    mode = Ref(0)
-    info = Ref(0)
-    
-    # Persistent RCI state (must be reused across calls in the loop)
-    srci_state = FeastSRCIState{T}()
-
-    # Matrix-free RCI loop
-    while true
-        # Call Feast RCI kernel
-        feast_srci!(ijob, N, Ze, work, workc, Aq, Sq, fpm_vec,
-                   epsout, loop, Emin, Emax, M0, lambda, q, mode, res, info; state=srci_state)
-        
-        if ijob[] == Int(Feast_RCI_DONE)
-            break
-        elseif ijob[] == Int(Feast_RCI_FACTORIZE)
-            # User should prepare linear solver for (Ze[]*B - A)
-            if linear_solver === nothing
-                throw(ArgumentError("Linear solver callback required for matrix-free operation"))
-            end
-            continue
-            
-        elseif ijob[] == Int(Feast_RCI_SOLVE)
-            # Solve (Ze[]*B - A) * Y = B*Q and store Y in workc.
-            try
-                # The kernel supplies Q; generalized contour projection needs B*Q.
-                for j in axes(work, 2)
-                    mul!(view(mass_rhs,:,j), B_op, view(work,:,j))
-                end
-                linear_solver(workc, Ze[], mass_rhs)
-            catch err
-                @debug "Matrix-free linear solver callback failed" exception=err
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
-            end
-
-        elseif ijob[] == Int(Feast_RCI_MULT_A)
-            # Compute A * q, store result in work.
-            # mode[] is how many columns of q the kernel wants multiplied.
-            M = mode[]
-            for j in 1:M
-                mul!(view(work, :, j), A_op, view(q, :, j))
-            end
-
-        elseif ijob[] == Int(Feast_RCI_MULT_B)
-            # Compute B * q, store result in work. The kernel needs this both to
-            # build the reduced mass matrix and to form the generalized residual
-            # ||A q - lambda B q||.
-            M = mode[]
-            for j in 1:M
-                mul!(view(work, :, j), B_op, view(q, :, j))
-            end
-
-        else
-            # Unknown RCI code
-            throw(ArgumentError("Unknown Feast RCI code: $(ijob[])"))
-        end
-    end
-    
-    # Return results
-    M_found = mode[]
-    return FeastResult{T, T}(
-        lambda[1:M_found],
-        q[:, 1:M_found],
-        M_found,
-        res[1:M_found],
-        info[],
-        epsout[],
-        loop[]
-    )
-end
-
-"""
-    feast_matfree_grci!(A_op, B_op, center, radius, M0; kwargs...)
-
-Matrix-free Feast RCI for general (non-Hermitian) eigenvalue problems.
-
-The user-provided `linear_solver` must solve `(Ze * B - A) * Y = X` for the
-current contour point `Ze`. The RCI kernel decides which operation is needed;
-this wrapper only supplies matrix-vector products and shifted solves through
-the matrix-free operators.
-"""
-function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
-                            B_op::MatrixFreeOperator{Complex{T}},
-                            center::Complex{T}, radius::T, M0::Int;
-                            fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
-                            linear_solver::Union{Function, Nothing} = nothing,
-                            workspace::Union{NamedTuple, Nothing} = nothing,
-                            maxiter::Int = 20,
-                            tol::T = T(1e-12)) where T<:Real
-    
-    N = size(A_op, 1)
-    
-    # Validate operators
-    if size(A_op) != size(B_op) || size(A_op, 1) != size(A_op, 2)
-        throw(DimensionMismatch("A_op and B_op must be square and same size"))
-    end
-    
-    # Initialize Feast parameters
-    if fpm === nothing
-        fpm = zeros(Int, 64)
-        feastinit!(fpm)
-        fpm[3] = round(Int, -log10(tol))
-        fpm[4] = maxiter
-    end
-
-    # Same up-front validation as the Hermitian matrix-free entry point.
-    fpm_vec = fpm isa FeastParameters ? fpm.fpm : fpm
-    check_feast_grci_input(N, M0, center, radius, fpm_vec)
-    
-    # Allocate workspace if not provided
-    if workspace === nothing
-        workspace = allocate_matfree_workspace(Complex{T}, N, M0)
-    end
-    
-    work = workspace.work
-    workc = workspace.workc
-    # `workc` is both the input RHS and output solution for solve requests.
-    # Keep a separate RHS buffer so callbacks can overwrite `workc` safely.
-    rhs = hasproperty(workspace, :rhs) ? workspace.rhs : similar(workc)
-    zAq = workspace.zAq
-    zSq = workspace.zSq
-    lambda = workspace.lambda
-    q = workspace.q
-    res = workspace.res
-    
-    # Initialize RCI variables
-    ijob = Ref(-1)
-    Ze = Ref(zero(Complex{T}))
-    epsout = Ref(zero(T))
-    loop = Ref(0)
-    mode = Ref(0)
-    info = Ref(0)
-    
-    # Persistent RCI state (must be reused across calls in the loop)
-    grci_state = FeastGRCIState{T}()
-
-    # Matrix-free RCI loop for general problems. `ijob` tells us which user
-    # operation the core FEAST state machine needs next.
-    while true
-        feast_grci!(ijob, N, Ze, work, workc, zAq, zSq, fpm_vec,
-                   epsout, loop, center, radius, M0, lambda, q, mode, res, info; state=grci_state)
-        
-        if ijob[] == Int(Feast_RCI_DONE)
-            break
-        elseif ijob[] == Int(Feast_RCI_FACTORIZE)
-            if linear_solver === nothing
-                throw(ArgumentError("Linear solver callback required"))
-            end
-            continue
-            
-        elseif ijob[] == Int(Feast_RCI_SOLVE)
-            # workc contains Q0. Form B*Q0 in separate scratch before the
-            # callback overwrites workc with the shifted solution.
-            try
-                for j in axes(workc, 2)
-                    mul!(view(rhs,:,j), B_op, view(workc,:,j))
-                end
-                linear_solver(workc, Ze[], rhs)
-            catch e
-                @debug "Matrix-free linear solver callback failed" exception=e
-                info[] = Int(Feast_ERROR_LAPACK)
-                break
-            end
-            
-        elseif ijob[] == Int(Feast_RCI_MULT_A)
-            # Compute A * q, store result in workc (complex for general problems)
-            M = mode[]
-            for j in 1:M
-                mul!(view(workc, :, j), A_op, view(q, :, j))
-            end
-
-        elseif ijob[] == Int(Feast_RCI_MULT_B)
-            # Compute B * q, store result in workc (complex for general problems)
-            M = mode[]
-            for j in 1:M
-                mul!(view(workc, :, j), B_op, view(q, :, j))
-            end
-            
-        else
-            throw(ArgumentError("Unknown Feast RCI code: $(ijob[])"))
-        end
-    end
-    
-    M_found = mode[]
-    return FeastGeneralResult{T}(
-        lambda[1:M_found],
-        q[:, 1:M_found],
-        M_found,
-        res[1:M_found],
-        info[],
-        epsout[],
-        loop[]
-    )
-end
-
-"""
-    allocate_matfree_workspace(T, N, M0)
-
-Allocate workspace arrays for matrix-free Feast operations.
-
-Real problems use real search vectors plus complex shifted-solve buffers.
-General complex problems use real FEAST bookkeeping with complex RHS/solution
-buffers. The `rhs` field is explicit scratch for callbacks that write into
-`workc`.
-"""
-function allocate_matfree_workspace(::Type{T}, N::Int, M0::Int) where T
-    if T <: Real
-        return (
-            work = zeros(T, N, M0),
-            workc = zeros(Complex{T}, N, M0), 
-            rhs = zeros(Complex{T}, N, M0),
-            Aq = zeros(T, M0, M0),
-            Sq = zeros(T, M0, M0),
-            lambda = zeros(T, M0),
-            q = zeros(T, N, M0),
-            res = zeros(T, M0)
-        )
-    else # Complex
-        RT = real(T)
-        return (
-            work = zeros(RT, N, M0),
-            workc = zeros(T, N, M0),
-            rhs = zeros(T, N, M0),
-            zAq = zeros(T, M0, M0),
-            zSq = zeros(T, M0, M0), 
-            lambda = zeros(T, M0),
-            q = zeros(T, N, M0),
-            res = zeros(RT, M0)
-        )
-    end
-end
-
 # High-level matrix-free Feast interfaces
 
 """
@@ -449,40 +12,59 @@ High-level matrix-free Feast interface for symmetric/Hermitian problems.
 
 # Keyword Arguments
 - `M0`: Maximum number of eigenvalues (default: 10)
+- `subspace_size`: Alias for `M0`
 - `solver`: Linear solver (:gmres, :bicgstab, or custom function)
 - `solver_opts`: Options for iterative solver
 - `fpm`: Feast parameters
 - `tol`: Convergence tolerance
 - `maxiter`: Maximum refinement iterations
+- `quadrature_points`: Half-contour node count (default: 8)
+
+Named controls and explicit `fpm` entries must agree. A custom solver callback
+must be configured directly; `solver_opts` is only for built-in iterative solvers.
 
 # Returns
 - `FeastResult` with eigenvalues and eigenvectors
 """
 function feast(A_op::MatrixFreeOperator{T}, B_op::MatrixFreeOperator{T},
                interval::Tuple{T,T};
-               M0::Int = 10,
+               M0::Union{Int,Nothing} = nothing,
                solver::Union{Symbol, Function} = :gmres,
                solver_opts::NamedTuple = NamedTuple(),
                fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
-               tol::T = T(1e-12),
-               maxiter::Int = 20) where T<:Real
-    
+               tol=nothing, maxiter=nothing,
+               subspace_size=nothing, quadrature_points=nothing,
+               initial_subspace=nothing, max_subspace_size=nothing) where T<:Real
+    if subspace_size === :auto
+        return _feast_auto_solve(A_op, B_op, interval, (; fpm, tol, maxiter, quadrature_points, solver, solver_opts, initial_subspace);
+                                 M0=M0, max_subspace_size=max_subspace_size, general=false)
+    end
+    max_subspace_size === nothing || throw(ArgumentError("max_subspace_size requires subspace_size=:auto"))
+
     # Validate operators are compatible
     if !issymmetric(A_op) && !ishermitian(A_op)
         throw(ArgumentError("A_op must be symmetric or Hermitian for this interface"))
     end
-    
+
+    (; params, solver_options, M0) =
+        _feast_prepare_options(size(A_op, 1); M0=M0, subspace_size=subspace_size, fpm=fpm,
+                               tol=tol, maxiter=maxiter, quadrature_points=quadrature_points,
+                               solver=solver, solver_opts=solver_opts, initial_subspace=initial_subspace, matrix_free=true)
+
+    # Only built-in solvers with an implicit tolerance follow outer accuracy.
+    inner_tolerance = !(solver isa Function) && !haskey(solver_opts, :rtol) ? Ref(1e-3) : nothing
+
     # Create linear solver if needed
     linear_solver = if isa(solver, Function)
         solver
     else
-        create_iterative_solver(A_op, B_op, solver; solver_opts...)
+        create_iterative_solver(A_op, B_op, solver; solver_options..., tolerance_ref=inner_tolerance)
     end
-    
+
     # Call matrix-free RCI
     return feast_matfree_srci!(A_op, B_op, interval, M0;
                               linear_solver=linear_solver,
-                              fpm=fpm, tol=tol, maxiter=maxiter)
+                              fpm=params, inner_tolerance=inner_tolerance, initial_subspace=initial_subspace)
 end
 
 """
@@ -493,9 +75,9 @@ Matrix-free Feast for standard eigenvalue problems (B = I).
 function feast(A_op::MatrixFreeOperator{T}, interval::Tuple{T,T}; kwargs...) where T<:Real
     # Create identity operator
     N = size(A_op, 1)
-    B_op = LinearOperator{T}((y, x) -> copy!(y, x), (N, N), 
+    B_op = LinearOperator{T}((y, x) -> copy!(y, x), (N, N),
                            issymmetric=true, ishermitian=true, isposdef=true)
-    
+
     return feast(A_op, B_op, interval; kwargs...)
 end
 
@@ -504,371 +86,72 @@ end
 
 Matrix-free Feast for general (non-Hermitian) eigenvalue problems.
 """
-function feast_general(A_op::MatrixFreeOperator{Complex{T}}, 
+function feast_general(A_op::MatrixFreeOperator{Complex{T}},
                       B_op::MatrixFreeOperator{Complex{T}},
-                      center::Complex{T}, radius::T; 
-                      M0::Int = 10,
+                      center::Complex{T}, radius::T;
+                      M0::Union{Int,Nothing} = nothing,
                       solver::Union{Symbol, Function} = :gmres,
                       solver_opts::NamedTuple = NamedTuple(),
                       fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
-                      tol::T = T(1e-12),
-                      maxiter::Int = 20) where T<:Real
-    
+                      tol=nothing, maxiter=nothing,
+                      subspace_size=nothing, quadrature_points=nothing,
+                      initial_subspace=nothing, max_subspace_size=nothing) where T<:Real
+    if subspace_size === :auto
+        return _feast_auto_solve(A_op, B_op, (center, radius), (; fpm, tol, maxiter, quadrature_points, solver, solver_opts, initial_subspace);
+                                 M0=M0, max_subspace_size=max_subspace_size, general=true)
+    end
+    max_subspace_size === nothing || throw(ArgumentError("max_subspace_size requires subspace_size=:auto"))
+
+    (; params, solver_options, M0) =
+        _feast_prepare_options(size(A_op, 1); M0=M0, subspace_size=subspace_size, fpm=fpm,
+                               tol=tol, maxiter=maxiter, quadrature_points=quadrature_points,
+                               solver=solver, solver_opts=solver_opts, initial_subspace=initial_subspace, matrix_free=true, general=true)
+
+    # Only built-in solvers with an implicit tolerance follow outer accuracy.
+    inner_tolerance = !(solver isa Function) && !haskey(solver_opts, :rtol) ? Ref(1e-3) : nothing
+
     # Create linear solver
     linear_solver = if isa(solver, Function)
         solver
     else
-        create_iterative_solver(A_op, B_op, solver; solver_opts...)
+        create_iterative_solver(A_op, B_op, solver; solver_options..., tolerance_ref=inner_tolerance)
     end
-    
+
     # Call matrix-free RCI for general problems
     return feast_matfree_grci!(A_op, B_op, center, radius, M0;
                               linear_solver=linear_solver,
-                              fpm=fpm, tol=tol, maxiter=maxiter)
+                              fpm=params, inner_tolerance=inner_tolerance, initial_subspace=initial_subspace)
 end
 
-function _matrix_free_polynomial_companion_operators(
-        coeffs_ops::AbstractVector{<:MatrixFreeOperator{Complex{T}}}) where T<:Real
-
-    d = length(coeffs_ops) - 1
-    if d < 1
-        throw(ArgumentError("Need at least 2 coefficient operators (degree ≥ 1)"))
-    end
-
-    N = size(coeffs_ops[1], 1)
-    for op in coeffs_ops
-        if size(op) != (N, N)
-            throw(DimensionMismatch("All coefficient operators must have size ($N, $N)"))
-        end
-    end
-
-    companion_tmp = Vector{Complex{T}}(undef, N)
-    companion_x = Vector{Complex{T}}(undef, N)
-
-    function A_companion_mul!(y::AbstractVector{Complex{T}}, x::AbstractVector{Complex{T}})
-        fill!(y, zero(Complex{T}))
-
-        for block in 1:d-1
-            y_offset = (block - 1) * N
-            x_offset = block * N
-            @inbounds for i in 1:N
-                y[y_offset+i] = x[x_offset+i]
-            end
-        end
-
-        last_offset = (d - 1) * N
-        for block in 0:d-1
-            x_offset = block * N
-            @inbounds for i in 1:N
-                companion_x[i] = x[x_offset+i]
-            end
-
-            mul!(companion_tmp, coeffs_ops[block+1], companion_x)
-
-            @inbounds for i in 1:N
-                y[last_offset+i] -= companion_tmp[i]
-            end
-        end
-
-        return y
-    end
-
-    function B_companion_mul!(y::AbstractVector{Complex{T}}, x::AbstractVector{Complex{T}})
-        fill!(y, zero(Complex{T}))
-
-        for block in 0:d-2
-            offset = block * N
-            @inbounds for i in 1:N
-                y[offset+i] = x[offset+i]
-            end
-        end
-
-        last_offset = (d - 1) * N
-        @inbounds for i in 1:N
-            companion_x[i] = x[last_offset+i]
-        end
-        mul!(companion_tmp, coeffs_ops[end], companion_x)
-        @inbounds for i in 1:N
-            y[last_offset+i] = companion_tmp[i]
-        end
-
-        return y
-    end
-
-    companion_size = (d * N, d * N)
-    A_comp = LinearOperator{Complex{T}}(A_companion_mul!, companion_size)
-    B_comp = LinearOperator{Complex{T}}(B_companion_mul!, companion_size)
-    return A_comp, B_comp
-end
-
-"""
-    feast_polynomial(coeffs_ops, center, radius; kwargs...)
-
-Matrix-free Feast for polynomial eigenvalue problems.
-
-Solves the polynomial eigenvalue problem P(λ)x = 0 where:
-P(λ) = coeffs_ops[1] + λ*coeffs_ops[2] + λ²*coeffs_ops[3] + ... + λᵈ*coeffs_ops[d+1]
-
-The polynomial is linearized using companion matrices to form a generalized 
-eigenvalue problem (A - λB)y = 0 of size (d*N × d*N), where y = [x; λx; λ²x; ...; λᵈ⁻¹x].
-
-# Arguments
-- `coeffs_ops`: Vector of matrix operators [C₀, C₁, C₂, ..., Cᵈ] where P(λ) = Σᵢ λⁱCᵢ
-- `center`: Center of circular search region in complex plane
-- `radius`: Radius of circular search region
-- `M0`: Maximum number of eigenvalues to find
-- `solver`: Linear solver type or custom function
-- `kwargs`: Additional options passed to feast_general
-
-# Returns
-- `FeastGeneralResult` with eigenvalues λ and corresponding eigenvectors x (first N components of full eigenvector)
-"""
-function feast_polynomial(coeffs_ops::Vector{<:MatrixFreeOperator{Complex{T}}},
-                         center::Complex{T}, radius::T;
-                         M0::Int = 10,
-                         solver::Union{Symbol, Function} = :gmres,
-                         kwargs...) where T<:Real
-    
-    d = length(coeffs_ops) - 1  # Polynomial degree
-    N = size(coeffs_ops[1], 1)
-    
-    # Validate input
-    if d < 1
-        throw(ArgumentError("Need at least 2 coefficient operators (degree ≥ 1)"))
-    end
-    
-    for i in 1:length(coeffs_ops)
-        if size(coeffs_ops[i]) != (N, N)
-            throw(DimensionMismatch("All coefficient operators must have size ($N, $N)"))
-        end
-    end
-    
-    A_comp, B_comp = _matrix_free_polynomial_companion_operators(coeffs_ops)
-    
-    # Solve linearized problem
-    result = feast_general(A_comp, B_comp, center, radius; M0=M0, solver=solver, kwargs...)
-    
-    # Extract original eigenvectors (first N components)
-    if result.M > 0
-        q_original = result.q[1:N, :]
-        return FeastGeneralResult{T}(
-            result.lambda,
-            q_original,
-            result.M,
-            result.res,
-            result.info,
-            result.epsout,
-            result.loop
-        )
-    else
-        return result
-    end
-end
-
-# Convenience functions for common linear solvers
-"""
-    create_iterative_solver(A_op, B_op, solver_type=:gmres; kwargs...)
-
-Create iterative linear solver for matrix-free Feast using Krylov.jl.
-
-Note: The shifted system `(z*B - A)` has complex `z` (contour integration points),
-so the linear solver must handle complex arithmetic.
-
-# Arguments
-- `A_op`, `B_op`: Matrix-free operators
-- `solver_type`: `:gmres` (default, recommended) or `:bicgstab`
-- `rtol`: Relative tolerance for convergence (default: 1e-6)
-- `maxiter`: Maximum iterations (default: 1000)
-- `restart`: GMRES restart parameter (default: 30)
-- `preconditioner`: Optional left inverse-action operator, applied with
-  `mul!(y, preconditioner, x)` on complex vectors (default: no preconditioning).
-
-The inner stopping criterion is relative to the initial residual (`atol=0`),
-so rescaling both matrices does not turn small nonzero right-hand sides into
-accepted zero solutions.
-
-# Returns
-- Function `(Y, z, X) -> solve (z*B - A) * Y = X`
-"""
-function create_iterative_solver(A_op::MatrixFreeOperator{T},
-                                B_op::MatrixFreeOperator{T},
-                                solver_type::Symbol = :gmres;
-                                rtol::Float64 = 1e-6,
-                                maxiter::Int = 1000,
-                                restart::Int = 30,
-                                preconditioner = nothing) where T
-
-    FEAST_KRYLOV_AVAILABLE[] ||
-        throw(ArgumentError("create_iterative_solver needs Krylov.jl. Run `using Krylov` to load the FeastKitKrylovExt extension."))
-
-    # Validate before any zero-RHS shortcut; unsupported solvers must never
-    # appear to work just because a particular trial column is zero.
-    if solver_type == :cg
-        throw(ArgumentError("CG solver cannot be used with FEAST: " *
-                            "the shifted system (z*B - A) is not SPD for complex z. " *
-                            "Use :gmres or :bicgstab instead."))
-    elseif solver_type ∉ (:gmres, :bicgstab)
-        throw(ArgumentError("Unsupported solver type: $solver_type. " *
-                            "Use :gmres or :bicgstab"))
-    end
-
+function feast_general(A_op::MatrixFreeOperator{Complex{T}}, center::Complex, radius::Real;
+                       kwargs...) where T<:Real
     N = size(A_op, 1)
-    CT = T <: Real ? Complex{T} : T
-    RT = typeof(real(zero(CT)))
-    rtol_value = RT(rtol)
-    rhs_scale = Ref(one(RT))
-    current_shift = Ref(zero(CT))
-    temp = Vector{CT}(undef, N)
-    temp_A = Vector{CT}(undef, N)
-    xj = Vector{CT}(undef, N)
-    gmres_workspace = _feast_gmres_workspace(N, CT; memory=max(restart, 2))
-
-    function shifted_mul!(y, x)
-        # y = (z*B - A) * x
-        z = current_shift[]
-        mul!(temp, B_op, x)
-        @. temp = z * temp
-        mul!(temp_A, A_op, x)
-        @. y = (temp - temp_A) / rhs_scale[]
-        return y
-    end
-
-    shifted_op = LinearOperator{CT}(shifted_mul!, (N, N))
-    # Scaling K and b by 1/s leaves K*y=b unchanged. The inverse action
-    # for K/s is s*P, keeping preconditioned systems on the same scale too.
-    scaled_preconditioner = if preconditioner === nothing
-        nothing
-    else
-        LinearOperator{CT}((y,x) -> begin
-            mul!(y, preconditioner, x)
-            y .*= rhs_scale[]
-            y
-        end, (N,N))
-    end
-
-    function linear_solver(Y::AbstractMatrix, z::Number, X::AbstractMatrix)
-        # FEAST contour shifts are complex; keep the Krylov operator and
-        # conversion scratch alive across contour points.
-        current_shift[] = CT(z)
-        M0 = size(X, 2)
-        for j in 1:M0
-            # Convert RHS to complex since z is complex (Krylov needs matching types)
-            @inbounds for i in 1:N
-                xj[i] = CT(X[i, j])
-            end
-            # Besides relative stopping, Krylov has absolute breakdown tests.
-            # Normalize both sides to avoid accepting/discarding tiny RHSs
-            # solely because the entire pencil was rescaled.
-            rhs_scale[] = norm(xj)
-            if iszero(rhs_scale[])
-                fill!(view(Y, :, j), zero(CT))
-                continue
-            end
-            xj ./= rhs_scale[]
-            if solver_type == :gmres
-                converged = _feast_gmres!(gmres_workspace, shifted_op, xj;
-                                          restart=true,
-                                          rtol=rtol_value,
-                                          atol=zero(RT),
-                                          preconditioner=scaled_preconditioner,
-                                          itmax=maxiter)
-                copyto!(view(Y, :, j), _feast_gmres_solution(gmres_workspace))
-            elseif solver_type == :bicgstab
-                result, converged = _feast_bicgstab(shifted_op, xj;
-                                                    rtol=rtol_value, atol=zero(RT),
-                                                    preconditioner=scaled_preconditioner,
-                                                    itmax=maxiter)
-                if all(isfinite, result)
-                    copyto!(view(Y, :, j), result)
-                else
-                    # BiCGSTAB can break down after an exact first step
-                    # (including with an exact inverse preconditioner),
-                    # forming 0/0 in its stabilization step. Retry that RHS
-                    # with GMRES rather than feeding NaNs to the projector.
-                    converged = _feast_gmres!(gmres_workspace, shifted_op, xj;
-                                              restart=true, rtol=rtol_value, atol=zero(RT),
-                                              preconditioner=scaled_preconditioner,
-                                              itmax=maxiter)
-                    copyto!(view(Y, :, j), _feast_gmres_solution(gmres_workspace))
-                end
-            end
-
-            if !converged
-                @warn "Linear solver did not converge for column $j"
-            end
-        end
-    end
-
-    return linear_solver
+    B_op = LinearOperator{Complex{T}}((y, x) -> copy!(y, x), (N, N),
+                                     ishermitian=true, isposdef=true)
+    return feast_general(A_op, B_op, Complex{T}(center), T(radius); kwargs...)
 end
 
-"""
-    validate_companion_matrices(A_companion_mul!, B_companion_mul!, coeffs_ops, test_lambda, test_x)
-
-Validate that the companion matrices correctly linearize the polynomial eigenvalue problem.
-
-Tests that if P(λ)x = 0, then (A - λB)y = 0 where y = [x; λx; λ²x; ...; λᵈ⁻¹x].
-"""
-function validate_companion_matrices(A_companion_mul!::Function, 
-                                   B_companion_mul!::Function,
-                                   coeffs_ops::Vector{<:MatrixFreeOperator{Complex{T}}},
-                                   test_lambda::Complex{T}, 
-                                   test_x::AbstractVector{Complex{T}}) where T<:Real
-    
-    d = length(coeffs_ops) - 1
-    N = length(test_x)
-    
-    # Construct companion eigenvector: y = [x; λx; λ²x; ...; λᵈ⁻¹x]
-    y = zeros(Complex{T}, d * N)
-    lambda_power = one(Complex{T})
-    for i in 0:d-1
-        y[i*N+1:(i+1)*N] .= lambda_power .* test_x
-        lambda_power *= test_lambda
-    end
-    
-    # Test (A - λB)y = 0
-    Ay = similar(y)
-    By = similar(y)
-    
-    A_companion_mul!(Ay, y)
-    B_companion_mul!(By, y)
-    
-    residual = Ay - test_lambda * By
-    residual_norm = norm(residual)
-    
-    # Also verify that P(λ)x = 0
-    Px = zeros(Complex{T}, N)
-    temp = similar(test_x)
-    lambda_power = one(Complex{T})
-    
-    for i in 0:d
-        mul!(temp, coeffs_ops[i+1], test_x)
-        Px .+= lambda_power .* temp
-        lambda_power *= test_lambda
-    end
-    
-    polynomial_residual = norm(Px)
-    
-    return (
-        companion_residual = residual_norm,
-        polynomial_residual = polynomial_residual,
-        companion_valid = residual_norm < 1e-12,
-        polynomial_valid = polynomial_residual < 1e-12
-    )
+function feast_general(A_op::MatrixFreeOperator{Complex{T}}, B_op::MatrixFreeOperator{Complex{T}},
+                       center::Complex, radius::Real; kwargs...) where T<:Real
+    return feast_general(A_op, B_op, Complex{T}(center), T(radius); kwargs...)
 end
 
-"""
-    create_direct_solver(A_op, B_op; factorization=:lu)
 
-Create direct linear solver using sparse factorization.
-Only works if operators can be converted to sparse matrices.
-"""
-function create_direct_solver(A_op::MatrixFreeOperator{T}, 
-                             B_op::MatrixFreeOperator{T};
-                             factorization::Symbol = :lu) where T
-    
-    # This requires the operators to support conversion to sparse matrices
-    # Implementation would depend on specific operator types
-    throw(ArgumentError("Direct solver for general matrix-free operators not implemented. " *
-                       "Use create_iterative_solver instead."))
+# Matrix-free interfaces
+function feast_matvec(A_mul!::Function, B_mul!::Function, N::Int,
+                     interval::Tuple{T,T}; M0::Int = 10,
+                     fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing) where T<:Real
+    # Feast with matrix-free operations
+    # A_mul!(y, x) computes y = A*x
+    # B_mul!(y, x) computes y = B*x
+
+    Emin, Emax = interval
+
+    # Initialize Feast parameters if not provided
+    if fpm === nothing
+        fpm = zeros(Int, 64)
+        feastinit!(fpm)
+    end
+
+    return feast_sparse_matvec!(A_mul!, B_mul!, N, Emin, Emax, M0, _ensure_feast_parameters(fpm))
 end

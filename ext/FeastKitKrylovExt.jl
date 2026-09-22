@@ -13,7 +13,8 @@ using Krylov
 using LinearAlgebra: I
 
 import FeastKit: _feast_gmres, _feast_gmres_workspace, _feast_gmres!,
-                 _feast_gmres_solution, _feast_bicgstab, FEAST_KRYLOV_AVAILABLE
+                 _feast_gmres_solution, _feast_bicgstab, _feast_bicgstab_workspace,
+                 _feast_bicgstab!, _feast_bicgstab_solution, FEAST_KRYLOV_AVAILABLE
 
 function __init__()
     FEAST_KRYLOV_AVAILABLE[] = true
@@ -63,5 +64,16 @@ function _feast_bicgstab(op, b; rtol = 1e-8, atol = 1e-8, itmax::Int = 200,
                               M = preconditioner === nothing ? I : preconditioner)
     return x, stats.solved
 end
+
+_feast_bicgstab_workspace(N::Int, ::Type{CT}) where CT =
+    Krylov.BicgstabWorkspace(N, N, Vector{CT})
+
+function _feast_bicgstab!(workspace, op, b; rtol=1e-8, atol=1e-8, itmax::Int=200,
+                          preconditioner=nothing)
+    Krylov.bicgstab!(workspace, op, b; rtol=rtol, atol=atol, itmax=itmax,
+                    M=preconditioner === nothing ? I : preconditioner)
+    return workspace.stats.solved
+end
+_feast_bicgstab_solution(workspace) = workspace.x
 
 end # module

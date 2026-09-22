@@ -318,7 +318,9 @@ function feastdefault!(fpm::Vector{Int})
 
     # fpm[42]: Mixed precision (0=double, 1=single solver)
     if fpm[42] == FEAST_UNINITIALIZED
-        fpm[42] = 1  # Default: mixed precision
+        fpm[42] = 0  # Opt-in: dense residual inverse iteration with Float32 LU
+    elseif fpm[42] != 0 && fpm[42] != 1
+        throw(ArgumentError("Invalid fpm[42]=$(fpm[42]): must be 0 or 1"))
     end
 
     # fpm[43]: Switch FEAST to IFEAST interfaces (0=FEAST, 1=IFEAST)

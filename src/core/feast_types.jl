@@ -81,6 +81,9 @@ end
 
 Result container for Hermitian or symmetric FEAST solves, where eigenvalues are
 real and eigenvectors may be real or complex depending on the input storage.
+Linear eigenproblem residuals are `norm(A*q - λ*B*q) / norm(B*q) / max(abs(λ), 1)`.
+`values` and `vectors` alias `lambda` and `q`. `converged` is true for `info == 0`;
+`message` describes the status and suggests a remedy on failure.
 """
 struct FeastResult{T<:Real, VT}
     lambda::Vector{T}
@@ -96,6 +99,7 @@ end
     FeastGeneralResult
 
 Result container for non-Hermitian FEAST solves over a complex search contour.
+Also exposes `values`, `vectors`, `converged`, and `message`, as in `FeastResult`.
 """
 struct FeastGeneralResult{T<:Real}
     lambda::Vector{Complex{T}}
@@ -252,14 +256,19 @@ end
 
 Integration contour data passed to custom-contour variants. Nodes and weights
 must have matching lengths and are copied into RCI state before iteration.
+Shape constructors may retain boundary vertices separately from quadrature
+nodes, so membership tests use the intended geometry.
 """
 struct FeastContour{T<:Real}
     Zne::Vector{Complex{T}}
     Wne::Vector{Complex{T}}
+    # Optional boundary vertices, distinct from quadrature nodes on the edges.
+    vertices::Union{Nothing,Vector{Complex{T}}}
     
-    function FeastContour{T}(nodes::Vector{Complex{T}}, weights::Vector{Complex{T}}) where T<:Real
+    function FeastContour{T}(nodes::Vector{Complex{T}}, weights::Vector{Complex{T}},
+                             vertices::Union{Nothing,Vector{Complex{T}}}=nothing) where T<:Real
         length(nodes) == length(weights) || error("Number of nodes and weights must match")
-        new(nodes, weights)
+        new(nodes, weights, vertices)
     end
 end
 

@@ -18,7 +18,7 @@
 
 ## Validation
 
-Use Julia 1.11.1 from the installed Juliaup version directory. Focused serial command: `julia --project=. -e 'push!(LOAD_PATH,abspath("docs")); using Krylov; include("test/test_hermitian_review.jl")'`. Full suite: enable `FEAST_RUN_LONG_TESTS`, `FEAST_RUN_PARALLEL_TESTS`, and `FEASTKIT_TEST_PARALLEL`, with two Julia threads, then run `Pkg.test()`. MPI tests live in `test/test_mpi_review.jl`, called by `test/test_parallel_backends.jl` under two ranks with Krylov and MPI loaded.
+Use Julia 1.11.1 from the installed Juliaup version directory. Focused serial command: `julia --project=. -e 'push!(LOAD_PATH,abspath("docs")); using Krylov; include("test/numerics/hermitian.jl")'`. Full suite: enable `FEAST_RUN_LONG_TESTS`, `FEAST_RUN_PARALLEL_TESTS`, and `FEASTKIT_TEST_PARALLEL`, with two Julia threads, then run `Pkg.test()`. MPI tests live in `test/backends/mpi_api.jl`, called by `test/backends/execution.jl` under two ranks with Krylov and MPI loaded.
 
 The Hermitian regression must fail before the change and converge with a partial subspace afterward. Check counts, eigenvalues, unit vector norms, independently recomputed generalized residuals, both factor-cache settings, and registered half contours. Keep repository changes local; this request does not require publishing or committing.
 

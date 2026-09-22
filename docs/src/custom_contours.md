@@ -1,14 +1,78 @@
 # Custom Contour Integration
 
-Advanced guide to customizing FeastKit's contour integration for optimal performance and accuracy.
+Define a circle, ellipse, or rectangle around the eigenvalues you want, then
+pass that contour to `feast`. Start with the complete examples below; custom
+weights, half-contours, and integration theory follow later in this guide.
 
-## Table of Contents
+```@contents
+Pages = ["custom_contours.md"]
+Depth = 2
+```
 
-1. [Contour Integration Theory](#contour-integration-theory)
-2. [Built-in Integration Methods](#built-in-integration-methods)  
-3. [Custom Contour Design](#custom-contour-design)
-4. [Advanced Applications](#advanced-applications)
-5. [Troubleshooting Contour Issues](#troubleshooting-contour-issues)
+---
+
+## Built-in Circle, Ellipse, and Box
+
+Use these exported constructors; they generate the nodes and normalized
+weights for you. A rectangle is also called a box in this guide.
+
+| Shape | Geometry arguments | Resolution |
+|:--|:--|:--|
+| `feast_circle(center, radius)` | Center `x + y*im`; positive radius | `n=64` total nodes by default |
+| `feast_ellipse(center, a, b)` | Positive **semiaxes**: horizontal `a`, vertical `b` before rotation | `n=64` total nodes by default |
+| `feast_rectangle(xmin, xmax, ymin, ymax)` | Real-axis bounds first, then imaginary-axis bounds | `points_per_edge=32` by default: **128 total nodes** |
+
+For example, `center=2+3im` places a circle or ellipse at real coordinate 2 and
+imaginary coordinate 3. A rectangle with arguments `(1, 3, 2, 4)` spans real
+coordinates 1 to 3 and imaginary coordinates 2 to 4. Ellipse `rotation` is
+counterclockwise in **radians**; `rotation=π/6` means 30 degrees. Geometry must
+be finite, rectangle bounds must increase, and `n` must be at least 3.
+
+This complete example defines all three shapes and solves the same problem
+with each. Copy the constructor and solve line for the shape you need:
+
+```@example standard_shapes
+using FeastKit, LinearAlgebra
+
+A = Matrix(Diagonal(ComplexF64[-0.3+0.2im, 0.4-0.1im, 2.5]))
+
+circle = feast_circle(0, 1; n=64)
+ellipse = feast_ellipse(0, 2, 1; n=64, rotation=π/6)
+rectangle = feast_rectangle(-1, 1, -1, 1; points_per_edge=32)
+
+circle_result = feast(A, circle; subspace_size=3)
+ellipse_result = feast(A, ellipse; subspace_size=3)
+rectangle_result = feast(A, rectangle; subspace_size=3)
+
+results = (circle_result, ellipse_result, rectangle_result)
+for result in results
+    @assert result.converged && result.M == 2
+    @assert sort(result.values; by=real) ≈ [-0.3+0.2im, 0.4-0.1im]
+end
+[result.values for result in results]
+```
+
+The contour controls integration and eigenvalue selection: `2.5` is excluded
+here. Registration and cleanup are automatic, including after an exception.
+For a generalized problem, use `feast(A, B, contour; ...)`.
+All three constructors produce full closed contours. These overloads use the
+general eigensolver and return complex eigenvalues in `FeastGeneralResult`,
+including when `A` is real. Access eigenvalues through `result.values` and
+eigenvectors through `result.vectors`.
+See [Matrix types: detected or declared?](@ref matrix-properties) for how
+real, complex, symmetric, and nonsymmetric inputs select solver paths.
+
+Use `subspace_size` larger than the expected enclosed count, or equal to the
+matrix dimension for a small full-space example like this one. The node count
+controls contour integration accuracy; it is separate from `subspace_size`.
+Keep eigenvalues away from contour boundaries and increase the node count when
+needed, especially for boxes. Set the count in the contour constructor;
+`quadrature_points`, if also supplied, must match the contour's node count.
+
+For a real symmetric or complex Hermitian problem on a real interval, the
+simpler call is `feast(A, (Emin, Emax))`; it creates its contour internally.
+The [half-contour workflow](#Advanced-Half-Contours-for-Interval-Solves) is for
+customizing that interval solve.
 
 ---
 
@@ -26,11 +90,11 @@ Where Γ is a contour enclosing the eigenvalues of interest.
 
 FeastKit computes moments of the spectral projector:
 
-$$\mathbf{S}_k = \frac{1}{2\pi i} \oint_\Gamma z^k (z\mathbf{B} - \mathbf{A})^{-1} \mathbf{Q} dz$$
+$$\mathbf{S}_k = \frac{1}{2\pi i} \oint_\Gamma z^k (z\mathbf{B} - \mathbf{A})^{-1} \mathbf{B}\mathbf{Q} dz$$
 
 The numerical integration becomes:
 
-$$\mathbf{S}_k \approx \sum_{e=1}^{n_e} w_e z_e^k (z_e\mathbf{B} - \mathbf{A})^{-1} \mathbf{Q}$$
+$$\mathbf{S}_k \approx \sum_{e=1}^{n_e} w_e z_e^k (z_e\mathbf{B} - \mathbf{A})^{-1} \mathbf{B}\mathbf{Q}$$
 
 !!! note "Key Insight"
     The quality of eigenvalue extraction depends critically on:
@@ -46,7 +110,8 @@ $$\mathbf{S}_k \approx \sum_{e=1}^{n_e} w_e z_e^k (z_e\mathbf{B} - \mathbf{A})^{
 
 **Best for**: High accuracy with minimal points, smooth integrands
 
-```julia
+```@example quadrature_gauss
+using FeastKit
 using FeastKit
 
 # High-accuracy Gauss-Legendre with 16 points
@@ -55,11 +120,12 @@ contour = feast_contour_expert(-1.0, 1.0, 16, 0, 100)
 println("Gauss-Legendre contour:")
 println("Nodes: ", contour.Zne[1:5])  # Show first 5 nodes
 println("Weights: ", contour.Wne[1:5]) # Show first 5 weights
+@assert all(isfinite, contour.Zne) && all(isfinite, contour.Wne)
 ```
 
 **Advantages**:
-- Highest accuracy per integration point
-- Optimal for smooth problems
+- Useful for smooth contour integrands
+- Accuracy depends on the integrand and node count
 - Well-established theory
 
 **Disadvantages**:  
@@ -70,13 +136,15 @@ println("Weights: ", contour.Wne[1:5]) # Show first 5 weights
 
 **Best for**: Robust integration, debugging, educational purposes
 
-```julia
+```@example quadrature_trapezoid
+using FeastKit
 # Trapezoidal rule with 12 points
 contour = feast_contour_expert(-2.0, 2.0, 12, 1, 100)
 
 # Visualize uniform node distribution
 θ = [angle(z) for z in contour.Zne]
 println("Angles: ", sort(θ))  # Should be uniformly spaced
+@assert all(isfinite, contour.Zne) && all(isfinite, contour.Wne)
 ```
 
 **Advantages**:
@@ -85,26 +153,27 @@ println("Angles: ", sort(θ))  # Should be uniformly spaced
 - Good for debugging
 
 **Disadvantages**:
-- Lower accuracy per point
-- Requires more points for precision
+- Accuracy depends on contour shape and distance to the spectrum
+- Near-boundary eigenvalues may need more points
 
 ### Zolotarev Integration
 
-**Best for**: Elliptical domains, clustered eigenvalues
+**Use for**: Symmetric interval filtering; compare against Gauss or trapezoidal integration for your problem
 
-```julia  
-# Zolotarev integration (optimal for ellipses)
+```@example quadrature_zolotarev
+using FeastKit
+# Zolotarev integration for a symmetric interval
 contour = feast_contour_expert(0.0, 4.0, 12, 2, 100)
 
 println("Zolotarev contour characteristics:")
-println("Optimized for elliptical regions")
-println("Excellent for clustered eigenvalues")
+println("Nodes: ", length(contour.Zne))
+@assert all(isfinite, contour.Zne) && all(isfinite, contour.Wne)
 ```
 
 **Advantages**:
-- Theoretically optimal for ellipses  
-- Excellent for clustered eigenvalues
-- Adaptive node placement
+- Rational-filter construction for symmetric interval problems
+- Precomputed nodes for supported counts
+- May help distinguish eigenvalues near interval endpoints
 
 **Disadvantages**:
 - More complex implementation
@@ -114,55 +183,10 @@ println("Excellent for clustered eigenvalues")
 
 ## Custom Contour Design
 
-### Built-in Circle, Ellipse, and Box
+### Advanced Half-Contours for Interval Solves
 
-Use the exported shape constructors for standard closed contours; no manual
-node generation or weight normalization is needed:
-
-```julia
-circle = feast_circle(0.0 + 0im, 1.0; n=64)
-ellipse = feast_ellipse(0.0 + 0im, 2.0, 1.0; n=64, rotation=0.2)
-box = feast_rectangle(-1.0, 1.0, -1.0, 1.0; points_per_edge=32)
-```
-
-Ellipse axes are **semiaxis lengths**, and `rotation` is in **radians**.
-The box arguments are `xmin, xmax, ymin, ymax`; 32 points per edge means 128
-total nodes. All three constructors return full closed contours with normalized
-weights. Use them with `feast_general`, not as half-contours for `feast`.
-
-Here is a complete solve with each shape:
-
-```@example standard_shapes
-using FeastKit, LinearAlgebra
-
-A = Matrix(Diagonal(ComplexF64[-0.3+0.2im, 0.4-0.1im, 2.5]))
-contours = (feast_circle(0, 1),
-            feast_ellipse(0, 2, 1; rotation=0.2),
-            feast_rectangle(-1, 1, -1, 1))
-results = map(contours) do contour
-    fpm = feastinit().fpm
-    fpm[16] = 1  # Midpoint/trapezoidal quadrature, not Gauss node-count rules
-    result = FeastKit.with_custom_contour(fpm, contour) do
-        feast_general(A, 0.0+0im, 3.0; M0=3, fpm=fpm, backend=:serial)
-    end
-    @assert result.info == 0 && result.M == 2
-    @assert sort(result.lambda; by=real) ≈ [-0.3+0.2im, 0.4-0.1im]
-    result
-end
-[result.lambda for result in results]
-```
-
-The nominal center/radius arguments remain required, but the **registered
-contour** controls integration and eigenvalue selection: `2.5` is excluded here
-even though it lies inside the nominal radius of 3. For a generalized problem,
-replace the call with `feast_general(A, B, 0.0+0im, 3.0; ...)`.
-Keep eigenvalues away from contour boundaries and increase the node count when
-needed, especially for boxes. No `contour=` keyword is supported.
-
-### Using a Contour with `feast`
-
-Creating a `contour` does not automatically attach it to a solve, and `feast`
-does **not** have a `contour=` keyword. Register it for the duration of the call
+Half-contours from `feast_contour_expert` are intended for the symmetric interval
+solver, rather than the full-contour overload. Register one for the duration of the call
 using `FeastKit.with_custom_contour`, passing the **same parameter vector** to
 both the helper and the solver:
 
@@ -189,16 +213,15 @@ including on exceptions. It is module-qualified because it is not exported.
 Use a separate `fpm` vector for each concurrent solve.
 
 !!! important "Half-contour versus full contour"
-    `feast` solves real symmetric or complex Hermitian problems on a real
+    `feast(A, interval)` solves real symmetric or complex Hermitian problems on a real
     interval. Its kernels account for conjugate symmetry using a half-contour,
     as returned by `feast_contour_expert`. Use `feast_general` with a full
-    closed contour for complex search regions, as shown below. Complex
+    closed contour for complex search regions, or pass it to `feast(A, contour)`. Complex
     Hermitian solvers internally add the conjugate nodes and weights and solve
     both halves against the same trial block. Continue supplying only the
     half-contour; do not double its weights or append its conjugate yourself.
-    These examples
-    explicitly select the serial backend; they do not assume that parallel
-    backends consume registered custom contours.
+    Threaded/distributed real interval backends and MPI drivers also consume
+    registered contours within their supported problem types.
 
 Choose `M0` larger than the expected number of enclosed eigenvalues, or use
 `M0 == size(A, 1)` for a small full-space solve. A saturated smaller subspace
@@ -214,7 +237,7 @@ Do not divide the weights returned by FeastKit's built-in contour generators aga
 
 ### Designing Your Own Contour
 
-```julia
+```@example custom_rectangle
 using FeastKit, LinearAlgebra
 
 function create_rectangular_contour(xmin, xmax, ymin, ymax, nx, ny)
@@ -262,8 +285,18 @@ nodes, weights = create_rectangular_contour(-1, 3, -2, 2, 20, 16)
 println("Created rectangular contour with $(length(nodes)) points")
 
 # Use with FeastKit
-contour = feast_contour_custom_weights!(nodes, weights)
+corners = ComplexF64[-1-2im, 3-2im, 3+2im, -1+2im]
+contour = FeastKit.FeastContour{Float64}(nodes, weights, corners)
+A = Matrix(Diagonal(ComplexF64[0.5+0.1im, 2+im, 5]))
+result = feast(A, contour; subspace_size=3)
+@assert result.converged && result.M == 2
+@assert isapprox(sort(result.values; by=real), [0.5+0.1im, 2+im]; atol=1e-9)
+result.values
 ```
+
+Without explicit vertices, general membership uses the polygon through the
+quadrature nodes. For rectangles, prefer `feast_rectangle`, which retains the
+actual corners separately.
 
 ### Circular Contour for Complex Eigenvalues
 
@@ -311,13 +344,20 @@ the integration nodes and weights.
 
 ### Adaptive Contour Generation
 
-```julia
+This illustrative heuristic chooses settings from supplied eigenvalue estimates;
+it does not discover the spectrum or guarantee convergence. Custom node-count
+bounds must be valid for the selected integration rule.
+
+```@example custom_adaptive
+using FeastKit
 function adaptive_elliptical_contour(Emin, Emax, eigenvalue_estimates; 
-                                    min_points=8, max_points=32)
+                                    min_points=8, max_points=20)
     """
     Create elliptical contour adapted to eigenvalue distribution.
     """
     
+    isempty(eigenvalue_estimates) && throw(ArgumentError("Supply eigenvalue estimates"))
+    3 <= min_points <= max_points || throw(ArgumentError("Invalid node-count bounds"))
     # Analyze eigenvalue clustering
     λ_center = (Emax + Emin) / 2
     λ_spread = (Emax - Emin) / 2
@@ -342,7 +382,7 @@ function adaptive_elliptical_contour(Emin, Emax, eigenvalue_estimates;
         
     else
         # Moderate distribution - standard approach
-        n_points = 16
+        n_points = clamp(16, min_points, max_points)
         method = 0  # Gauss-Legendre
         aspect_ratio = 100
         println("Standard distribution: using $n_points Gauss-Legendre points")
@@ -354,6 +394,9 @@ end
 # Example with eigenvalue estimates
 λ_estimates = [0.5, 0.52, 0.54, 1.8, 1.82, 1.84]  # Two clusters
 contour = adaptive_elliptical_contour(0.0, 2.5, λ_estimates)
+@assert length(contour.Zne) == 16
+@assert length(adaptive_elliptical_contour(0.0, 2.5, [1.2, 1.25, 1.3]).Zne) == 20
+@assert length(adaptive_elliptical_contour(0.0, 2.5, [0.2, 2.2]).Zne) == 8
 ```
 
 ---
@@ -362,10 +405,12 @@ contour = adaptive_elliptical_contour(0.0, 2.5, λ_estimates)
 
 ### Multi-Level Contour Strategy
 
-For problems with eigenvalues at different scales:
+This helper is for real `Float64` symmetric matrices and disjoint intervals.
+It concatenates the results, so overlapping intervals would duplicate eigenpairs:
 
-```julia
-function multi_level_feast(A, eigenvalue_regions; M0_per_region=10)
+```@example custom_multiregion
+using FeastKit, LinearAlgebra
+function multi_level_feast(A::AbstractMatrix{Float64}, eigenvalue_regions; M0_per_region=10)
     """
     Apply FeastKit to multiple regions with customized contours.
     """
@@ -381,7 +426,7 @@ function multi_level_feast(A, eigenvalue_regions; M0_per_region=10)
         width = region_max - region_min
         
         if width < 0.01  # Very narrow region
-            n_points = 32
+            n_points = 20
             method = 2  # Zolotarev for high precision
         elseif width > 10  # Very wide region  
             n_points = 12
@@ -405,6 +450,7 @@ function multi_level_feast(A, eigenvalue_regions; M0_per_region=10)
                   backend=:serial)
         end
         
+        result.converged || error(result.message)
         println("Found $(result.M) eigenvalues in region $i")
         
         if result.M > 0
@@ -429,69 +475,29 @@ regions = [
     (4.5, 5.5, "High frequency modes")
 ]
 
-A = create_test_matrix(1000)
+A = Matrix(Diagonal([0.05, 0.85, 1.0, 1.1, 5.0, 8.0]))
 eigenvalues, eigenvectors = multi_level_feast(A, regions)
+@assert isapprox(eigenvalues, [0.05, 0.85, 1.0, 1.1, 5.0]; atol=1e-9)
+@assert norm(A*eigenvectors - eigenvectors*Diagonal(eigenvalues)) < 1e-8
 ```
 
-### Contour Optimization via Rational Function
+### Rational Filters and Eigenvalue Counts
 
-```julia
-function optimize_contour_placement(A, initial_interval, target_count; 
-                                   max_iterations=5)
-    """
-    Optimize contour placement using rational function evaluation.
-    """
-    
-    Emin, Emax = initial_interval
-    
-    for iter in 1:max_iterations
-        println("Iteration $iter: interval [$Emin, $Emax]")
-        
-        # Generate test points in current interval
-        test_points = range(Emin, Emax, length=50)
-        
-        # Evaluate rational function to estimate eigenvalue count
-        contour = feast_contour_expert(Emin, Emax, 16, 0, 100)
-        rational_values = feast_rational_expert(contour.Zne, contour.Wne, test_points)
-        
-        # Count estimated eigenvalues (rational function ≈ 1 near eigenvalues)
-        estimated_count = sum(rational_values .> 0.5)
-        
-        println("Estimated eigenvalues in interval: $estimated_count")
-        println("Target count: $target_count")
-        
-        if abs(estimated_count - target_count) <= 1
-            println("Converged to optimal interval!")
-            break
-        end
-        
-        # Adjust interval based on estimate
-        if estimated_count > target_count
-            # Too many eigenvalues - shrink interval
-            width = Emax - Emin
-            center = (Emin + Emax) / 2
-            new_width = width * 0.8
-            Emin = center - new_width/2
-            Emax = center + new_width/2
-            
-        else  # estimated_count < target_count
-            # Too few eigenvalues - expand interval
-            width = Emax - Emin  
-            expansion = 1.2
-            Emin -= width * (expansion - 1) / 2
-            Emax += width * (expansion - 1) / 2
-        end
-    end
-    
-    return (Emin, Emax)
-end
+`feast_rational` and `feast_rational_expert` evaluate a contour's rational
+filter at the supplied points. They do not inspect `A`. Counting grid points
+where the filter is near one counts sample points, not eigenvalues.
 
-# Example usage
-A = SymTridiagonal(2.0 * ones(500), -1.0 * ones(499))
-initial_interval = (0.5, 1.5)
-optimized_interval = optimize_contour_placement(A, initial_interval, 10)
+For a matrix-dependent estimate, use `feast_estimate_count`:
 
-println("Optimized interval: $optimized_interval")
+```@example contour_count_estimate
+using FeastKit, LinearAlgebra
+A = Matrix(Diagonal([1.0, 2.0, 3.0, 4.0]))
+interval = (0.5, 2.5)
+estimate = feast_estimate_count(A, interval; nprobe=16)
+# Leave headroom and verify the result; the estimate is stochastic.
+result = feast(A, interval; subspace_size=3)
+@assert result.converged && result.M == 2
+(estimate=estimate, found=result.M)
 ```
 
 ---
@@ -502,7 +508,8 @@ println("Optimized interval: $optimized_interval")
 
 For eigenvalues with radial distribution:
 
-```julia
+```@example custom_star
+using FeastKit, LinearAlgebra
 function create_star_contour(center, radius, n_spikes, n_points_per_spike)
     """
     Create star-shaped contour for eigenvalues with radial symmetry.
@@ -524,13 +531,23 @@ function create_star_contour(center, radius, n_spikes, n_points_per_spike)
     
     return nodes, weights
 end
+
+nodes, weights = create_star_contour(0, 2, 5, 32)
+contour = FeastKit.FeastContour{Float64}(nodes, weights)
+A = Matrix(Diagonal(ComplexF64[-0.3+0.2im, 0.4-0.1im, 4]))
+result = feast(A, contour; subspace_size=3)
+@assert result.converged && result.M == 2
+@assert isapprox(sort(result.values; by=real), [-0.3+0.2im, 0.4-0.1im]; atol=1e-9)
+@assert abs(sum(weights)) < 1e-12
+result.values
 ```
 
 ### Lens-Shaped Contours
 
 For eigenvalues in bimodal distributions:
 
-```julia
+```@example custom_lens
+using FeastKit, LinearAlgebra
 function create_lens_contour(focus1, focus2, width, n_points)
     """
     Create lens-shaped (elliptical) contour between two focal points.
@@ -538,8 +555,10 @@ function create_lens_contour(focus1, focus2, width, n_points)
     # Ellipse parameters
     center = (focus1 + focus2) / 2
     focus_distance = abs(focus2 - focus1)
-    major_axis = focus_distance + width
+    width > 0 || throw(ArgumentError("width must be positive"))
     minor_axis = width
+    major_axis = sqrt(focus_distance^2 + width^2)
+    rotation = cis(angle(complex(focus2 - focus1)))
     
     θ = range(0, 2π, length=n_points+1)[1:end-1]
     
@@ -551,13 +570,13 @@ function create_lens_contour(focus1, focus2, width, n_points)
         x = (major_axis/2) * cos(θᵢ)
         y = (minor_axis/2) * sin(θᵢ)
         
-        z = center + x + im * y
+        z = center + rotation * (x + im * y)
         push!(nodes, z)
         
         # Derivative for weight calculation
         dx_dθ = -(major_axis/2) * sin(θᵢ)  
         dy_dθ = (minor_axis/2) * cos(θᵢ)
-        dz_dθ = dx_dθ + im * dy_dθ
+        dz_dθ = rotation * (dx_dθ + im * dy_dθ)
         
         weight = dz_dθ * (2π / n_points) / (2π * im)
         push!(weights, weight)
@@ -565,6 +584,15 @@ function create_lens_contour(focus1, focus2, width, n_points)
     
     return nodes, weights
 end
+
+nodes, weights = create_lens_contour(-1, 1, 2, 64)
+contour = FeastKit.FeastContour{Float64}(nodes, weights)
+A = Matrix(Diagonal(ComplexF64[-0.3+0.2im, 0.4-0.1im, 4]))
+result = feast(A, contour; subspace_size=3)
+@assert result.converged && result.M == 2
+@assert isapprox(sort(result.values; by=real), [-0.3+0.2im, 0.4-0.1im]; atol=1e-9)
+@assert abs(sum(weights)) < 1e-12
+result.values
 ```
 
 ---
@@ -573,10 +601,14 @@ end
 
 ### Diagnostic Tools
 
-```julia
-using Statistics   # for `mean` below
+The closure check below is for a **full** contour, not a symmetric
+half-contour. Singular values make this a small dense-problem diagnostic.
 
-function diagnose_contour_quality(contour, A, interval)
+```@example custom_diagnostics
+using FeastKit, LinearAlgebra
+
+
+function diagnose_contour_quality(contour, A)
     """
     Analyze contour quality for eigenvalue computation.
     """
@@ -619,8 +651,8 @@ function diagnose_contour_quality(contour, A, interval)
         try
             # Approximate condition number of (zI - A)
             shift_matrix = z * I - A
-            σ_min = minimum(svdvals(shift_matrix))  # Smallest singular value
-            cond_approx = 1.0 / σ_min
+            σ = svdvals(Matrix(shift_matrix))
+            cond_approx = maximum(σ) / minimum(σ)
             push!(condition_numbers, cond_approx)
         catch
             push!(condition_numbers, Inf)
@@ -628,7 +660,7 @@ function diagnose_contour_quality(contour, A, interval)
     end
     
     max_cond = maximum(condition_numbers)
-    avg_cond = mean(condition_numbers)
+    avg_cond = sum(condition_numbers) / length(condition_numbers)
     
     println("Max condition number: $max_cond")
     println("Average condition number: $avg_cond") 
@@ -641,11 +673,11 @@ function diagnose_contour_quality(contour, A, interval)
 end
 
 # Example usage
-A = randn(100, 100); A = A + A'  # Symmetric test matrix
-interval = (-2, 2)
-contour = feast_contour_expert(interval[1], interval[2], 16, 0, 100)
+A = Matrix(Diagonal([-1.0, 0.5, 3.0]))
+contour = feast_circle(0, 2; n=32)
 
-diagnostics = diagnose_contour_quality(contour, A, interval)
+diagnostics = diagnose_contour_quality(contour, A)
+@assert diagnostics[1] < 1e-12 && all(isfinite, diagnostics)
 ```
 
 ### Common Issues and Solutions
@@ -654,41 +686,53 @@ diagnostics = diagnose_contour_quality(contour, A, interval)
     **Causes**: Contour doesn't enclose eigenvalues
     
     **Solutions**:
-    ```julia
+    ```@example custom_empty
+    using FeastKit, LinearAlgebra
+    A = Matrix(Diagonal(collect(1.0:40.0)))
+    interval = (0.5, 3.5)
     # 1. Check eigenvalue bounds
     bounds = feast_validate_interval(A, interval)
     println("Estimated bounds: $bounds")
     
     # 2. Use wider interval
     wider_interval = (bounds[1] - 0.1, bounds[2] + 0.1)
-    result = feast(A, wider_interval)
+    result = feast(A, wider_interval; subspace_size=size(A, 1))
+    @assert result.converged && result.M == 40
+    contour = feast_contour_expert(interval..., 16)
     
     # 3. Visualize rational function
     test_points = range(interval[1], interval[2], length=100)
     rational_vals = feast_rational_expert(contour.Zne, contour.Wne, test_points)
-    # Plot rational_vals vs test_points (peaks indicate eigenvalues)
+    # Plot rational_vals vs test_points to inspect the filter, not the spectrum
     ```
 
 !!! warning "Issue: Integration not converging"
     **Causes**: Too few integration points, poor contour shape
     
     **Solutions**:
-    ```julia
+    ```@example custom_refine
+    using FeastKit, LinearAlgebra
+    A = Matrix(Diagonal(collect(1.0:40.0)))
+    interval = (0.5, 3.5)
     # 1. Increase integration points
     contour = feast_contour_expert(interval[1], interval[2], 32, 0, 100)
     
     # 2. Use Zolotarev integration for difficult problems
-    contour = feast_contour_expert(interval[1], interval[2], 24, 2, 100)
+    contour = feast_contour_expert(interval[1], interval[2], 20, 2, 100)
     
     # 3. Adjust ellipse aspect ratio for eigenvalue distribution
     contour = feast_contour_expert(interval[1], interval[2], 16, 0, 50)  # Flatter
+    @assert length(contour.Zne) == 16
     ```
 
 !!! warning "Issue: Spurious eigenvalues"
     **Causes**: Numerical errors, ill-conditioned linear systems
     
     **Solutions**:
-    ```julia
+    ```@example custom_spurious
+    using FeastKit, LinearAlgebra
+    A = Matrix(Diagonal(collect(1.0:40.0)))
+    interval = (0.5, 3.5)
     # 1. Increase precision
     fpm = feastinit().fpm
     fpm[3] = 14  # Higher tolerance (10^-14)
@@ -702,6 +746,7 @@ diagnostics = diagnose_contour_quality(contour, A, interval)
     
     # 3. Use iterative refinement
     fpm[4] = 50  # More refinement iterations
+    @assert result.converged && result.M == 3
     ```
 
 ---
@@ -717,7 +762,6 @@ phase between calls.
 
 ---
 
-<div align="center">
-  <p><strong>Master advanced contour integration techniques with FeastKit.jl</strong></p>
-  ← [Performance](performance.md) | [API Reference](api_reference.md) →
-</div>
+**Master advanced contour integration techniques with FeastKit.jl**
+
+← [Performance](performance.md) | [API Reference](api_reference.md) →

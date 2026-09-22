@@ -12,6 +12,8 @@ on:
     paths:
       - 'docs/**'
       - 'src/**'
+      - 'ext/**'
+      - 'Project.toml'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -45,8 +47,12 @@ jobs:
             Pkg.instantiate()
           '
 
+      - name: Verify threaded documentation example
+        run: julia --project=docs --threads=2 docs/check_parallel_examples.jl threads
+
       - name: Build and deploy documentation
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
-        run: julia --project=docs docs/make.jl
+          FEASTKIT_DOCS_DEPLOY: 'true'
+        run: julia --project=docs --threads=2 docs/make.jl

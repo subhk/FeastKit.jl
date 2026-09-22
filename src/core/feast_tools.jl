@@ -486,7 +486,8 @@ Generate Feast integration contour with expert-level control matching original F
 - `Emin, Emax`: Search interval bounds
 - `ne`: Number of integration points (half-contour)
 - `integration_type`: 0=Gauss-Legendre, 1=Trapezoidal, 2=Zolotarev  
-- `ellipse_ratio`: Aspect ratio a/b * 100 (100 = circle)
+- `ellipse_ratio`: Vertical/horizontal semiaxis ratio * 100
+  (100 = circle, 50 = half as tall as it is wide)
 
 # Returns
 - `FeastContour` with integration nodes and weights
@@ -813,6 +814,16 @@ function feast_sort_general!(lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
     return nothing
 end
 
+# Normalize by B*q so a common rescaling of A and B cannot change convergence.
+# The unit floor applies to the eigenvalue, not the matrix scale; this also
+# handles zero eigenvalues without dividing by norm(A*q). A common null vector
+# of A and B cannot certify a finite eigenvalue, so a zero B*q is rejected.
+@inline function _feast_scaled_residual(residual, Bq, lambda)
+    bnorm = norm(Bq)
+    return bnorm > zero(bnorm) ?
+        (norm(residual) / bnorm) / max(abs(lambda), one(bnorm)) : oftype(bnorm, Inf)
+end
+
 # Compute residual norms
 function feast_residual!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                         lambda::Vector{T}, q::Matrix{T}, res::Vector{T}, 
@@ -841,7 +852,7 @@ function feast_residual!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     end
 
     for j in 1:M
-        # Relative residual: ||A*q - λ*B*q|| / max(|λ|, 1)
+        # Relative residual, independent of the scaling of the pencil and q.
         qj = view(q, :, j)
         mul!(Aq, A, qj)
         mul!(Bq, B, qj)
@@ -849,7 +860,7 @@ function feast_residual!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         @inbounds @simd for i in 1:N
             residual[i] = Aq[i] - λ * Bq[i]
         end
-        res[j] = norm(residual) / max(abs(λ), one(T))
+        res[j] = _feast_scaled_residual(residual, Bq, λ)
     end
 
     return nothing

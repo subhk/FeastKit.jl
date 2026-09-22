@@ -31,7 +31,7 @@ checkout instead of a registry release, run
 | `A*x = λ*B*x`, real spectrum | `feast(A, B, (Emin, Emax); M0)` | Symmetric/Hermitian `A`; matching positive-definite `B` |
 | General standard or generalized pencil | `feast_general(A, center, radius; M0)` or `feast_general(A, B, center, radius; M0)` | Square matrices; positive radius and complex center |
 | Real symmetric matrix-free problem | `feast(Aop, Bop, interval; M0, solver)` | Real operators implementing multiplication; SPD `Bop` |
-| Complex matrix-free problem | `feast_general(Aop, Bop, center, radius; M0, solver)` | Complex operators, including an explicit identity `Bop` for standard problems |
+| Complex matrix-free problem | `feast_general(Aop, center, radius; M0, solver)` or the overload with `Bop` | Complex operators; omitting `Bop` uses the identity |
 | Polynomial `Σ λ^k Aₖ*x = 0` | `feast_polynomial(coeffs, center, radius; M0)` | Complex coefficients ordered `[A₀, A₁, …, Aₚ]` |
 
 Use floating-point arrays (`Float32`, `Float64`, `ComplexF32`, `ComplexF64`)
@@ -42,10 +42,92 @@ positive definiteness: for a manageable assembled mass matrix, check
 `isposdef(Hermitian(B))` yourself. A general pencil must be regular; singular
 mass matrices and infinite eigenvalues require particular care.
 
-Do not make a nonsymmetric model "symmetric" by wrapping it in `Symmetric`:
-that wrapper treats one triangle as authoritative and changes the represented
-matrix. Use `feast_general` instead. Remove constrained degrees of freedom
-consistently from both stiffness and mass matrices before solving.
+Remove constrained degrees of freedom consistently from both stiffness and
+mass matrices before solving.
+
+### [Matrix types: detected or declared?](@id matrix-properties)
+
+For assembled dense or sparse matrices, FeastKit gets **real versus complex
+from `eltype(A)`**. You select an interval or a full contour; the interval
+interface checks the required symmetry. There is no `matrix_type` keyword.
+
+| Matrix properties | Interface | What the code does |
+|:--|:--|:--|
+| Real symmetric | `feast(A, (Emin, Emax))` | Checks `issymmetric(A)` and uses a real symmetric driver |
+| Complex Hermitian | `feast(A, (Emin, Emax))` | Checks `ishermitian(A)` and uses a Hermitian driver |
+| Real nonsymmetric | `feast(A, contour)` or `feast_general(A, center, radius)` | Converts to complex arithmetic and uses a general driver |
+| Complex non-Hermitian, including complex symmetric | `feast(A, contour)` or `feast_general(A, center, radius)` | Uses a general driver |
+
+Complex **symmetric** means `A == transpose(A)`. Complex **Hermitian** means
+`A == adjoint(A)` (written `A'` in Julia); these are different properties.
+Even a nonsymmetric matrix with entirely real eigenvalues needs the general
+interface. A `ComplexF64` array uses the complex path even when every stored
+imaginary part is zero.
+
+An incompatible matrix passed to `feast(A, interval)` raises `ArgumentError`;
+the call does **not** automatically switch to a general solver or choose a
+complex search region. Conversely, `feast(A, contour)` always uses a general
+driver, even for symmetric or Hermitian input, and returns complex eigenvalues.
+For generalized interval problems, the same structural requirements apply to
+`B`, which must also be positive definite.
+
+Here are all four cases in one executable example:
+
+```@example matrix_properties
+using FeastKit, LinearAlgebra
+
+S = [2.0 -1.0; -1.0 2.0]         # Real symmetric: eigenvalues 1 and 3
+H = ComplexF64[2 im; -im 2]       # Complex Hermitian: eigenvalues 1 and 3
+R = [0.0 -1.0; 1.0 0.0]          # Real nonsymmetric: eigenvalues ±im
+C = ComplexF64[0 im; im 0]        # Complex symmetric, not Hermitian: ±im
+
+interval = (0.5, 3.5)
+contour = feast_circle(0, 1.5)
+real_symmetric = feast(S, interval; subspace_size=2)
+complex_hermitian = feast(H, interval; subspace_size=2)
+real_general = feast(R, contour; subspace_size=2)
+complex_general = feast(C, contour; subspace_size=2)
+
+@assert issymmetric(C) && !ishermitian(C)
+for result in (real_symmetric, complex_hermitian)
+    @assert result.converged
+    @assert isapprox(result.values, [1.0, 3.0]; atol=1e-9)
+end
+for result in (real_general, complex_general)
+    @assert result.converged
+    @assert isapprox(sort(result.values; by=imag), [-1.0im, 1.0im]; atol=1e-9)
+end
+(real_symmetric.values, complex_hermitian.values,
+ real_general.values, complex_general.values)
+```
+
+**Explicit structure for assembled matrices.** Use Julia's `Symmetric` or
+`Hermitian` wrappers when your model defines that structure:
+
+```@example matrix_properties
+S_declared = Symmetric(S, :U)
+H_declared = Hermitian(H, :U)
+@assert Matrix(S_declared) == S && Matrix(H_declared) == H
+(issymmetric(S_declared), ishermitian(H_declared))
+```
+
+`:U` makes the upper triangle authoritative; `:L` uses the lower triangle.
+These wrappers construct the represented symmetric/Hermitian matrix from that
+triangle, rather than checking that both stored triangles agree. Wrapping a
+nonsymmetric model therefore changes it. Plain-array symmetry checks use exact
+entry comparisons, so small assembly differences can fail them; decide from
+your model whether declaring one triangle authoritative is appropriate.
+
+**Explicit properties for matrix-free operators.** FeastKit cannot inspect
+the entries behind a multiplication callback. Declare the element type and
+known properties yourself, for example
+`LinearOperator{Float64}(A_mul!, (n, n); issymmetric=true)`.
+The `issymmetric`, `ishermitian`, and `isposdef` flags are declarations, not
+properties inferred or verified from the callback; they default to `false`.
+The current matrix-free interval interface accepts real symmetric operators.
+Use `LinearOperator{ComplexF64}` with `feast_general` or `feast(Aop, contour)`
+for complex operators, including complex Hermitian ones. See the
+[Matrix-Free Interface](matrix_free_interface.md) for complete callback examples.
 
 ### Generalized symmetric example
 
@@ -111,29 +193,40 @@ Other structured arrays may be materialized by the convenience API; choose
 `full_to_banded` with `feast_banded`; consult the
 [API reference](api_reference.md) for bandwidth and triangle conventions.
 
-Every solve needs `(z*B - A)*Y = X` at contour nodes. Assembled high-level
-`feast`/`feast_general` calls do **not** accept `solver`, `solver_opts`,
-`tolerance`, or `integration_points` keywords. Configure `fpm`, or select a
-low-level driver when you need explicit inner-solver controls:
+Every solve needs `(z*B - A)*Y = X` at contour nodes. High-level `feast`,
+`feast_general`, and `feast_banded` accept `solver=:direct` (the default) or
+`:gmres`, with `solver_opts=(rtol=..., maxiter=..., restart=...)` for iterative
+shifted solves. Set outer controls with `tol`, `maxiter`, `subspace_size`
+(alias `M0`), and `quadrature_points`, or retain `fpm` for advanced settings:
 
 ```@example setup_sparse_iterative
 using FeastKit, Krylov, LinearAlgebra, SparseArrays
 A = spdiagm(0 => [1.0, 2.0, 3.0, 4.0])
 B = spdiagm(0 => ones(4))
-fpm = feastinit().fpm
-result = feast_scsrgv!(A, B, 0.5, 2.5, 3, fpm;
-                       solver=:gmres, solver_tol=1e-14,
-                       solver_maxiter=200, solver_restart=20)
-@assert result.info == 0 && result.M == 2
-result.lambda
+result = feast(A, B, (0.5, 2.5); subspace_size=3, tol=1e-12,
+               solver=:gmres, solver_opts=(rtol=1e-14, maxiter=200, restart=20))
+@assert result.converged && result.M == 2
+result.values
 ```
 
 Direct factorization is a useful baseline. Sparse factorization can have
 substantial fill-in; storing all contour factorizations trades memory for
 speed. Iterative solves need sufficiently accurate inner solutions, especially
 near clustered eigenvalues. Here the inner tolerance is `1e-14`, tighter than
-the default outer residual target `10.0^(-fpm[3]) == 1e-12`, to leave room for
+the default outer residual target `1e-12`, to leave room for
 error in the shifted solves. Tightening the outer tolerance alone is not enough.
+
+Named settings that conflict with an explicitly set `fpm` entry raise an
+`ArgumentError`. Named overrides use a copy of `fpm`. `tol` is rounded down to
+a decimal power in `[1e-16, 1]`; Float32 still uses a minimum effective tolerance
+of `sqrt(eps(Float32))`. `quadrature_points` controls the half-contour count for
+interval solves and the full-contour count for general solves, subject to the
+chosen integration rule's valid counts.
+
+GMRES is supported by serial assembled drivers and complex MPI drivers.
+Explicit unsupported backend requests raise an error; `backend=:auto` may
+fall back to serial. Matrix-free calls support `:gmres`, `:bicgstab`, or a
+callback, with the same inner option names and an additional `preconditioner`.
 
 ### Matrix-free callback contract
 
@@ -181,12 +274,15 @@ uninitialized. Pass it as `fpm=fpm` to the solver.
 | `fpm[10]` | Cache direct factorizations: 1 stores, 0 recomputes |
 | `fpm[16]` | Integration: 0 Gauss, 1 trapezoidal, 2 Zolotarev (not general problems) |
 
-For matrix-free calls, `tol` and `maxiter` initialize outer parameters only
-when `fpm` is omitted; a supplied `fpm` takes precedence. `solver_opts` controls
+High-level named controls must agree with explicit `fpm` entries. For the
+lower-level `feast_matfree_srci!` and `feast_matfree_grci!` functions only,
+a supplied `fpm` takes precedence over their `tol` and `maxiter` keywords. `solver_opts` controls
 the inner solver separately. Use precision-appropriate tolerances and consult
 the [parameter reference](api_reference.md) for supported quadrature counts.
 
-Creating a contour does not attach it to a solve. There is no `contour=` keyword:
+Pass full contours directly with `feast(A, contour)` or `feast(A, B, contour)`.
+Half-contours for interval problems use the advanced registration workflow
+below. There is no `contour=` keyword:
 
 ```@example setup_contour
 using FeastKit, LinearAlgebra
@@ -232,7 +328,7 @@ for matrix-free companions and direct polynomial RCI alternatives.
 
 ## 7. Verify the result before scaling up
 
-Read `result.info` first, then `result.M`, `result.lambda[1:result.M]`,
+Check `result.converged` and `result.message` first, then `result.M`, `result.lambda[1:result.M]`,
 `result.q[:,1:result.M]`, and `result.res[1:result.M]`. Eigenvectors are columns.
 `epsout` and `loop` report the outer convergence metric and refinement progress.
 Some invalid inputs throw exceptions before a result is returned.
@@ -268,3 +364,12 @@ First obtain a verified `backend=:serial` baseline. Then use the
 Avoid oversubscribing BLAS threads across workers or MPI ranks. Keep your
 project/manifest, matrix construction, region, `M0`, `fpm`, solver options,
 and backend settings with the result so the computation can be reproduced.
+
+## Repeated Solves and Unknown Eigenvalue Counts
+
+For related problems, use `initial_subspace=previous.vectors` with the serial
+assembled or matrix-free API. To choose a width automatically, use
+`subspace_size=:auto` and optionally `max_subspace_size=cap`. Dense serial
+Float64/ComplexF64 direct solves can opt into `mixed_precision=true`.
+See the [Performance Guide](performance.md) for executable examples, supported
+backends, estimator costs, accuracy checks, and fallback behavior.

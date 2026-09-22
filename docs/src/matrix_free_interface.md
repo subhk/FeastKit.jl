@@ -1,296 +1,204 @@
 # Matrix-Free FeastKit Interface
 
-The matrix-free interface allows you to use FeastKit without explicitly storing matrices, making it ideal for large-scale problems where memory is limited or when matrices are too expensive to construct.
+Matrix-free solves replace stored matrices with multiplication callbacks. FEAST
+still allocates subspace, projection, and linear-solver workspaces; avoiding a
+stored matrix does not make a solve allocation-free.
 
 ## Overview
 
-Instead of providing explicit matrices `A` and `B`, you provide functions that compute matrix-vector products:
-- `A_mul!(y, x)` computes `y = A*x`
-- `B_mul!(y, x)` computes `y = B*x`
-- `linear_solver(Y, z, X)` solves `(z*B - A)*Y = X`
+Provide operations that overwrite their outputs without changing their inputs:
 
-For generalized problems, the wrapper supplies `X = B*Q` during contour
-projection. The callback should solve the supplied system without multiplying
-the right-hand side by `B` again.
+- `A_mul!(y, x)` computes `y = A*x`.
+- `B_mul!(y, x)` computes `y = B*x`.
+- A custom `solver(Y, z, X)` overwrites every column of `Y` with the solution of
+  `(z*B - A)*Y = X`. Shifted systems and their right-hand sides are complex even
+  when `A` and `B` are real.
+
+For generalized projection, FEAST supplies `X = B*Q`. The solver callback must
+not multiply that supplied right-hand side by `B` again.
+
+The high-level interval overload supports **real symmetric operators**. For
+complex operators, use `feast_general` or a full contour. Complex Hermitian
+assembled matrices also have the interval interface described in the
+[API reference](api_reference.md).
 
 ## Matrix-Free Operator Types
 
 ### LinearOperator
 
-The main interface for defining matrix-free operators:
+`LinearOperator{T}(A_mul!, (n, n); issymmetric=false, ishermitian=false,
+isposdef=false, At_mul! = nothing, Ac_mul! = nothing, solve! = nothing)` stores
+multiplication callbacks and structural flags. In Julia calls, put a space
+before `=` for keywords ending in `!`, for example `At_mul! = callback`.
+`T` declares the element type. Structural flags are supplied by you; FeastKit
+does not infer or verify symmetry or positive definiteness from the callback.
+For the real interval interface, declare the known symmetry explicitly. Complex
+operators, including Hermitian ones, use the general/full-contour interface.
+See [Matrix types: detected or declared?](@ref matrix-properties) for the
+difference between operator declarations and checks on assembled matrices.
 
-```julia
-using FeastKit
-
-# Define matrix-vector multiplication function
-function A_mul!(y, x)
-    # Your custom matrix-vector product code here
-    # Example: y = A*x for some implicit matrix A
-end
-
-# Create operator
-n = 1000  # Matrix size
-A_op = LinearOperator{Float64}(A_mul!, (n, n), issymmetric=true)
-```
-
-**Properties you can specify:**
-- `issymmetric=true/false`: Matrix is symmetric
-- `ishermitian=true/false`: Matrix is Hermitian  
-- `isposdef=true/false`: Matrix is positive definite
+`At_mul!` computes the transpose product, while `Ac_mul!` computes the adjoint.
+The high-level solvers use their explicit `solver` keyword; storing `solve!`
+in an operator does not automatically select it.
 
 ### MatrixVecFunction
 
-Alternative interface for operators that need additional data:
+`MatrixVecFunction{T}(callback, (n, n); issymmetric=false, ...)` calls
+`callback(y, op, x)`. It has no `data` field. Capture additional data in the
+callback's closure or use a callable object:
 
-```julia
-function A_mul!(y, op, x)
-    # Access operator data via op.data
-    mul!(y, op.data, x)
-end
-
-A_op = MatrixVecFunction{Float64}(A_mul!, (n, n), issymmetric=true)
+```@example matfree_payload
+using FeastKit, LinearAlgebra
+weights = [1.0, 2.0, 3.0]
+op = MatrixVecFunction{Float64}(
+    (y, op, x) -> (y .= weights .* x), (3, 3); issymmetric=true)
+y = zeros(3)
+mul!(y, op, ones(3))
+@assert y == weights
+y
 ```
 
 ## Basic Usage
 
-### Standard Eigenvalue Problem (A*x = λ*x)
+### Standard Eigenvalue Problem
 
-```julia
-using FeastKit
+This example only stores a vector of diagonal entries. Load the optional
+Krylov dependency for the built-in iterative solvers.
 
-n = 10000
-
-# Define A*x operation
-function laplacian_1d!(y, x)
-    # 1D discrete Laplacian: [-1 2 -1] stencil
-    y[1] = 2*x[1] - x[2]
-    for i in 2:n-1
-        y[i] = -x[i-1] + 2*x[i] - x[i+1]
-    end  
-    y[n] = -x[n-1] + 2*x[n]
-end
-
-# Create operator
-A_op = LinearOperator{Float64}(laplacian_1d!, (n, n), issymmetric=true)
-
-# Solve eigenvalue problem
-result = feast(A_op, (0.1, 1.0), M0=10, solver=:gmres)
-
-println("Found $(result.M) eigenvalues")
-println("Eigenvalues: $(result.lambda[1:result.M])")
+```@example matfree_basic
+using FeastKit, Krylov, LinearAlgebra
+entries = collect(1.0:12.0)
+n = length(entries)
+A_op = LinearOperator{Float64}((y, x) -> (y .= entries .* x),
+                              (n, n); issymmetric=true)
+result = feast(A_op, (0.5, 2.5); subspace_size=4, tol=1e-10,
+               solver=:gmres, solver_opts=(rtol=1e-13, maxiter=200, restart=16))
+@assert result.converged result.message
+@assert result.values ≈ [1.0, 2.0]
+result.values
 ```
 
-### Generalized Eigenvalue Problem (A*x = λ*B*x)
+### Generalized Eigenvalue Problem and Custom Solver
 
-```julia
-# Define both A and B operations
-function A_mul!(y, x)
-    # Your A*x computation
+A custom callback can exploit structure without loading Krylov:
+
+```@example matfree_generalized
+using FeastKit, LinearAlgebra
+mass = [2.0, 3.0, 4.0, 5.0]
+stiffness = mass .* [1.0, 2.0, 3.0, 4.0]
+A_op = LinearOperator{Float64}((y, x) -> (y .= stiffness .* x),
+                              (4, 4); issymmetric=true)
+B_op = LinearOperator{Float64}((y, x) -> (y .= mass .* x),
+                              (4, 4); issymmetric=true, isposdef=true)
+function shifted_solve!(Y, z, X)
+    for j in axes(X, 2), i in axes(X, 1)
+        Y[i, j] = X[i, j] / (z * mass[i] - stiffness[i])
+    end
+    return Y
 end
-
-function B_mul!(y, x) 
-    # Your B*x computation
-end
-
-A_op = LinearOperator{Float64}(A_mul!, (n, n), issymmetric=true)
-B_op = LinearOperator{Float64}(B_mul!, (n, n), issymmetric=true, isposdef=true)
-
-result = feast(A_op, B_op, (emin, emax), M0=10)
+result = feast(A_op, B_op, (0.5, 2.5); subspace_size=3, solver=shifted_solve!)
+@assert result.converged result.message
+@assert result.values ≈ [1.0, 2.0]
+result.values
 ```
 
 ## Linear Solvers
 
-FeastKit requires solving linear systems `(z*B - A)*Y = X` for various values of `z`. You have several options:
+| Solver | Requirements and options |
+|:--|:--|
+| `:gmres` (default) | Load `Krylov`; `rtol`, `maxiter`, `restart`, `preconditioner` |
+| `:bicgstab` | Load `Krylov`; `rtol`, `maxiter`, `preconditioner` |
+| Callback | Pass `solver=shifted_solve!`; configure the callback directly |
 
-### Built-in Iterative Solvers
+`solver_opts` is a named tuple. Defaults are `rtol=1e-6`, `maxiter=1000`, and
+GMRES `restart=30`. Tight outer targets may require a smaller inner `rtol`.
+`solver_opts.maxiter` limits each shifted solve; outer `maxiter` limits FEAST
+refinement. `restart` is accepted for BiCGSTAB but only affects GMRES.
+There is no `l` option or built-in BiCGSTAB(l) variant. `:direct` requires
+assembled matrices; `:cg` is rejected because complex shifts do not preserve
+symmetric positive definiteness.
 
-```julia
-# Use GMRES (default, works for general problems)
-result = feast(A_op, B_op, interval, solver=:gmres, 
-              solver_opts=(rtol=1e-6, restart=30, maxiter=1000))
+### Preconditioning
 
-# Use BiCGSTAB
-result = feast(A_op, B_op, interval, solver=:bicgstab,
-              solver_opts=(rtol=1e-8, maxiter=500))
-
-# Use BiCGSTAB(l) 
-result = feast(A_op, B_op, interval, solver=:bicgstab,
-              solver_opts=(l=2, rtol=1e-6, maxiter=800))
-```
-
-### Custom Linear Solver
-
-For specialized problems, provide your own solver:
-
-```julia
-function my_custom_solver(Y::AbstractMatrix, z::Number, X::AbstractMatrix)
-    # Solve (z*B - A)*Y = X for each column of X
-    # Store results in corresponding columns of Y
-    
-    M0 = size(X, 2)
-    for j in 1:M0
-        # Your custom solution method for column j
-        Y[:, j] = solve_linear_system(z, X[:, j])
-    end
-end
-
-result = feast(A_op, B_op, interval, solver=my_custom_solver)
-```
+The optional `solver_opts.preconditioner` is a **left inverse-action** operator:
+`mul!(y, preconditioner, x)` must apply the preconditioning action to complex
+vectors. A factorization intended for `ldiv!` must be wrapped in an appropriate
+multiplication callback; `Pl` is not a supported option. A preconditioner for
+`A` alone may be ineffective for the family of shifted systems `z*B - A`.
 
 ## Advanced Features
 
-### Custom Contour Integration
+### Named Options and Parameters
 
-Use advanced contour integration methods from the original Fortran FEAST:
+`subspace_size` aliases `M0` (default 10, clamped to the operator dimension).
+Use `initial_subspace=previous.vectors` to seed a related solve, or
+`subspace_size=:auto, max_subspace_size=cap` for bounded growth from a small
+heuristic width. Matrix-free sizing does not run a direct count estimator.
+Built-in solvers adapt their default inner tolerance to the outer residual;
+set `solver_opts.rtol` to keep it fixed. Custom callbacks retain control over
+their own tolerances. Mixed precision requires assembled dense matrices.
+`tol`, `maxiter`, and `quadrature_points` have the same meaning as in assembled
+solves. Conflicting named controls and explicitly set `fpm` entries raise an
+`ArgumentError`. Named overrides use a copy of the supplied parameter vector.
+The tolerance is rounded down to a decimal power; Float32 retains its precision
+floor. See [Problem Setup](problem_setup.md) for details.
 
-```julia
-# Gauss-Legendre integration (high accuracy)
-contour = feast_contour_expert(emin, emax, 8, 0, 100)
+### Custom Contour Integration and General Problems
 
-# Zolotarev integration (optimal for ellipses) 
-contour = feast_contour_expert(emin, emax, 12, 2, 100)
+Use complex operators for a full contour. The contour determines which
+values are selected; the wrapper manages registration and cleanup.
 
-# Custom ellipse aspect ratio (a/b = 0.5, flatter ellipse)
-contour = feast_contour_expert(emin, emax, 10, 0, 50)
+```@example matfree_contour
+using FeastKit, LinearAlgebra
+entries = ComplexF64[-0.3+0.2im, 0.4-0.1im, 2.5]
+A_op = LinearOperator{ComplexF64}((y, x) -> (y .= entries .* x), (3, 3))
+shifted_solve!(Y, z, X) = (Y .= X ./ (z .- entries))
+contour = feast_rectangle(-1, 1, -1, 1)
+result = feast(A_op, contour; subspace_size=3, solver=shifted_solve!)
+@assert result.converged result.message
+@assert sort(result.values; by=real) ≈ entries[1:2]
+result.values
 ```
 
-### General (Non-Hermitian) Problems
+For a circle, `feast_general(A_op, center, radius; ...)` and
+`feast_general(A_op, B_op, center, radius; ...)` are also available. Half-contours
+from `feast_contour_expert` use the advanced registration workflow in
+[Custom Contours](custom_contours.md).
 
-For non-symmetric matrices with complex eigenvalues:
+### Workspace Reuse
 
-```julia
-# Complex operators
-A_op = LinearOperator{ComplexF64}(A_mul!, (n, n))
-B_op = LinearOperator{ComplexF64}(B_mul!, (n, n))
+The lower-level real interface accepts an allocated workspace and an explicit
+linear-solver callback. Reuse is valid for the same dimension, subspace size,
+and precision. It does not eliminate every temporary allocation.
 
-# Circular search region in complex plane
-center = 1.0 + 0.5im
-radius = 2.0
-
-result = feast_general(A_op, B_op, center, radius, M0=10)
+```@example matfree_generalized
+workspace = allocate_matfree_workspace(Float64, 4, 3)
+result = feast_matfree_srci!(A_op, B_op, (0.5, 2.5), 3;
+                             workspace=workspace, linear_solver=shifted_solve!)
+@assert result.converged result.message
+result.values
 ```
+
+Unlike the high-level named-option interface, low-level `feast_matfree_srci!`
+and `feast_matfree_grci!` use their `tol`/`maxiter` keywords only when `fpm` is
+omitted. Set the corresponding entries when supplying `fpm` at that level.
 
 ### Polynomial Eigenvalue Problems
 
-For polynomial eigenvalue problems P(λ)x = 0:
+`feast_polynomial(coeffs_ops, center, radius; ...)` accepts complex coefficient
+operators in increasing powers of λ. It builds matrix-free companion operators
+of dimension `degree*n`; a solver callback receives right-hand sides of that
+larger dimension. See [Polynomial Problems](polynomial_problems.md).
 
-```julia
-# Define coefficient operators for P(λ) = A₀ + λ*A₁ + λ²*A₂
-A0_op = LinearOperator{ComplexF64}(A0_mul!, (n, n))
-A1_op = LinearOperator{ComplexF64}(A1_mul!, (n, n))  
-A2_op = LinearOperator{ComplexF64}(A2_mul!, (n, n))
+## Performance and Error Handling
 
-coeffs = [A0_op, A1_op, A2_op]
+Check `result.converged` and `result.message` before using eigenpairs. A small
+residual does not establish completeness when the subspace is saturated.
+Choose a region and subspace that can hold every target eigenvalue, and tighten
+inner solves when outer refinement stalls. GMRES convergence is not guaranteed
+by choosing it, even for an invertible shifted system with a limited budget.
 
-result = feast_polynomial(coeffs, center, radius, M0=15)
-```
-
-## Complete Examples
-
-### 2D Discrete Laplacian
-
-```julia
-using FeastKit
-
-# Parameters
-nx, ny = 200, 200
-n = nx * ny
-h = 1.0 / (nx + 1)
-
-# Index mapping
-idx(i, j) = (j-1) * nx + i
-
-# Matrix-free 2D Laplacian
-function laplacian_2d!(y, x)
-    fill!(y, 0)
-    for j in 1:ny, i in 1:nx
-        k = idx(i, j)
-        y[k] += 4 * x[k] / h^2
-        
-        # Neighbors
-        i > 1  && (y[k] -= x[idx(i-1, j)] / h^2)
-        i < nx && (y[k] -= x[idx(i+1, j)] / h^2)
-        j > 1  && (y[k] -= x[idx(i, j-1)] / h^2)
-        j < ny && (y[k] -= x[idx(i, j+1)] / h^2)
-    end
-end
-
-A_op = LinearOperator{Float64}(laplacian_2d!, (n, n), 
-                              issymmetric=true, isposdef=true)
-
-# Find smallest eigenvalues
-λ_min_approx = 2π^2 * (1/nx^2 + 1/ny^2)
-result = feast(A_op, (0.5*λ_min_approx, 2.0*λ_min_approx), 
-              M0=20, solver=:gmres)
-
-println("Found $(result.M) eigenvalues:")
-for i in 1:result.M
-    println("  λ[$i] = $(result.lambda[i])")
-end
-```
-
-### Large Sparse Matrix as Matrix-Free
-
-Even when you have a sparse matrix, using the matrix-free interface can save memory for very large problems:
-
-```julia
-using SparseArrays
-
-# Create large sparse matrix (don't store factorizations)
-n = 100000
-A_sparse = sprand(n, n, 0.0001)  # Very sparse
-A_sparse = A_sparse + A_sparse' + 5*I  # Symmetric positive definite
-
-# Matrix-free wrapper
-A_mul!(y, x) = mul!(y, A_sparse, x)
-A_op = LinearOperator{Float64}(A_mul!, (n, n), issymmetric=true, isposdef=true)
-
-# Find largest eigenvalues
-result = feast(A_op, (4.8, 5.2), M0=8, solver=:gmres)
-```
-
-## Performance Tips
-
-1. **Choose appropriate solver**: `:gmres` is the default and works for every problem; `:bicgstab` uses less memory per iteration. `:cg` is *not* usable with FEAST — even for a symmetric positive definite `A`, the shifted system `z*B - A` is complex and indefinite at every contour point, so FEAST rejects it.
-
-2. **Tune solver parameters**: Adjust `rtol`, `maxiter`, and `restart` based on your problem.
-
-3. **Optimize matrix-vector products**: Make your `A_mul!` and `B_mul!` functions as efficient as possible.
-
-4. **Use workspace reuse**: For repeated solves, pre-allocate workspace:
-   ```julia
-   workspace = allocate_matfree_workspace(Float64, n, M0)
-   result = feast_matfree_srci!(A_op, B_op, interval, M0; workspace=workspace)
-   ```
-
-5. **Consider integration method**: Zolotarev integration often requires fewer points than Gauss-Legendre.
-
-## Error Handling
-
-Common issues and solutions:
-
-- **Linear solver convergence**: Increase `maxiter`, decrease `rtol`, or try different solver
-- **FeastKit not converging**: Increase `maxiter` in FeastKit parameters, adjust `tol` 
-- **No eigenvalues found**: Check that search interval/region contains eigenvalues
-- **Memory issues**: Use iterative solvers, increase sparsity, consider domain decomposition
-
-## Integration with Other Packages
-
-The matrix-free interface works well with:
-
-- **IterativeSolvers.jl**: For advanced iterative methods
-- **LinearMaps.jl**: Alternative operator interface
-- **KrylovKit.jl**: High-performance Krylov methods  
-- **Preconditioners.jl**: For preconditioning
-- **CUDA.jl**: For GPU-accelerated operations
-
-Example with LinearMaps.jl:
-```julia
-using LinearMaps, FeastKit
-
-# Convert LinearMap to FeastKit operator
-lmap = LinearMap(your_function!, n)
-A_op = LinearOperator{Float64}((y,x) -> mul!(y, lmap, x), (n, n))
-
-result = feast(A_op, interval)
-```
+External multiplication operators can be wrapped in `LinearOperator`, and
+external linear solvers can be adapted to the callback contract. FeastKit's
+built-in iterative integration uses Krylov.jl. Its current workspaces are CPU
+`Matrix`/`Vector` arrays; there is no built-in CUDA or GPU workspace backend.

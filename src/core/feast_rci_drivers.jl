@@ -117,10 +117,10 @@ function _feast_shifted_solve!(dest::Matrix{Complex{T}},
                                rhs::Matrix{Complex{T}},
                                A::Matrix, B::Union{Matrix,Nothing},
                                z::Complex{T}, ncols::Int, tol::T,
-                               maxiter::Int, restart::Int) where T<:Real
+                               maxiter::Int, restart::Int; workspace=nothing) where T<:Real
     N = size(A, 1)
-    tmpA = Vector{Complex{T}}(undef, N)
-    tmpB = Vector{Complex{T}}(undef, N)
+    buffers = workspace === nothing ? _feast_krylov_workspace(N, T, restart) : workspace
+    tmpA, tmpB = buffers.tmpA, buffers.tmpB
     function apply_shift!(y::Vector{Complex{T}}, x::Vector{Complex{T}})
         if B === nothing
             @. tmpB = z * x
@@ -133,7 +133,7 @@ function _feast_shifted_solve!(dest::Matrix{Complex{T}},
         return y
     end
     return solve_dense_shifted!(view(dest, :, 1:ncols), view(rhs, :, 1:ncols),
-                                apply_shift!, :gmres, tol, maxiter, restart)
+                                apply_shift!, :gmres, tol, maxiter, restart; workspace=buffers)
 end
 
 function _feast_shifted_solve!(dest::Matrix{Complex{T}},
@@ -141,14 +141,14 @@ function _feast_shifted_solve!(dest::Matrix{Complex{T}},
                                A::SparseMatrixCSC,
                                B::Union{SparseMatrixCSC,Nothing},
                                z::Complex{T}, ncols::Int, tol::T,
-                               maxiter::Int, restart::Int) where T<:Real
+                               maxiter::Int, restart::Int; workspace=nothing) where T<:Real
     if B === nothing
         return solve_shifted_iterative_identity!(view(dest, :, 1:ncols),
                                                  view(rhs, :, 1:ncols),
-                                                 A, z, tol, maxiter, restart)
+                                                 A, z, tol, maxiter, restart; workspace=workspace)
     end
     return solve_shifted_iterative!(view(dest, :, 1:ncols), view(rhs, :, 1:ncols),
-                                    A, B, z, tol, maxiter, restart)
+                                    A, B, z, tol, maxiter, restart; workspace=workspace)
 end
 
 
@@ -217,7 +217,8 @@ function _feast_symmetric_real(A::AbstractMatrix{T},
                                solver::Symbol = :direct,
                                solver_tol::Real = 0.0,
                                solver_maxiter::Int = 500,
-                               solver_restart::Int = 30) where T<:Real
+                               solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
+    fpm = _feast_initial_parameters(fpm, initial_subspace)
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("Matrix A must be square"))
     B === nothing || size(B) == (N, N) || throw(ArgumentError("Matrix B must match size of A"))
@@ -232,14 +233,17 @@ function _feast_symmetric_real(A::AbstractMatrix{T},
     solver_choice = solver_choice in (:direct, :gmres) ? solver_choice : :invalid
     solver_choice == :invalid &&
         throw(ArgumentError("Unsupported solver '$solver'. Use :direct, :gmres, or :iterative."))
+    mixed_workspace = _feast_mixed_workspace(A, B, M0, fpm, solver_choice)
     solver_is_direct = solver_choice == :direct
     solver_is_direct || FEAST_KRYLOV_AVAILABLE[] ||
         throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
     # Only the default tolerance is adapted; an explicit request is obeyed.
     adaptive_tol = solver_tol == 0.0
+    krylov_workspace = !solver_is_direct ? _feast_krylov_workspace(N, T, solver_restart) : nothing
 
     workspace = FeastWorkspaceReal{T}(N, M0)
+    _feast_initial_subspace!(workspace.work, initial_subspace)
     rci_state = FeastSRCIState{T}()
 
     ijob = Ref(-1)
@@ -283,6 +287,16 @@ function _feast_symmetric_real(A::AbstractMatrix{T},
 
         elseif ijob[] == Int(Feast_RCI_FACTORIZE)
             solver_is_direct || continue
+            if mixed_workspace !== nothing
+                try
+                    _feast_mixed_factorize!(mixed_workspace, Ze[], fpm[50], fpm[51])
+                catch err
+                    @debug "Mixed factorization failed" exception=err
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+                continue
+            end
 
             if isempty(factor_cache)
                 factor_cache = _feast_factor_cache(A, store_factors ? fpm[51] : 1)
@@ -307,6 +321,16 @@ function _feast_symmetric_real(A::AbstractMatrix{T},
             end
 
         elseif ijob[] == Int(Feast_RCI_SOLVE)
+            if mixed_workspace !== nothing
+                try
+                    _feast_mixed_solve!(workspace.workc, mixed_workspace, Ze[], rci_state.Q0, fpm[50], fpm[51])
+                catch err
+                    @debug "Mixed solve failed" exception=err
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+                continue
+            end
             # Right-hand side is B * (current trial subspace), kept real until
             # the complex solve needs it.
             #
@@ -345,7 +369,7 @@ function _feast_symmetric_real(A::AbstractMatrix{T},
                                                 A, B, Ze[], M0,
                                                 _feast_inner_tol(adaptive_tol, tol_value,
                                                                  epsout[], loop[]),
-                                                solver_maxiter, solver_restart)
+                                                solver_maxiter, solver_restart; workspace=krylov_workspace)
                 if !success
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     break
@@ -393,7 +417,8 @@ function _feast_hermitian_complex(A::AbstractMatrix{Complex{T}},
                                   solver::Symbol = :direct,
                                   solver_tol::Real = 0.0,
                                   solver_maxiter::Int = 500,
-                                  solver_restart::Int = 30) where T<:Real
+                                  solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
+    fpm = _feast_initial_parameters(fpm, initial_subspace)
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("Matrix A must be square"))
     B === nothing || size(B) == (N, N) || throw(ArgumentError("Matrix B must match size of A"))
@@ -408,14 +433,17 @@ function _feast_hermitian_complex(A::AbstractMatrix{Complex{T}},
     solver_choice = solver_choice in (:direct, :gmres) ? solver_choice : :invalid
     solver_choice == :invalid &&
         throw(ArgumentError("Unsupported solver '$solver'. Use :direct, :gmres, or :iterative."))
+    mixed_workspace = _feast_mixed_workspace(A, B, M0, fpm, solver_choice)
     solver_is_direct = solver_choice == :direct
     solver_is_direct || FEAST_KRYLOV_AVAILABLE[] ||
         throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
     # Only the default tolerance is adapted; an explicit request is obeyed.
     adaptive_tol = solver_tol == 0.0
+    krylov_workspace = !solver_is_direct ? _feast_krylov_workspace(N, T, solver_restart) : nothing
 
     workspace = FeastWorkspaceComplex{T}(N, M0)
+    _feast_initial_subspace!(workspace.workc, initial_subspace)
     rci_state = FeastHRCIState{T}()
 
     ijob = Ref(-1)
@@ -456,6 +484,16 @@ function _feast_hermitian_complex(A::AbstractMatrix{Complex{T}},
 
         elseif ijob[] == Int(Feast_RCI_FACTORIZE)
             solver_is_direct || continue
+            if mixed_workspace !== nothing
+                try
+                    _feast_mixed_factorize!(mixed_workspace, Ze[], fpm[50], fpm[51])
+                catch err
+                    @debug "Mixed factorization failed" exception=err
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+                continue
+            end
 
             if isempty(factor_cache)
                 factor_cache = _feast_factor_cache(A, store_factors ? fpm[51] : 1)
@@ -480,6 +518,16 @@ function _feast_hermitian_complex(A::AbstractMatrix{Complex{T}},
             end
 
         elseif ijob[] == Int(Feast_RCI_SOLVE)
+            if mixed_workspace !== nothing
+                try
+                    _feast_mixed_solve!(workspace.workc, mixed_workspace, Ze[], rci_state.Q0, fpm[50], fpm[51])
+                catch err
+                    @debug "Mixed solve failed" exception=err
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+                continue
+            end
             # As in _feast_symmetric_real: the kernel restores the trial
             # subspace into workc before each contour point, so B * workc is
             # the same at every point of one sweep. workc is overwritten by the
@@ -513,7 +561,7 @@ function _feast_hermitian_complex(A::AbstractMatrix{Complex{T}},
                                                 _feast_inner_tol(adaptive_tol, tol_value,
                                                                  epsout[], loop[]),
                                                 solver_maxiter,
-                                                solver_restart)
+                                                solver_restart; workspace=krylov_workspace)
                 if !success
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     break
@@ -630,4 +678,46 @@ function feast_estimate_count(A::AbstractMatrix, interval::Tuple{Real,Real};
         total += V[i, j] * real(acc[i, j])
     end
     return Float64(total / p)
+end
+
+"""
+    feast_estimate_count(A, center::Complex, radius::Real; B=nothing, nprobe=16, fpm=nothing)
+
+Estimate the eigenvalue count inside a full complex contour using stochastic
+trace probes. A registered custom contour takes precedence over the circle.
+This is an estimate, especially for nonnormal pencils and boundary clusters.
+The factorization work is additional setup cost when using automatic sizing.
+"""
+function feast_estimate_count(A::AbstractMatrix, center::Complex, radius::Real;
+                              B::Union{AbstractMatrix,Nothing}=nothing,
+                              nprobe::Int=16, fpm::Union{Vector{Int},Nothing}=nothing)
+    N = size(A, 1)
+    size(A) == (N, N) || throw(ArgumentError("A must be square"))
+    B === nothing || size(B) == size(A) || throw(DimensionMismatch("B must match A"))
+    nprobe > 0 || throw(ArgumentError("nprobe must be positive"))
+    params = copy(_ensure_feast_parameters(fpm))
+    feastdefault!(params)
+    (; A_exec, B_exec, center_exec, radius_exec) = _feast_prepare_general_matrices(A, B, center, radius)
+    T = real(eltype(A_exec))
+    contour = feast_get_custom_contour(T, params)
+    contour === nothing && (contour = feast_gcontour(center_exec, radius_exec, params))
+    # Match mixed dense/sparse pencils to a common storage just as interval
+    # count estimation does; ordinary solver validation still applies later.
+    if B_exec !== nothing && (A_exec isa SparseMatrixCSC) != (B_exec isa SparseMatrixCSC)
+        A_exec, B_exec = Matrix(A_exec), Matrix(B_exec)
+    end
+    p = min(nprobe, N)
+    rng = MersenneTwister(hash((N, p, :feast_general_count)))
+    probes = Complex{T}.(rand(rng, (-one(T), one(T)), N, p))
+    rhs = B_exec === nothing ? copy(probes) : B_exec * probes
+    solutions = similar(rhs)
+    total = zero(Complex{T})
+    factor = nothing
+    for (z, w) in zip(contour.Zne, contour.Wne)
+        factor = _feast_refactorize(factor, _feast_shifted_complex(A_exec, B_exec, z), true)
+        copyto!(solutions, rhs)
+        _feast_factor_solve!(factor, solutions)
+        total += w * dot(probes, solutions)
+    end
+    return Float64(real(total) / p)
 end

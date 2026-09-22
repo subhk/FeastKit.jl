@@ -38,6 +38,12 @@ using MPI      # enables mpi_feast and the other distributed drivers
 Direct (factorization-based) FEAST needs neither. Calling an iterative variant
 without Krylov, or an MPI driver without MPI, reports what to load.
 
+New performance controls in this checkout include `initial_subspace` for
+serial/matrix-free warm starts, `subspace_size=:auto` with a width cap, and
+opt-in dense serial `mixed_precision=true`. See the
+[performance guide](docs/src/performance.md) for supported paths and
+[measured tradeoffs](benchmark/README.md).
+
 ## Quick Start
 
 ### Basic Usage
@@ -51,18 +57,40 @@ n = 100
 A = diagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))
 
 # Find eigenvalues in the interval [0.5, 1.5]
-result = feast(A, (0.5, 1.5), M0=10)
+result = feast(A, (0.5, 1.5); subspace_size=30, tol=1e-10)
 
+@assert result.converged result.message
 println("Found $(result.M) eigenvalues")
-println("Eigenvalues: ", result.lambda)
+println("Eigenvalues: ", result.values)
 ```
+
+Use `subspace_size` to leave room for all eigenvalues in the search region.
+`M0` remains an alias. Common controls are `tol`, `maxiter`, and
+`quadrature_points`; `fpm` remains available for advanced settings. Conflicting
+named and `fpm` settings raise an error. Tolerances round down to the next
+decimal power (for example, `tol=3e-9` uses `1e-9`); Float32 retains its precision
+floor of `sqrt(eps(Float32))`.
+
+Full contours can be passed directly, including for non-Hermitian problems:
+
+```julia
+C = Matrix(Diagonal(ComplexF64[-0.3+0.2im, 0.4-0.1im, 2.5]))
+region = feast_rectangle(-1, 1, -1, 1)
+result = feast(C, region; subspace_size=3)
+@assert result.converged result.message
+```
+
+For iterative shifted solves, load `Krylov` and pass `solver=:gmres` with
+`solver_opts=(rtol=1e-13, maxiter=500, restart=30)`. Assembled matrices default
+to `solver=:direct`; matrix-free operators default to `:gmres` and also accept
+a solver callback. These keyword names work across both interfaces.
 
 ### Generalized Eigenvalue Problems
 
 ```julia
 # For generalized problem Ax = λBx
 B = diagm(0 => ones(n))
-result = feast(A, B, (0.5, 1.5), M0=10)
+result = feast(A, B, (0.5, 1.5); subspace_size=30)
 ```
 
 ### Sparse Matrices
@@ -72,7 +100,7 @@ using SparseArrays
 
 # Create sparse matrix
 A_sparse = spdiagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))
-result = feast(A_sparse, (0.5, 1.5), M0=10)
+result = feast(A_sparse, (0.5, 1.5); subspace_size=30)
 ```
 
 ### Complex Eigenvalue Problems
@@ -194,7 +222,7 @@ Production backend support is intentionally explicit:
 | Backend | Supported high-level problems |
 | --- | --- |
 | `:serial` | Real symmetric, complex Hermitian, and general problems through the serial solvers |
-| `:threads` | Sparse real symmetric standard/generalized problems |
+| `:threads` | Dense and sparse real symmetric standard/generalized problems |
 | `:distributed` | Sparse real symmetric standard/generalized problems with Julia workers |
 | `:mpi` | Real symmetric standard/generalized plus dense/sparse complex Hermitian/general problems with an initialized MPI communicator |
 | `:auto` | Best available backend; unsupported selections fall back to serial |
@@ -207,16 +235,16 @@ acceptable.
 
 ```julia
 # Prefer the explicit backend keyword for new code.
-# Threaded backend currently supports sparse real symmetric problems.
+# Threaded backend supports dense and sparse real symmetric problems.
 result = feast(A_sparse, (0.5, 1.5), M0=10, backend=:threads)
 
 # Let FeastKit choose a backend and fall back if needed.
 result = feast(A_sparse, (0.5, 1.5), M0=10, backend=:auto)
 ```
 
-The older `parallel=:threads` keyword remains supported as an alias. Dense
-threaded FEAST is disabled in the high-level API until it matches serial results
-reliably; requesting it explicitly throws an `ArgumentError`.
+The older `parallel=:threads` keyword remains supported as an alias. Both dense
+and sparse threaded solvers complete the conjugate contour before extracting
+the eigenspace.
 
 ### Distributed Computing
 
@@ -372,7 +400,16 @@ The algorithm is particularly effective for:
 
 ## Result Structure
 
-FeastKit returns a `FeastResult` object containing:
+Symmetric/Hermitian solves return `FeastResult`; full-contour solves return
+`FeastGeneralResult`. Both provide `values`, `vectors`, `converged`, and
+`message`, plus a compact REPL display. `converged` is true only for `info == 0`;
+small residuals with a saturated subspace do not establish completeness.
+For the convenience wrappers, use
+`eigvals_feast(A, interval; check=true, ...)` or
+`eigen_feast(A, B, interval; check=true, ...)` to throw an error with recovery
+guidance for any nonzero FEAST status. Both default to `check=false` for
+compatibility. Use `feast` directly to inspect status and partial results.
+The original fields remain available:
 
 ```julia
 struct FeastResult{T<:Real, VT}
@@ -390,7 +427,7 @@ end
 
 - `info = 0`: Successful convergence
 - `info = 1`: Invalid matrix size N
-- `info = 2`: Invalid search subspace size M0
+- `info = 2`: Invalid or saturated search subspace; increase `subspace_size` or narrow the region
 - `info = 3`: Invalid search interval (Emin >= Emax)
 - `info = 4`: Invalid center/radius for complex problems
 - `info = 5`: No convergence achieved

@@ -20,6 +20,7 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
 
     # Apply defaults FIRST before using any fpm values
     feastdefault!(fpm)
+    fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
 
     # Check inputs
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
@@ -39,6 +40,7 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
         throw(ArgumentError("Krylov.jl is required for iterative banded FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+    krylov_workspace = solver_choice === :gmres ? _feast_krylov_workspace(N, T, solver_restart) : nothing
 
     # Initialize workspace
     workspace = FeastWorkspaceReal{T}(N, M0)
@@ -171,8 +173,8 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
             else
                 success = _solve_banded_shifted!(view(workspace.workc, :, 1:M0), rhs_block,
                                                  shifted_mul!, solver_choice,
-                                                 tol_value, solver_maxiter,
-                                                 solver_restart)
+                                                 _feast_inner_tol(solver_tol == 0.0, tol_value, epsout[], loop[]), solver_maxiter,
+                                                 solver_restart; workspace=krylov_workspace)
                 if !success
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     break
@@ -345,10 +347,10 @@ function _solve_banded_shifted!(dest::AbstractMatrix{Complex{T}},
                                 rhs::AbstractMatrix{Complex{T}},
                                 apply_shift!::F,
                                 solver::Symbol, tol::T,
-                                maxiter::Int, restart::Int) where {T<:Real,F}
+                                maxiter::Int, restart::Int; workspace=nothing) where {T<:Real,F}
     # Share dense shifted-solve logic so direct/iterative stopping behavior stays
     # consistent between dense and banded FEAST paths.
-    return solve_dense_shifted!(dest, rhs, apply_shift!, solver, tol, maxiter, restart)
+    return solve_dense_shifted!(dest, rhs, apply_shift!, solver, tol, maxiter, restart; workspace=workspace)
 end
 
 function feast_hbev!(A::Matrix{Complex{T}}, ka::Int,
@@ -421,6 +423,7 @@ function feast_hbgv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}}, ka::Int, kb::
 
     # Apply defaults FIRST before using any fpm values
     feastdefault!(fpm)
+    fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
 
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
     return _feast_banded_complex_hermitian(A, B, ka, kb, Emin, Emax, M0, fpm;
@@ -602,6 +605,7 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
     end
 
     feastdefault!(fpm)
+    fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
 
     solver_choice = solver == :iterative ? :gmres : solver
@@ -613,6 +617,7 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
         throw(ArgumentError("Krylov.jl is required for iterative banded FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+    krylov_workspace = solver_choice === :gmres ? _feast_krylov_workspace(N, T, solver_restart) : nothing
 
     B_is_identity = B === nothing
     Q_basis = zeros(Complex{T}, N, M0)
@@ -727,8 +732,8 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
                 current_shift[] = z
                 success = _solve_banded_shifted!(solutions_block, rhs_block,
                                                  shifted_mul!, solver_choice,
-                                                 tol_value, solver_maxiter,
-                                                 solver_restart)
+                                                 _feast_inner_tol(solver_tol == 0.0, tol_value, epsout_val, loop_idx), solver_maxiter,
+                                                 solver_restart; workspace=krylov_workspace)
                 if !success
                     info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                     solve_failed = true
@@ -823,7 +828,7 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
                     banded_hermitian_matvec!(Bq_vec, B, kb, q_col)
                     @. residual_vec = residual_vec - lambda_vec[j] * Bq_vec
                 end
-                res_val = norm(residual_vec) / max(abs(lambda_vec[j]), one(T))
+                res_val = _feast_scaled_residual(residual_vec, B_is_identity ? q_col : Bq_vec, lambda_vec[j])
                 res_vec[j] = res_val
                 max_res = max(max_res, res_val)
             end
@@ -882,6 +887,7 @@ required for complex-symmetric pencils.
     end
 
     feastdefault!(fpm)
+    fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
     check_feast_grci_input(N, M0, Emid, r, fpm)
 
     solver_choice = solver == :iterative ? :gmres : solver
@@ -893,6 +899,7 @@ required for complex-symmetric pencils.
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
         throw(ArgumentError("Krylov.jl is required for iterative banded FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+    krylov_workspace = solver_choice === :gmres ? _feast_krylov_workspace(N, T, solver_restart) : nothing
 
     B_is_identity = B === nothing
     Q_basis = zeros(Complex{T}, N, M0)
@@ -1002,8 +1009,8 @@ required for complex-symmetric pencils.
                 current_shift[] = z
                 success = _solve_banded_shifted!(shifted_block, rhs_block,
                                                  shifted_mul!, solver_choice,
-                                                 tol_value, solver_maxiter,
-                                                 solver_restart)
+                                                 _feast_inner_tol(solver_tol == 0.0, tol_value, epsout_val, loop_idx), solver_maxiter,
+                                                 solver_restart; workspace=krylov_workspace)
                 if !success
                     info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                     solve_failed = true
@@ -1080,7 +1087,7 @@ required for complex-symmetric pencils.
                     banded_complex_symmetric_matvec!(Bq_vec, B, kb, q_col)
                     @. residual_vec = residual_vec - lambda_vec[j] * Bq_vec
                 end
-                res_val = norm(residual_vec) / max(abs(lambda_vec[j]), one(T))
+                res_val = _feast_scaled_residual(residual_vec, B_is_identity ? q_col : Bq_vec, lambda_vec[j])
                 res_vec[j] = res_val
                 max_res = max(max_res, res_val)
             end
@@ -1140,6 +1147,7 @@ to the dense GMRES path used by the existing dense general solver.
     end
 
     feastdefault!(fpm)
+    fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
     check_feast_grci_input(N, M0, Emid, r, fpm)
 
     solver_choice = solver == :iterative ? :gmres : solver
@@ -1151,6 +1159,7 @@ to the dense GMRES path used by the existing dense general solver.
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
         throw(ArgumentError("Krylov.jl is required for iterative banded FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+    krylov_workspace = solver_choice === :gmres ? _feast_krylov_workspace(N, T, solver_restart) : nothing
 
     B_is_identity = B === nothing
     workspace = FeastWorkspaceComplex{T}(N, M0)
@@ -1284,8 +1293,8 @@ to the dense GMRES path used by the existing dense general solver.
             else
                 success = _solve_banded_shifted!(workc_block, rhs_block,
                                                  shifted_mul!, solver_choice,
-                                                 tol_value, solver_maxiter,
-                                                 solver_restart)
+                                                 _feast_inner_tol(solver_tol == 0.0, tol_value, epsout[], loop[]), solver_maxiter,
+                                                 solver_restart; workspace=krylov_workspace)
                 if !success
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     break

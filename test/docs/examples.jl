@@ -50,6 +50,10 @@ end
             end
         end
     end
+    @testset "Eigenvalue accuracy example" begin
+        sandbox = documentation_sandbox()
+        Base.include_string(sandbox, documentation_block("testing.md", "### Testing Eigenvalue Accuracy"))
+    end
     @testset "Convergence workflow" begin
         sandbox = documentation_sandbox()
         code = documentation_block("getting_started.md", "**Problem**: FeastKit isn't converging well")

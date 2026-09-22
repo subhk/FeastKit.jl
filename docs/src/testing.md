@@ -116,20 +116,25 @@ end
 
 ### Testing Eigenvalue Accuracy
 
+Place interval endpoints in gaps between eigenvalues. This matrix has an
+eigenvalue exactly at `1.0`, so use `1.05` as the upper endpoint to avoid
+roundoff-dependent inclusion of that eigenvalue.
+
 ```@example test_eigenvalues
 using Test, FeastKit, LinearAlgebra
 @testset "Eigenvalue accuracy" begin
     n = 50
     A = SymTridiagonal(2*ones(n), -ones(n-1))
-    B = Matrix(1.0I, n, n)
+    interval = (0.0, 1.05)
 
     # Compute reference eigenvalues
     λ_ref = eigvals(A)
 
     # FEAST result
-    result = feast(A, (0.0, 1.0), M0=20)
+    result = feast(A, interval, M0=20)
 
-    expected = filter(λ -> 0.0 < λ < 1.0, λ_ref)
+    expected = filter(λ -> interval[1] < λ < interval[2], λ_ref)
+    @test length(expected) == 17
     @test result.converged
     @test result.M == length(expected)
     @test result.values ≈ expected atol=1e-9

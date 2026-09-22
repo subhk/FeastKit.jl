@@ -2,14 +2,10 @@
 
 This guide covers how to run and write tests for FeastKit.jl.
 
-## Table of Contents
-
-- [Running Tests](#running-tests)
-- [Test Structure](#test-structure)
-- [Writing Tests](#writing-tests)
-- [Test Categories](#test-categories)
-- [Debugging Tests](#debugging-tests)
-- [Continuous Integration](#continuous-integration)
+```@contents
+Pages = ["testing.md"]
+Depth = 2
+```
 
 ---
 
@@ -24,22 +20,23 @@ julia --project -e 'using Pkg; Pkg.test()'
 # With multiple threads
 julia --project --threads=auto -e 'using Pkg; Pkg.test()'
 
-# With verbose output
+# Collect local coverage data
 julia --project -e 'using Pkg; Pkg.test(coverage=true)'
 ```
 
 ### Specific Tests
 
-```bash
-julia --project
-```
+`Pkg.test()` prepares the test extras automatically. To include an individual
+file manually, first create a temporary environment containing this checkout
+and its optional solver packages (run from the repository root):
 
-```julia-repl
-julia> using Test
-
-julia> include("test/runtests.jl")
-
-julia> include("test/test_matrix_free.jl")   # a single file
+```julia
+using Pkg
+checkout = pwd()
+Pkg.activate(temp=true)
+Pkg.develop(path=checkout)
+Pkg.add(["Krylov", "MPI"])
+include(joinpath(checkout, "test", "matrixfree", "operators_and_solvers.jl"))
 ```
 
 ### Test with Specific Configuration
@@ -49,10 +46,10 @@ julia> include("test/test_matrix_free.jl")   # a single file
 JULIA_DEPOT_PATH=$PWD/.julia julia --project -e 'using Pkg; Pkg.test()'
 
 # Test distributed workers
-FEASTKIT_TEST_DISTRIBUTED=true julia --project -e 'using Distributed; addprocs(2; exeflags=`--project=$(Base.active_project())`); @everywhere using FeastKit, LinearAlgebra, SparseArrays; include("test/test_parallel_backends.jl")'
+FEASTKIT_TEST_DISTRIBUTED=true julia --project -e 'using Distributed; addprocs(2; exeflags=`--project=$(Base.active_project())`); @everywhere using FeastKit, LinearAlgebra, SparseArrays; include("test/backends/execution.jl")'
 
-# Test MPI with the launcher selected by MPI.jl
-FEASTKIT_TEST_MPI=true FEASTKIT_ENABLE_MPI=true julia --project -e 'using MPI; run(`$(MPI.mpiexec()) -n 4 julia --project test/test_parallel_backends.jl`)'
+# MPI tests need an environment with both MPI and Krylov.
+# See the mpi-backend job in .github/workflows/ci.yml for the complete launcher command.
 ```
 
 ---
@@ -63,37 +60,40 @@ FEASTKIT_TEST_MPI=true FEASTKIT_ENABLE_MPI=true julia --project -e 'using MPI; r
 
 ```
 test/
-├── runtests.jl           # Main test file
-├── test_matrix_free.jl   # Matrix-free interface tests
-└── (future test files)
+├── runtests.jl           # Includes suites grouped by feature
+├── support/             # Common imports and deterministic backend fixtures
+├── api/                 # Public dispatch, options, compatibility, result wrappers
+├── core/                # Parameters, utilities, allocation and CI coverage checks
+├── contours/            # Contour generation, shapes, and membership
+├── storage/             # Dense, sparse, and banded drivers
+├── rci/                 # RCI protocol tests
+├── matrixfree/          # Operator and shifted-solver tests
+├── numerics/            # Eigenpair accuracy, scaling, projection, solver failures
+├── backends/            # Threaded, worker, MPI, and hybrid execution
+└── docs/                # Published snippets and standalone example programs
 ```
 
 ### Main Test File
 
-`test/runtests.jl` contains the primary test suite organized by functionality:
+`test/runtests.jl` is an include manifest. Add new tests to the relevant feature
+directory and include them in that feature's testset. Existing numerical
+regressions remain part of the ordinary suite.
 
-```julia
-using Test
-using FeastKit
-using LinearAlgebra
-using SparseArrays
+`test/support/setup.jl` provides imports for the extracted storage and RCI suites.
+`test/support/fixtures.jl` provides the shared small tridiagonal problem used by
+API and worker/MPI tests. Test files with their own imports can also run directly
+in a prepared test environment.
 
-@testset "FeastKit.jl" begin
-    @testset "Core Types" begin
-        # Type tests
-    end
+The full CI job enables `FEAST_RUN_LONG_TESTS`, `FEAST_RUN_PARALLEL_TESTS`, and
+`FEASTKIT_TEST_PARALLEL`. Worker and MPI execution are enabled in dedicated jobs
+using `FEASTKIT_TEST_DISTRIBUTED` and `FEASTKIT_TEST_MPI`. MPI fault-injection
+scripts (`backends/mpi_faults.jl` and `backends/mpi_rhs_faults.jl`) run in separate
+processes with timeouts because they deliberately replace numerical methods.
+They must not be included in the ordinary test runner.
 
-    @testset "Dense Solvers" begin
-        # Dense matrix tests
-    end
-
-    @testset "Sparse Solvers" begin
-        # Sparse matrix tests
-    end
-
-    # ... more testsets
-end
-```
+`test/docs/example_scripts.jl` is an additional standalone example-program check;
+`docs/check_parallel_examples.jl` executes the parallel scripts printed in the
+manual. The strict documentation build executes the `@example` blocks.
 
 ---
 
@@ -101,30 +101,23 @@ end
 
 ### Basic Test Patterns
 
-```julia
-@testset "Feature Name" begin
-    # Setup
-    n = 100
-    A = create_test_matrix(n)
-
-    # Test basic functionality
-    @test result.info == 0
-    @test result.M > 0
-
-    # Test numerical accuracy
-    @test isapprox(computed, expected, rtol=1e-10)
-
-    # Test types
+```@example test_basics
+using Test, FeastKit, LinearAlgebra
+@testset "Small standard problem" begin
+    A = Matrix(Diagonal([1.0, 2.0, 4.0]))
+    result = feast(A, (0.5, 2.5); subspace_size=3)
+    @test result.converged
+    @test result.M == 2
+    @test result.values ≈ [1.0, 2.0] atol=1e-9
     @test result isa FeastResult
-
-    # Test exceptions
-    @test_throws ArgumentError bad_function_call()
+    @test_throws ArgumentError feast(A, (2.5, 0.5))
 end
 ```
 
 ### Testing Eigenvalue Accuracy
 
-```julia
+```@example test_eigenvalues
+using Test, FeastKit, LinearAlgebra
 @testset "Eigenvalue accuracy" begin
     n = 50
     A = SymTridiagonal(2*ones(n), -ones(n-1))
@@ -135,6 +128,11 @@ end
 
     # FEAST result
     result = feast(A, (0.0, 1.0), M0=20)
+
+    expected = filter(λ -> 0.0 < λ < 1.0, λ_ref)
+    @test result.converged
+    @test result.M == length(expected)
+    @test result.values ≈ expected atol=1e-9
 
     # Check eigenvalues match
     for i in 1:result.M
@@ -148,21 +146,23 @@ end
 
 ### Testing Eigenvector Residuals
 
-```julia
+```@example test_residuals
+using Test, FeastKit, LinearAlgebra
 @testset "Eigenvector residuals" begin
     n = 100
-    A = Symmetric(randn(n, n))
+    A = Matrix(SymTridiagonal(2.0*ones(n), -ones(n-1)))
     B = Matrix(1.0I, n, n)
 
-    result = feast(A, (-1.0, 1.0), M0=20)
+    result = feast(A, (0.0, 0.05), M0=20)
 
+    @test result.converged && result.M == 7
     for i in 1:result.M
         λ = result.lambda[i]
         x = result.q[:, i]
 
-        # Residual: ||Ax - λBx|| / ||Ax||
+        # Scaled residual: ||Ax - λBx|| / (||Bx|| * max(|λ|, 1))
         Ax = A * x
-        residual = norm(Ax - λ * B * x) / norm(Ax)
+        residual = norm(Ax - λ * B * x) / norm(B * x) / max(abs(λ), 1)
         @test residual < 1e-10
     end
 end
@@ -170,17 +170,25 @@ end
 
 ### Testing Orthogonality
 
-```julia
+```@example test_orthogonality
+using Test, FeastKit, LinearAlgebra
+A = Matrix(Diagonal([2.0, 6.0, 16.0]))
+B = Matrix(Diagonal([2.0, 3.0, 4.0]))
+interval = (0.5, 2.5)
 @testset "Eigenvector orthogonality" begin
     result = feast(A, B, interval, M0=20)
 
     Q = result.q[:, 1:result.M]
 
-    # For standard problem (B=I): Q'Q ≈ I
-    @test isapprox(Q' * Q, I, atol=1e-10)
-
-    # For generalized problem: Q'BQ ≈ I
-    @test isapprox(Q' * B * Q, I, atol=1e-10)
+    @test result.converged
+    # Returned vectors have unit Euclidean norm. For a symmetric/Hermitian
+    # definite pencil with distinct eigenvalues, the B-Gram matrix is diagonal.
+    @test all(j -> isapprox(norm(Q[:, j]), 1; atol=1e-10), axes(Q, 2))
+    gram = Q' * B * Q
+    @test isapprox(gram, Diagonal(diag(gram)); atol=1e-10)
+    # Normalize explicitly if downstream work requires Q'BQ = I.
+    Q_B = Q * Diagonal(inv.(sqrt.(real.(diag(gram)))))
+    @test isapprox(Q_B' * B * Q_B, I; atol=1e-10)
 end
 ```
 
@@ -190,12 +198,13 @@ end
 
 ### Core Type Tests
 
-```julia
+```@example test_result_type
+using Test, FeastKit
 @testset "FeastResult" begin
     # Test construction
     result = FeastResult{Float64, Float64}(
         [1.0, 2.0, 3.0],        # lambda
-        randn(10, 3),           # q
+        zeros(10, 3),           # q
         3,                       # M
         [1e-12, 1e-12, 1e-12],  # res
         0,                       # info
@@ -211,39 +220,26 @@ end
 
 ### Dense Solver Tests
 
-```julia
-@testset "Dense Solvers" begin
-    @testset "feast_sygv! - Real symmetric generalized" begin
-        n = 50
-        A = Symmetric(randn(n, n))
-        B = Symmetric(randn(n, n) + 5I)
-        fpm = zeros(Int, 64)
-        feastinit!(fpm)
+```@example test_dense_drivers
+using Test, FeastKit, LinearAlgebra
+@testset "Dense drivers" begin
+    B = Matrix(Diagonal([2.0, 3.0, 4.0]))
+    A = B * Diagonal([1.0, 2.0, 4.0])
+    result = feast_sygv!(A, B, 0.5, 2.5, 3, feastinit().fpm)
+    @test result.converged && result.M == 2
+    @test result.values ≈ [1.0, 2.0] atol=1e-9
 
-        result = feast_sygv!(Matrix(A), Matrix(B), -1.0, 1.0, 15, fpm)
-
-        @test result.info == 0
-        @test 0 <= result.M <= 15
-    end
-
-    @testset "feast_heev! - Complex Hermitian" begin
-        n = 50
-        A = randn(ComplexF64, n, n)
-        A = (A + A') / 2  # Hermitian
-        fpm = zeros(Int, 64)
-        feastinit!(fpm)
-
-        result = feast_heev!(copy(A), -1.0, 1.0, 15, fpm)
-
-        @test result.info == 0
-        @test all(isreal.(result.lambda[1:result.M]))
-    end
+    H = ComplexF64[2 im; -im 2]
+    result = feast_heev!(H, 0.5, 3.5, 2, feastinit().fpm)
+    @test result.converged && result.M == 2
+    @test result.values ≈ [1.0, 3.0] atol=1e-9
 end
 ```
 
 ### Sparse Solver Tests
 
-```julia
+```@example test_sparse_drivers
+using Test, FeastKit, LinearAlgebra, SparseArrays
 @testset "Sparse Solvers" begin
     @testset "feast_scsrgv! - Sparse symmetric generalized" begin
         n = 500
@@ -252,28 +248,29 @@ end
         fpm = zeros(Int, 64)
         feastinit!(fpm)
 
-        result = feast_scsrgv!(A, B, 0.0, 1.0, 20, fpm)
+        result = feast_scsrgv!(A, B, 0.0, 1.05*(2-2cos(10π/(n+1))), 20, fpm)
 
         @test result.info == 0
-        @test result.M > 0
+        @test result.M == 10
     end
 end
 ```
 
 ### Parallel Tests
 
-```julia
+```@example test_threaded_drivers
+using Test, FeastKit, LinearAlgebra
 @testset "Parallel Computing" begin
     @testset "Threading" begin
         if Threads.nthreads() > 1
-            n = 500
-            A = Symmetric(randn(n, n))
+            n = 20
+            A = Matrix(Diagonal(collect(1.0:n)))
             B = Matrix(1.0I, n, n)
 
-            result = feast_parallel(A, B, (0.0, 1.0), M0=20, use_threads=true)
+            result = feast_parallel(A, B, (0.5, 2.5), M0=4, use_threads=true)
 
             @test result.info == 0
-            @test result.M > 0
+            @test result.M == 2
         else
             @info "Skipping threading tests (single thread)"
         end
@@ -283,9 +280,11 @@ end
 
 ### Matrix-Free Tests
 
-```julia
+```@example test_matfree
+using Test, FeastKit, LinearAlgebra
+using FeastKit, Krylov, Test
 @testset "Matrix-Free Interface" begin
-    n = 200
+    n = 12
 
     # Define operators
     function A_mul!(y, x)
@@ -302,15 +301,18 @@ end
     end
 
     @testset "Matrix-free solve" begin
-        result = feast(A_op, (0.0, 1.0), M0=10, solver=:gmres)
-        @test result.info == 0 || result.M > 0
+        result = feast(A_op, (0.1, 1.0); subspace_size=5, tol=1e-9, solver=:gmres,
+                       solver_opts=(rtol=1e-12, maxiter=200, restart=16))
+        @test result.converged
+        @test result.M == 3
     end
 end
 ```
 
 ### Error Handling Tests
 
-```julia
+```@example test_errors
+using Test, FeastKit, LinearAlgebra
 @testset "Error Handling" begin
     @testset "Invalid interval" begin
         A = randn(10, 10)
@@ -334,7 +336,8 @@ end
 
 ### Verbose Testing
 
-```julia
+```@example test_verbose
+using Test, FeastKit, LinearAlgebra
 @testset verbose=true "Detailed Tests" begin
     @testset "Subtest 1" begin
         @test true
@@ -347,7 +350,9 @@ end
 
 ### Debugging Failing Tests
 
-```julia
+```@example test_debugging
+using Test, FeastKit, LinearAlgebra
+A = Matrix(Diagonal([0.1, 0.4, 0.9, 2.0]))
 # Add debugging output
 @testset "Debug example" begin
     result = feast(A, (0.0, 1.0), M0=10)
@@ -362,6 +367,7 @@ end
     end
 
     @test result.info == 0
+    @test result.M == 3
 end
 ```
 
@@ -371,7 +377,7 @@ end
 julia --project
 ```
 
-```julia
+```@example test_isolated
 using FeastKit, LinearAlgebra, Test
 
 # Set up test case
@@ -379,15 +385,16 @@ n = 100
 A = Matrix(SymTridiagonal(2*ones(n), -ones(n-1)))
 
 # Reproduce the failing call. Count what the interval holds first: (0.5, 1.5)
-# contains 19 eigenvalues here, so M0 = 10 can only ever report info = 5.
+# contains 19 eigenvalues here, so M0 = 10 cannot establish completeness (status 2 or 5).
 exact(k) = 2 - 2cos(k * π / (n + 1))
 expected = count(k -> 0.5 <= exact(k) <= 1.5, 1:n)
 result = feast(A, (0.5, 1.5), M0 = 2 * expected)
 
 # Inspect results
-result.info
-result.M
-result.lambda
+@test result.converged
+@test result.M == expected
+@test result.values ≈ filter(λ -> 0.5 < λ < 1.5, exact.(1:n)) atol=1e-9
+result.values
 ```
 
 ---
@@ -396,44 +403,32 @@ result.lambda
 
 ### GitHub Actions Configuration
 
-Tests run automatically on pull requests via `.github/workflows/ci.yml`:
+The actual workflow is `.github/workflows/ci.yml`. It runs Julia 1.10 and 1.11
+on Linux, macOS, and Windows with two threads and enables the optional long and
+parallel test groups. Separate jobs exercise Julia workers and two MPI ranks,
+including collective fault tests. `.github/workflows/pages.yml` builds the web
+docs against the checkout and fails on broken examples or references.
 
-```yaml
-name: CI
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+To enable the same optional test groups locally:
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        julia-version: ['1.10', '1.11']
-    steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
-        with:
-          version: ${{ matrix.julia-version }}
-      - uses: julia-actions/cache@v2
-      - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
+```sh
+FEAST_RUN_LONG_TESTS=true FEAST_RUN_PARALLEL_TESTS=true FEASTKIT_TEST_PARALLEL=true julia --project=. --threads=2 -e 'using Pkg; Pkg.test()'
 ```
 
 ### Test Coverage
 
-Coverage is collected during CI runs:
+Request coverage explicitly for a local run (the main CI job does not currently enable it):
 
 ```julia
+using Pkg
 # Run tests with coverage
 Pkg.test(coverage=true)
 ```
 
 ### CI Environment Detection
 
-```julia
+```@example test_ci_environment
+using Test, FeastKit, LinearAlgebra
 @testset "CI-specific tests" begin
     if get(ENV, "CI", "false") == "true"
         @info "Running on CI"
@@ -458,7 +453,8 @@ end
 
 ### Reproducibility
 
-```julia
+```@example test_reproducible
+using Test, FeastKit, LinearAlgebra
 using Random
 
 @testset "Reproducible tests" begin
@@ -475,14 +471,14 @@ end
 
 ### Numerical Tolerance
 
-```julia
+```@example test_tolerances
 using FeastKit, LinearAlgebra, Test
 
 A = Matrix(Diagonal([1.0e-6, 2.0e-6, 1.0, 2.0, 100.0]))
-expected = sort(eigvals(A))
+expected = filter(λ -> 0.0 < λ < 3.0, sort(eigvals(A)))
 result = feast(A, (0.0, 3.0), M0 = 8)
 computed = sort(result.lambda[1:result.M])
-expected = expected[1:length(computed)]
+@test result.converged && result.M == length(expected)
 
 # Use appropriate tolerances
 @test isapprox(computed, expected, rtol=1e-10)  # Relative
@@ -501,7 +497,6 @@ end
 
 ---
 
-<div align="center">
-  <p><strong>Ensuring FeastKit.jl quality through comprehensive testing</strong></p>
-  <a href="contributing.md">Contributing Guide</a> · <a href="developer_guide.md">Developer Guide</a>
-</div>
+**Ensuring FeastKit.jl quality through comprehensive testing**
+
+[Contributing Guide](contributing.md) · [Developer Guide](developer_guide.md)

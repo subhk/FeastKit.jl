@@ -16,6 +16,15 @@ function LinearAlgebra.mul!(y::AbstractVector{Complex{T}},
     return y
 end
 
+function _feast_krylov_workspace(N::Int, ::Type{T}, restart::Int) where T<:Real
+    FEAST_KRYLOV_AVAILABLE[] || throw(ArgumentError("Iterative solves require Krylov.jl; run `using Krylov` first"))
+    return (; gmres=_feast_gmres_workspace(N, Complex{T}; memory=max(restart, 2)),
+              rhs_scale=Ref(one(T)), residual=zeros(Complex{T}, N),
+              rhs_column=Vector{Complex{T}}(undef, N),
+              refined_solution=Vector{Complex{T}}(undef, N),
+              tmpA=Vector{Complex{T}}(undef, N), tmpB=Vector{Complex{T}}(undef, N))
+end
+
 """
     solve_dense_shifted!(dest, rhs, apply_shift!, solver, tol, maxiter, restart)
 
@@ -33,7 +42,8 @@ function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
                               rhs::AbstractMatrix{Complex{T}},
                               apply_shift!::F,
                               solver::Symbol, tol::T,
-                              maxiter::Int, restart::Int) where {T<:Real,F}
+                              maxiter::Int, restart::Int;
+                              workspace=nothing) where {T<:Real,F}
     solver == :direct && error("Direct solve should be handled before calling solve_dense_shifted!")
 
     if !FEAST_KRYLOV_AVAILABLE[]
@@ -41,7 +51,9 @@ function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
     end
 
     N = size(rhs, 1)
-    rhs_scale = Ref(one(T))
+    buffers = workspace === nothing ? _feast_krylov_workspace(N, T, restart) : workspace
+    length(buffers.residual) == N || throw(DimensionMismatch("Krylov workspace size must match the shifted system"))
+    rhs_scale = buffers.rhs_scale
     scaled_shift! = (y, x) -> begin
         apply_shift!(y, x)
         y ./= rhs_scale[]
@@ -49,12 +61,12 @@ function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
     end
     op = DenseShiftOperator{typeof(scaled_shift!), T}(scaled_shift!, N)
 
-    residual = zeros(Complex{T}, N)
-    # One Krylov basis per block, not per right-hand side. Hermitian drivers
-    # visit both contour halves, making per-column workspace allocation costly.
-    gmres_workspace = _feast_gmres_workspace(N, Complex{T}; memory=max(restart, 2))
-    rhs_column = Vector{Complex{T}}(undef, N)
-    refined_solution = similar(rhs_column)
+    residual = buffers.residual
+    # Each driver owns this state for its whole solve, including all shifts
+    # and refinement sweeps. No workspace is shared between concurrent solves.
+    gmres_workspace = buffers.gmres
+    rhs_column = buffers.rhs_column
+    refined_solution = buffers.refined_solution
     @views for j in 1:size(rhs, 2)
         b = view(rhs, :, j)
         b_norm = norm(b)
@@ -117,11 +129,11 @@ function feast_sygv!(A::Matrix{T}, B::Matrix{T},
                      solver::Symbol = :direct,
                      solver_tol::Real = 0.0,
                      solver_maxiter::Int = 500,
-                     solver_restart::Int = 30) where T<:Real
+                     solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return _feast_symmetric_real(A, B, Emin, Emax, M0, fpm;
                                  solver=solver, solver_tol=solver_tol,
                                  solver_maxiter=solver_maxiter,
-                                 solver_restart=solver_restart)
+                                 solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 @inline function _complex_to_real_result(result::FeastResult{T, Complex{T}}) where T<:Real
@@ -147,11 +159,11 @@ function feast_heev!(A::Matrix{Complex{T}},
                      solver::Symbol = :direct,
                      solver_tol::Real = 0.0,
                      solver_maxiter::Int = 500,
-                     solver_restart::Int = 30) where T<:Real
+                     solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return _feast_hermitian_complex(A, nothing, Emin, Emax, M0, fpm;
                                           solver=solver, solver_tol=solver_tol,
                                           solver_maxiter=solver_maxiter,
-                                          solver_restart=solver_restart)
+                                          solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing},
@@ -159,7 +171,8 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
                      solver::Symbol = :direct,
                      solver_tol::Real = 0.0,
                      solver_maxiter::Int = 500,
-                     solver_restart::Int = 30) where T<:Real
+                     solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
+    fpm = _feast_initial_parameters(fpm, initial_subspace)
     # Feast for dense complex general eigenvalue problem
     # Solves: A*q = lambda*B*q where A and B are general matrices
     
@@ -178,9 +191,11 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
     solver_choice = solver_choice in (:direct, :gmres) ? solver_choice : :invalid
     solver_choice == :invalid &&
         throw(ArgumentError("Unsupported solver '$solver'. Use :direct, :gmres, or :iterative."))
+    mixed_workspace = _feast_mixed_workspace(A, B, M0, fpm, solver_choice)
     use_direct = solver_choice == :direct
     use_iterative = !use_direct
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+    krylov_workspace = solver_choice === :gmres ? _feast_krylov_workspace(N, T, solver_restart) : nothing
 
     use_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
         throw(ArgumentError("Krylov.jl is required for iterative dense FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
@@ -193,6 +208,7 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
 
     # Initialize workspace
     workspace = FeastWorkspaceComplex{T}(N, M0)
+    _feast_initial_subspace!(workspace.workc, initial_subspace)
     
     # Initialize variables for RCI
     ijob = Ref(-1)
@@ -265,6 +281,16 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
         end
 
         if ijob[] == Int(Feast_RCI_FACTORIZE)
+            if mixed_workspace !== nothing
+                try
+                    _feast_mixed_factorize!(mixed_workspace, Ze[], fpm[50], fpm[51])
+                catch err
+                    @debug "Mixed factorization failed" exception=err
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+                continue
+            end
             # Factorize Ze*B - A
             z = Ze[]
             if use_direct
@@ -297,6 +323,16 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
             end
 
         elseif ijob[] == Int(Feast_RCI_SOLVE)
+            if mixed_workspace !== nothing
+                try
+                    _feast_mixed_solve!(workspace.workc, mixed_workspace, Ze[], grci_state.Q0, fpm[50], fpm[51])
+                catch err
+                    @debug "Mixed solve failed" exception=err
+                    info[] = Int(Feast_ERROR_LAPACK)
+                    break
+                end
+                continue
+            end
             # Solve linear systems: (Ze*B - A) * X = B * workspace.workc
             rhs = view(rhs_buffer, :, 1:M0)
             workc_block = view(workspace.workc, :, 1:M0)
@@ -319,8 +355,8 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
             else
                 copyto!(rhs_copy, rhs)
                 success = solve_dense_shifted!(workspace.workc[:, 1:M0], rhs_copy,
-                                               shifted_mul!, solver_choice, tol_value,
-                                               solver_maxiter, solver_restart)
+                                               shifted_mul!, solver_choice, _feast_inner_tol(solver_tol == 0.0, tol_value, epsout[], loop[]),
+                                               solver_maxiter, solver_restart; workspace=krylov_workspace)
                 if !success
                     # Fall back to direct solve if iterative solver failed
                     if B_is_identity
@@ -416,6 +452,7 @@ end
 
 function _feast_polynomial_rci!(coeffs::Vector{Matrix{Complex{T}}}, d::Int,
                                 Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int}) where T<:Real
+    fpm[42] == 1 && throw(ArgumentError("mixed_precision is supported only for linear dense eigenproblems"))
     N = _check_polynomial_coeffs(coeffs, d)
     check_feast_grci_input(N, M0, Emid, r, fpm)
 
@@ -563,7 +600,7 @@ function feast_syev!(A::Matrix{T},
                      solver::Symbol = :direct,
                      solver_tol::Real = 0.0,
                      solver_maxiter::Int = 500,
-                     solver_restart::Int = 30) where T<:Real
+                     solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     # Feast for dense real symmetric standard eigenvalue problem
     # Solves: A*q = lambda*q where A is symmetric
     # This is equivalent to feast_sygv! with B = I
@@ -574,7 +611,7 @@ function feast_syev!(A::Matrix{T},
     return _feast_symmetric_real(A, nothing, Emin, Emax, M0, fpm;
                                  solver=solver, solver_tol=solver_tol,
                                  solver_maxiter=solver_maxiter,
-                                 solver_restart=solver_restart)
+                                 solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function feast_hegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
@@ -582,11 +619,11 @@ function feast_hegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
                      solver::Symbol = :direct,
                      solver_tol::Real = 0.0,
                      solver_maxiter::Int = 500,
-                     solver_restart::Int = 30) where T<:Real
+                     solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return _feast_hermitian_complex(A, B, Emin, Emax, M0, fpm;
                                           solver=solver, solver_tol=solver_tol,
                                           solver_maxiter=solver_maxiter,
-                                          solver_restart=solver_restart)
+                                          solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 
@@ -595,7 +632,7 @@ function feast_geev!(A::Matrix{Complex{T}},
                      solver::Symbol = :direct,
                      solver_tol::Real = 0.0,
                      solver_maxiter::Int = 500,
-                     solver_restart::Int = 30) where T<:Real
+                     solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     # Feast for dense complex general standard eigenvalue problem
     # Solves: A*q = lambda*q where A is a general matrix
     # This is equivalent to feast_gegv! with B = I
@@ -605,67 +642,67 @@ function feast_geev!(A::Matrix{Complex{T}},
 
     return feast_gegv!(A, nothing, Emid, r, M0, fpm;
                        solver=solver, solver_tol=solver_tol,
-                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function zifeast_gegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
                        Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
                        solver_tol::Real = 0.0,
                        solver_maxiter::Int = 500,
-                       solver_restart::Int = 30) where T<:Real
+                       solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return feast_gegv!(A, B, Emid, r, M0, fpm;
                        solver=:gmres, solver_tol=solver_tol,
-                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function zifeast_geev!(A::Matrix{Complex{T}},
                        Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
                        solver_tol::Real = 0.0,
                        solver_maxiter::Int = 500,
-                       solver_restart::Int = 30) where T<:Real
+                       solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return feast_geev!(A, Emid, r, M0, fpm;
                        solver=:gmres, solver_tol=solver_tol,
-                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function difeast_sygv!(A::Matrix{T}, B::Matrix{T},
                        Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                        solver_tol::Real = 0.0,
                        solver_maxiter::Int = 500,
-                       solver_restart::Int = 30) where T<:Real
+                       solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return feast_sygv!(A, B, Emin, Emax, M0, fpm;
                        solver=:gmres, solver_tol=solver_tol,
-                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function difeast_syev!(A::Matrix{T},
                        Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                        solver_tol::Real = 0.0,
                        solver_maxiter::Int = 500,
-                       solver_restart::Int = 30) where T<:Real
+                       solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return feast_syev!(A, Emin, Emax, M0, fpm;
                        solver=:gmres, solver_tol=solver_tol,
-                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function zifeast_heev!(A::Matrix{Complex{T}},
                        Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                        solver_tol::Real = 0.0,
                        solver_maxiter::Int = 500,
-                       solver_restart::Int = 30) where T<:Real
+                       solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return feast_heev!(A, Emin, Emax, M0, fpm;
                        solver=:gmres, solver_tol=solver_tol,
-                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function zifeast_hegv!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
                        Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                        solver_tol::Real = 0.0,
                        solver_maxiter::Int = 500,
-                       solver_restart::Int = 30) where T<:Real
+                       solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return feast_hegv!(A, B, Emin, Emax, M0, fpm;
                        solver=:gmres, solver_tol=solver_tol,
-                       solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                       solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 # Custom contour (x-suffix) variants
@@ -811,7 +848,12 @@ Hermitian/general dense paths.
                                                solver::Symbol = :direct,
                                                solver_tol::Real = 0.0,
                                                solver_maxiter::Int = 500,
-                                               solver_restart::Int = 30) where T<:Real
+                                               solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
+    if initial_subspace !== nothing || fpm[42] == 1
+        return feast_gegv!(A, B, Emid, r, M0, fpm; solver=solver,
+            solver_tol=solver_tol, solver_maxiter=solver_maxiter,
+            solver_restart=solver_restart, initial_subspace=initial_subspace)
+    end
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     B === nothing || size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
@@ -830,6 +872,7 @@ Hermitian/general dense paths.
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
         throw(ArgumentError("Krylov.jl is required for iterative dense FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+    krylov_workspace = solver_choice === :gmres ? _feast_krylov_workspace(N, T, solver_restart) : nothing
 
     B_is_identity = B === nothing
     B_matrix = B_is_identity ? Matrix{Complex{T}}(undef, 0, 0) : copy(B)
@@ -935,8 +978,8 @@ Hermitian/general dense paths.
                 current_shift[] = z
                 success = solve_dense_shifted!(shifted_block, rhs_copy_block,
                                                shifted_mul!, solver_choice,
-                                               tol_value, solver_maxiter,
-                                               solver_restart)
+                                               _feast_inner_tol(solver_tol == 0.0, tol_value, epsout_val, loop_idx), solver_maxiter,
+                                               solver_restart; workspace=krylov_workspace)
                 if !success
                     info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                     solve_failed = true
@@ -1009,7 +1052,7 @@ Hermitian/general dense paths.
                     mul!(Bq_vec, B_matrix, q_col)
                     @. residual_vec = residual_vec - lambda_vec[j] * Bq_vec
                 end
-                res_val = norm(residual_vec) / max(abs(lambda_vec[j]), one(T))
+                res_val = _feast_scaled_residual(residual_vec, B_is_identity ? q_col : Bq_vec, lambda_vec[j])
                 res_vec[j] = res_val
                 max_res = max(max_res, res_val)
             end
@@ -1049,12 +1092,12 @@ function feast_geev_complex_sym!(A::Matrix{Complex{T}},
                                  solver::Symbol = :direct,
                                  solver_tol::Real = 0.0,
                                  solver_maxiter::Int = 500,
-                                 solver_restart::Int = 30) where T<:Real
+                                 solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return _feast_dense_complex_symmetric(A, nothing, Emid, r, M0, fpm;
                                           solver=solver,
                                           solver_tol=solver_tol,
                                           solver_maxiter=solver_maxiter,
-                                          solver_restart=solver_restart)
+                                          solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function feast_gegv_complex_sym!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
@@ -1062,10 +1105,10 @@ function feast_gegv_complex_sym!(A::Matrix{Complex{T}}, B::Matrix{Complex{T}},
                                  solver::Symbol = :direct,
                                  solver_tol::Real = 0.0,
                                  solver_maxiter::Int = 500,
-                                 solver_restart::Int = 30) where T<:Real
+                                 solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return _feast_dense_complex_symmetric(A, B, Emid, r, M0, fpm;
                                           solver=solver,
                                           solver_tol=solver_tol,
                                           solver_maxiter=solver_maxiter,
-                                          solver_restart=solver_restart)
+                                          solver_restart=solver_restart, initial_subspace=initial_subspace)
 end

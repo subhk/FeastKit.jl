@@ -1,164 +1,100 @@
 # Parallel Computing
 
-FeastKit.jl provides multiple parallelization strategies to accelerate eigenvalue computations. The FEAST algorithm is naturally parallelizable because each contour integration point can be computed independently.
+FEAST can solve shifted systems at different contour nodes concurrently. This
+guide contains complete local threading, distributed-worker, MPI, and hybrid
+examples. Their assertions check the eigenvalues, not a promised speedup.
 
-## Table of Contents
-
-- [Overview](#overview)
-- [Checking Capabilities](#checking-capabilities)
-- [Threading (Shared Memory)](#threading-shared-memory)
-- [Distributed Computing](#distributed-computing)
-- [MPI Parallelization](#mpi-parallelization)
-- [Hybrid Parallelization](#hybrid-parallelization)
-- [Performance Tuning](#performance-tuning)
-- [Troubleshooting](#troubleshooting)
-
----
+```@contents
+Pages = ["parallel_computing.md"]
+Depth = 2
+```
 
 ## Overview
 
-FeastKit supports three parallel backends:
+| Backend | Supported high-level problems | Required setup |
+|:--|:--|:--|
+| `:threads` | Real symmetric dense/sparse interval problems | Multiple Julia threads |
+| `:distributed` | Real symmetric sparse interval problems | Julia workers with FeastKit available |
+| `:mpi` | Real symmetric intervals and complex Hermitian/general dense/sparse problems | MPI.jl, initialized communicator, multiple ranks |
+| `feast_hybrid` | Real symmetric MPI problems with threaded contour solves | MPI plus threads on each rank |
 
-| Backend | Best For | Setup | Scalability |
-|---------|----------|-------|-------------|
-| **Threading** | Single node, shared memory | `julia --threads=N` | Up to ~16 cores |
-| **Distributed** | Multi-process Julia | `addprocs(N)` | Multiple nodes |
-| **MPI** | HPC clusters | MPI installation + `using MPI` | 1000s of cores |
+Explicit unavailable backends raise an error. `backend=:auto` permits fallback
+and does not guarantee that a parallel backend will be chosen. Assembled serial
+solves support direct and GMRES inner solvers. Threaded/distributed and real MPI
+paths use direct solves; complex MPI also supports GMRES after loading Krylov.
 
-MPI is a weak dependency provided by the `FeastKitMPIExt` package extension:
-`using MPI` alongside `using FeastKit` is what gives `mpi_feast` and the other
-`mpi_feast_*` drivers their methods. Threading and `Distributed` need no extra
-packages. Iterative (IFEAST) solves additionally need `using Krylov`.
-
-High-level production support is intentionally narrower than the lower-level
-interfaces:
-
-| Backend | Supported high-level problems | Fallback behavior |
-|---------|--------------------------------|-------------------|
-| `:serial` | Real symmetric, complex Hermitian, and general problems | None |
-| `:threads` | Dense **and** sparse real symmetric standard/generalized problems | Explicit requests throw on unsupported inputs |
-| `:distributed` | Sparse real symmetric standard/generalized problems with workers | Explicit requests throw if workers are missing |
-| `:mpi` | Real symmetric standard/generalized plus dense/sparse complex Hermitian/general problems with an MPI communicator | Explicit requests throw if MPI is unavailable or storage is unsupported |
-| `:auto` | Best available supported backend | Falls back to serial when needed |
-
-### How FEAST Parallelizes
-
-The FEAST algorithm computes eigenvalues using contour integration:
-
-```
-                    Im(z)
-                      ↑
-      z₄ ●───────────●───────────● z₁
-         │           │           │
-      z₃ ●───────────●───────────● z₂    Each zₙ is computed
-         │           │           │       independently!
-      z₅ ●───────────●───────────● z₈
-         │           │           │
-      z₆ ●───────────●───────────● z₇
-         └───────────┴───────────→ Re(z)
-               Emin        Emax
-```
-
-Each integration point requires solving a linear system `(z*B - A)*Y = X`. These solves are independent and can be distributed across workers.
-
----
+All examples use a project environment containing FeastKit. The MPI examples
+also need MPI; the iterative MPI alias needs Krylov. Scripts marked with
+`# docs-test:` are executed by `docs/check_parallel_examples.jl` in CI.
 
 ## Checking Capabilities
 
-Before using parallel features, check available backends:
+The report reflects the current session:
 
-```julia
+```@example parallel_capabilities
 using FeastKit
-
-# Check all available backends
 capabilities = feast_parallel_capabilities()
-println(capabilities)
-# Dict(:threads => true, :distributed => false, :mpi => false)
-
-# Detailed information
-feast_parallel_info()
-# FeastKit Parallel Computing Capabilities
-# ========================================
-# Threading:
-#   Available threads: 8
-#   Status: Enabled
-#
-# Distributed Computing:
-#   Available workers: 1
-#   Status: Disabled
-#
-# MPI:
-#   MPI initialized: No
-#   Status: Disabled
+@assert all(k -> haskey(capabilities, k), (:threads, :distributed, :mpi))
+@assert capabilities[:threads] == (Threads.nthreads() > 1)
+feast_parallel_info()  # Output reflects the current session, not fixed hardware.
 ```
-
----
 
 ## Threading (Shared Memory)
 
-The simplest parallelization - uses Julia's built-in threading.
-
 ### Setup
 
-Start Julia with multiple threads:
+Start Julia with at least two threads:
 
-```bash
-# Command line
-julia --threads=8
-
-# Or use auto-detection
-julia --threads=auto
-
-# Environment variable
-export JULIA_NUM_THREADS=8
-julia
+```sh
+julia --project --threads=2
 ```
+
+`--threads=auto` can select the count from your machine. Julia thread count is
+separate from BLAS thread count; extra BLAS threads can oversubscribe the CPU.
 
 ### Usage
 
-Run this in a session started with more than one thread (see above);
-`backend=:threads` throws in a single-threaded session rather than pretending to
-parallelise.
+Save this as `feast_threads.jl` and run it with the setup above. The explicit
+threaded request requires more than one Julia thread:
 
 ```julia
+# docs-test: threads
 using FeastKit, LinearAlgebra, SparseArrays
-
-# Create test problem
-n = 5000
-A = SymTridiagonal(2.0*ones(n), -ones(n-1))
-B = Matrix(1.0I, n, n)
-
-# The eigenvalues are 2 - 2cos(kπ/(n+1)): (0.5, 1.5) would hold 948 of them,
-# far more than M0. Bracket the ten smallest.
-interval = (0.0, 4.15e-5)
-
-A_sparse = sparse(A)
-B_sparse = sparse(B)
-result = feast(A_sparse, B_sparse, interval, M0=20, backend=:threads)
-
-# Use automatic selection when serial fallback is acceptable.
-result = feast(A_sparse, B_sparse, interval, M0=20, backend=:auto)
-
-println("Found $(result.M) eigenvalues using $(Threads.nthreads()) threads")
+@assert Threads.nthreads() > 1 "Start Julia with --threads=2 or more"
+n = 200
+A = sparse(SymTridiagonal(2.0*ones(n), -ones(n-1)))
+B = spdiagm(0 => ones(n))
+expected = [2-2cos(k*π/(n+1)) for k in 1:10]
+interval = (0.0, (expected[end] + 2-2cos(11π/(n+1)))/2)
+result = feast(A, B, interval; subspace_size=12, backend=:threads)
+@assert result.converged && result.M == 10
+@assert isapprox(result.values, expected; atol=1e-9)
+result_auto = feast(A, B, interval; subspace_size=12, backend=:auto)
+@assert result_auto.converged && result_auto.M == 10
+println("Found $(result.M) eigenvalues with $(Threads.nthreads()) threads")
 ```
 
 ### Direct RCI Interface
 
-For more control, use the parallel RCI (Reverse Communication Interface):
+Manual callers own the state and buffers and service every requested product.
+The iteration bound below catches an incomplete RCI loop instead of hanging:
 
-```julia
-using FeastKit
-
-# ne = contour points, M0 = subspace size, N = matrix size; work/workc/Aq/Sq,
-# lambda/q/res are the caller-owned RCI buffers (see `FeastWorkspaceReal`).
-state = ParallelFeastState{Float64}(ne, M0, true, true)
-
-# RCI loop
-while true
+```@example parallel_manual_rci
+using FeastKit, LinearAlgebra, Random
+N, M0 = 12, 4
+A = Matrix(Diagonal(collect(1.0:N)))
+B = Matrix{Float64}(I, N, N)
+Emin, Emax = 0.5, 2.5
+fpm = feastinit().fpm
+fpm[2] = 8
+state = ParallelFeastState{Float64}(fpm[2], M0, true, true)
+work = randn(MersenneTwister(42), N, M0)
+workc = zeros(ComplexF64, N, M0)
+Aq, Sq = zeros(M0, M0), zeros(M0, M0)
+lambda, q, res = zeros(M0), zeros(N, M0), zeros(M0)
+for request in 1:1000
     pfeast_srci!(state, N, work, workc, Aq, Sq, fpm, Emin, Emax, M0, lambda, q, res)
-
     if state.ijob == Int(FeastKit.Feast_RCI_PARALLEL_SOLVE)
-        # Solve all contour points in parallel
         pfeast_compute_all_contour_points!(state, A, B, work, M0)
     elseif state.ijob == Int(Feast_RCI_MULT_A)
         work[:, 1:state.mode] .= A * q[:, 1:state.mode]
@@ -168,9 +104,11 @@ while true
         break
     end
 end
+@assert state.ijob == Int(Feast_RCI_DONE) && state.info == 0
+@assert state.mode == 2
+@assert isapprox(lambda[1:state.mode], [1.0, 2.0]; atol=1e-9)
+lambda[1:state.mode]
 ```
-
----
 
 ```@docs
 feast_parallel
@@ -179,347 +117,255 @@ pfeast_srci!
 
 ## Distributed Computing
 
-For multi-process parallelization using Julia's `Distributed` module.
+### Setup and Usage
 
-The high-level distributed backend currently supports sparse real symmetric
-standard/generalized problems. Requesting `backend=:distributed` requires active
-Julia workers; use `backend=:auto` if serial fallback is acceptable.
-
-### Setup
+This example starts two local workers in the active project and removes only
+those workers when it finishes. Save it as `feast_distributed.jl` and run
+`julia --project feast_distributed.jl` from an environment containing FeastKit.
 
 ```julia
-using Distributed
+# docs-test: distributed
+using Distributed, FeastKit, LinearAlgebra, SparseArrays
+pids = addprocs(2; exeflags=`--project=$(Base.active_project())`)
+try
+    n = 200
+    A = sparse(SymTridiagonal(2.0*ones(n), -ones(n-1)))
+    B = spdiagm(0 => ones(n))
+    expected = [2-2cos(k*π/(n+1)) for k in 1:10]
+    interval = (0.0, (expected[end] + 2-2cos(11π/(n+1)))/2)
+    result = feast(A, B, interval; subspace_size=12, backend=:distributed)
+    @assert result.converged && result.M == 10
+    @assert isapprox(result.values, expected; atol=1e-9)
 
-# Add local workers
-addprocs(4)  # Add 4 worker processes
-
-# Or add remote workers
-addprocs([("node1", 2), ("node2", 2)])  # 2 workers each on node1 and node2
-
-# Verify workers
-println("Workers: $(workers())")
-println("Number of workers: $(nworkers())")
+    # Match the quadrature task count to the workers; trapezoidal counts are flexible.
+    fpm = feastinit().fpm
+    fpm[16] = 1
+    fpm[2] = max(2*nworkers(), 8)
+    tuned = feast(A, B, interval; subspace_size=12, fpm=fpm, backend=:distributed)
+    @assert tuned.converged && tuned.M == 10
+    pfeast_show_distribution(fpm[2]; use_threads=false)
+finally
+    rmprocs(pids)
+end
 ```
 
-### Usage
-
-Add workers first (see above); `backend=:distributed` throws when there are
-none rather than silently running serial.
+For remote workers, replace the `addprocs` call with your reachable SSH hosts
+and remote Julia/project paths. This is a configuration template, not a
+runnable local example:
 
 ```julia
-using Distributed
-@everywhere using FeastKit
-using LinearAlgebra, SparseArrays
-
-# Create problem on main process
-n = 10000
-A = sprandn(n, n, 0.001)
-A = A + A' + 10I
-B = sparse(1.0I, n, n)
-
-# Distributed computation. Throws if no workers are available.
-result = feast(A, B, (9.0, 11.0), M0=30, backend=:distributed)
-
-println("Found $(result.M) eigenvalues using $(nworkers()) workers")
+pids = addprocs([("node1", 2), ("node2", 2)];
+               exeflags=`--project=/path/to/remote/project`)
 ```
 
 ### How It Works
 
-FeastKit distributes contour points across workers:
+FeastKit loads itself on the selected workers and builds shifted factorizations
+there. Factors are reused while right-hand sides and projected results move
+between processes. Remote workers must have compatible Julia and package
+environments. The high-level distributed path currently requires sparse real
+symmetric inputs. The following command reports the current task distribution:
 
-```julia
-# Show distribution. The worker/thread count comes from the session, so the
-# only argument is the number of contour points; `use_threads` picks which
-# layout to report.
+```@example parallel_distribution
 using FeastKit
 pfeast_show_distribution(16; use_threads=false)
-# Worker 1: points 1-4
-# Worker 2: points 5-8
-# Worker 3: points 9-12
-# Worker 4: points 13-16
 ```
-
----
 
 ## MPI Parallelization
 
-For high-performance computing clusters with thousands of cores.
+### Prerequisites and Setup
 
-The high-level MPI backend supports real symmetric standard/generalized
-problems and dense/sparse complex Hermitian/general problems. Pass the communicator
-explicitly when using the public `feast` and `feast_general` APIs so MPI
-remains an explicit opt-in.
+Install optional dependencies in the same environment used to launch scripts:
 
-### Prerequisites
-
-1. Install MPI on your system (OpenMPI, MPICH, or Intel MPI)
-2. Install MPI.jl: `Pkg.add("MPI")`
-3. Enable MPI in FeastKit: `ENV["FEASTKIT_ENABLE_MPI"] = "true"`
-
-### Setup
-
-```bash
-# Install MPI.jl and configure
-julia -e 'using Pkg; Pkg.add("MPI"); using MPI; MPI.install_mpiexecjl()'
-
-# Set environment variable before running
-export FEASTKIT_ENABLE_MPI=true
+```sh
+julia --project -e 'using Pkg; Pkg.add(["MPI", "Krylov"])'
 ```
+
+Load MPI, initialize it on every rank, and pass `comm` explicitly to FEAST.
+`FEASTKIT_ENABLE_MPI=true` optionally enables automatic availability detection;
+it is not required when an initialized communicator is supplied explicitly.
+Every rank must provide the same matrices, search region, and solver settings.
 
 ### Usage
 
-Create a script `feast_mpi.jl`:
+Save this complete script as `feast_mpi.jl`:
 
 ```julia
-using MPI
+# docs-test: mpi
+using MPI, FeastKit, LinearAlgebra, SparseArrays
 MPI.Init()
+try
+    comm = MPI.COMM_WORLD
+    n = 200
+    A = sparse(SymTridiagonal(2.0*ones(n), -ones(n-1)))
+    B = spdiagm(0 => ones(n))
+    expected = [2-2cos(k*π/(n+1)) for k in 1:10]
+    interval = (0.0, (expected[end] + 2-2cos(11π/(n+1)))/2)
+    result = feast(A, B, interval; subspace_size=12, backend=:mpi, comm=comm)
+    @assert result.converged && result.M == 10
+    @assert isapprox(result.values, expected; atol=1e-9)
 
-using FeastKit, LinearAlgebra, SparseArrays
-
-comm = MPI.COMM_WORLD
-rank = MPI.Comm_rank(comm)
-size = MPI.Comm_size(comm)
-
-# Create problem (same on all ranks)
-n = 10000
-A = spdiagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))
-B = sparse(1.0I, n, n)
-
-# MPI FEAST
-result = feast(A, B, (0.0, 0.1), M0=20, backend=:mpi, comm=comm)
-
-# Dense or sparse complex general MPI FEAST
-Az = sparse(Diagonal(ComplexF64[0.5 + 0.1im, 1.0 + 0.2im, 2.0 - 0.1im]))
-Bz = spdiagm(0 => ones(ComplexF64, 3))
-general = feast_general(Az, Bz, 1.0 + 0.1im, 1.5;
-                        M0=3, backend=:mpi, comm=comm)
-
-if rank == 0
-    println("Found $(result.M) eigenvalues")
-    println("Eigenvalues: $(result.lambda[1:result.M])")
+    Az = sparse(Diagonal(ComplexF64[0.5+0.1im, 1.0+0.2im, 2.0-0.1im]))
+    Bz = spdiagm(0 => ones(ComplexF64, 3))
+    general = feast_general(Az, Bz, 1.0+0.1im, 1.5;
+                            subspace_size=3, backend=:mpi, comm=comm)
+    @assert general.converged && general.M == 3
+    @assert isapprox(sort(general.values; by=real), diag(Az); atol=1e-9)
+    MPI.Comm_rank(comm) == 0 && println(result.values)
+finally
+    MPI.Finalize()
 end
-
-MPI.Finalize()
 ```
 
-Run with MPI:
+Launch with MPI.jl's configured executable, which matches its MPI library:
 
-```bash
-julia --project -e 'using MPI; run(`$(MPI.mpiexec()) -n 8 julia --project feast_mpi.jl`)'
+```sh
+julia --project -e 'using MPI; run(`$(MPI.mpiexec()) -n 2 julia --project feast_mpi.jl`)'
 ```
 
 ### MPI-Specific Functions
 
-MPI honors custom contours registered in `fpm` on the communicator's root.
-The contour nodes and weights are broadcast to every rank, and general-problem
-eigenvalue selection uses that same geometry. A rank-local factorization or
-direct shifted-solve failure returns `Feast_ERROR_LAPACK` collectively;
-iterative projection failures return `Feast_ERROR_NO_CONVERGENCE`.
-Projected eigenproblem and distributed residual failures are also synchronized
-before ranks enter the next collective. Ranks use the root's Ritz vectors and
-stopping decision. Supply the same matrices and solver settings on all ranks.
-This synchronization also covers failures while forming the shifted-system
-right-hand side `B * Q`, before the contour solves begin.
-
-For iterative MPI solves, the default inner GMRES tolerance is one percent of
-the precision-aware outer tolerance, with a machine-epsilon floor. This leaves
-accuracy headroom for outer refinement without requesting unattainable precision
-from `ComplexF32` solves. An explicit `solver_tol` overrides this default.
-
-`fpm[10]=0` disables retained LU factors: each rank factors and solves one local
-shift at a time on each refinement sweep. This mode also uses serial contour
-solves within a hybrid rank to bound factor storage; `fpm[10]=1` retains factors
-and permits threaded reuse. Real and complex `mpi_feast` entry points accept
-either the `FeastParameters` returned by `feastinit()` or its raw `.fpm` vector.
+Save the following as `feast_mpi_aliases.jl` and launch it the same way, in a
+fresh process. It exercises direct MPI, real/complex PFEAST aliases, and a
+GMRES-backed `pzifeast_*` alias. MPI cannot be reinitialized after finalization
+in the same Julia process.
 
 ```julia
-# Direct MPI interface
-result = mpi_feast(A, B, interval, M0=M0, comm=comm, fpm=fpm)
+# docs-test: mpi_aliases
+using MPI, Krylov, FeastKit, LinearAlgebra, SparseArrays
+MPI.Init()
+try
+    comm = MPI.COMM_WORLD
+    A = spdiagm(0 => [0.5, 1.0, 2.0])
+    B = spdiagm(0 => ones(3))
+    interval, M0 = (0.0, 2.5), 3
+    fpm = feastinit().fpm
+    direct = mpi_feast(A, B, interval; M0=M0, comm=comm, fpm=copy(fpm))
+    real_alias = pdfeast_scsrgv!(A, B, interval..., M0, copy(fpm); comm=comm)
 
-# FEAST-compatible PFEAST alias with explicit MPI communicator
-result = pdfeast_scsrgv!(A, B, interval[1], interval[2], M0, fpm; comm=comm)
-
-# Dense/sparse complex Hermitian/general PFEAST aliases with explicit MPI communicator
-Ahd = Matrix(Diagonal(ComplexF64[0.5, 1.0, 2.0]))
-Bhd = Matrix{ComplexF64}(I, 3, 3)
-dense_hz = pzfeast_hegv!(Ahd, Bhd, 0.0, 2.5, M0, fpm; comm=comm)
-Ahz = sparse(Diagonal(ComplexF64[0.5, 1.0, 2.0]))
-hz = pzfeast_hcsrgv!(Ahz, Bz, 0.0, 2.5, M0, fpm; comm=comm)
-gz = pzifeast_gcsrgv!(Az, Bz, 1.0 + 0.1im, 1.5, M0, fpm;
-                      comm=comm, solver_tol=1e-10)
-
-# Check MPI availability
-if mpi_available()
-    println("MPI is ready!")
+    Ahd = Matrix(Diagonal(ComplexF64[0.5, 1.0, 2.0]))
+    Bhd = Matrix{ComplexF64}(I, 3, 3)
+    dense_h = pzfeast_hegv!(Ahd, Bhd, interval..., M0, copy(fpm); comm=comm)
+    sparse_h = pzfeast_hcsrgv!(sparse(Ahd), sparse(Bhd), interval..., M0,
+                              copy(fpm); comm=comm)
+    for result in (direct, real_alias, dense_h, sparse_h)
+        @assert result.converged && result.M == 3
+        @assert isapprox(result.values, [0.5, 1.0, 2.0]; atol=1e-9)
+    end
+    Az = sparse(Diagonal(ComplexF64[0.5+0.1im, 1.0+0.2im, 2.0-0.1im]))
+    general = pzifeast_gcsrgv!(Az, sparse(Bhd), 1.0+0.1im, 1.5, M0,
+                              copy(fpm); comm=comm, solver_tol=1e-12)
+    @assert general.converged && general.M == 3
+    @assert isapprox(sort(general.values; by=real), diag(Az); atol=1e-9)
+finally
+    MPI.Finalize()
 end
 ```
 
-The real symmetric PFEAST-compatible aliases are `psfeast_syev!`,
-`pdfeast_syev!`, `psfeast_sygv!`, `pdfeast_sygv!`, `psfeast_scsrev!`,
-`pdfeast_scsrev!`, `psfeast_scsrgv!`, `pdfeast_scsrgv!`, `psfeast_srci!`,
-and `pdfeast_srci!`. Without `comm=`, these call the threaded/distributed
-parallel kernels. With `comm=`, the dense and sparse generalized/standard
-aliases use the MPI kernels.
+MPI broadcasts custom contour nodes, weights, and optional boundary vertices
+from the communicator root. General-problem membership uses that geometry.
+Rank-local factorization or direct-solve failures return `Feast_ERROR_LAPACK`
+collectively; iterative projection failures return
+`Feast_ERROR_NO_CONVERGENCE`. Product, projection, eigensolve, and residual
+failures are synchronized so ranks do not diverge across collectives.
 
-Complex MPI aliases include dense `pcfeast_heev!`, `pzfeast_heev!`,
-`pcfeast_hegv!`, `pzfeast_hegv!`, `pcfeast_geev!`, `pzfeast_geev!`,
-`pcfeast_gegv!`, `pzfeast_gegv!`, sparse `pcfeast_hcsrev!`,
-`pzfeast_hcsrev!`, `pcfeast_hcsrgv!`, `pzfeast_hcsrgv!`,
-`pcfeast_gcsrev!`, `pzfeast_gcsrev!`, `pcfeast_gcsrgv!`,
-`pzfeast_gcsrgv!`, and their GMRES-backed `pcifeast_*`/`pzifeast_*`
-counterparts.
+The default inner MPI GMRES tolerance is one percent of the precision-aware
+outer tolerance, subject to a machine-epsilon floor. Use high-level
+`solver_opts=(rtol=...,)` or low-level `solver_tol` to override it. Real and
+complex `mpi_feast` calls accept a `FeastParameters` wrapper or its raw `.fpm`.
 
----
+`fpm[10]=1` caches each rank's assigned factors and permits threaded reuse.
+`fpm[10]=0` factors shifts one at a time on each sweep, using serial contour
+solves within a hybrid rank to limit retained storage.
+
+The real symmetric PFEAST aliases use the parallel Julia kernels without
+`comm`, and the supported MPI kernels when `comm` is supplied. Complex
+`pcfeast_*`/`pzfeast_*` and iterative `pcifeast_*`/`pzifeast_*` aliases cover
+supported dense/sparse Hermitian and general MPI problems; see the
+[API reference](api_reference.md) for the precision families.
 
 ## Hybrid Parallelization
 
-Combine MPI (across nodes) with threading (within nodes) for maximum performance.
+Hybrid execution combines MPI ranks with threaded solves of contour systems
+within each rank. MPI collectives run on the calling thread. It currently
+supports real symmetric problems through `feast_hybrid`, not a `:hybrid`
+backend keyword.
 
 ### Setup
 
-```bash
-# 4 MPI ranks, each with 8 threads
-export JULIA_NUM_THREADS=8
-mpiexec -n 4 julia --threads=8 feast_hybrid.jl
+Save the script below as `feast_hybrid.jl`, then run two ranks with two threads
+each:
+
+```sh
+julia --project -e 'using MPI; run(`$(MPI.mpiexec()) -n 2 julia --project --threads=2 feast_hybrid.jl`)'
 ```
 
 ### Usage
 
 ```julia
-using MPI
+# docs-test: hybrid
+using MPI, FeastKit, LinearAlgebra, SparseArrays
+@assert Threads.nthreads() > 1 "Start each rank with --threads=2 or more"
 MPI.Init()
-
-using FeastKit
-
-comm = MPI.COMM_WORLD
-rank = MPI.Comm_rank(comm)
-
-# Hybrid FEAST: MPI + threads
-result = feast_hybrid(A, B, interval,
-                      M0=20,
-                      comm=comm,
-                      use_threads_per_rank=true)
-
-if rank == 0
-    println("Hybrid computation complete")
-    println("MPI ranks: $(MPI.Comm_size(comm))")
-    println("Threads per rank: $(Threads.nthreads())")
-    println("Total parallelism: $(MPI.Comm_size(comm) * Threads.nthreads())")
+try
+    comm = MPI.COMM_WORLD
+    A = spdiagm(0 => collect(1.0:12.0))
+    B = spdiagm(0 => ones(12))
+    result = feast_hybrid(A, B, (0.5, 2.5); M0=4, comm=comm,
+                          use_threads_per_rank=true)
+    @assert result.converged && result.M == 2
+    @assert isapprox(result.values, [1.0, 2.0]; atol=1e-9)
+    MPI.Comm_rank(comm) == 0 && println(result.values)
+finally
+    MPI.Finalize()
 end
-
-MPI.Finalize()
 ```
-
-### Architecture
-
-Hybrid execution uses the same filtered-subspace solver as the real MPI backend,
-with independent contour solves threaded within each rank. MPI collectives run
-on the calling thread. Rank-local factorization or solve failures are propagated
-collectively as `Feast_ERROR_LAPACK`.
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    MPI Communicator                          │
-├───────────────┬───────────────┬───────────────┬─────────────┤
-│    Rank 0     │    Rank 1     │    Rank 2     │   Rank 3    │
-│  ┌─────────┐  │  ┌─────────┐  │  ┌─────────┐  │ ┌─────────┐ │
-│  │Thread 1 │  │  │Thread 1 │  │  │Thread 1 │  │ │Thread 1 │ │
-│  │Thread 2 │  │  │Thread 2 │  │  │Thread 2 │  │ │Thread 2 │ │
-│  │Thread 3 │  │  │Thread 3 │  │  │Thread 3 │  │ │Thread 3 │ │
-│  │Thread 4 │  │  │Thread 4 │  │  │Thread 4 │  │ │Thread 4 │ │
-│  └─────────┘  │  └─────────┘  │  └─────────┘  │ └─────────┘ │
-│ Points: 1-4   │ Points: 5-8   │ Points: 9-12  │Points: 13-16│
-└───────────────┴───────────────┴───────────────┴─────────────┘
-```
-
----
 
 ## Performance Tuning
 
 ### Choosing the Right Backend
 
-| Scenario | Recommended Backend |
-|----------|---------------------|
-| Laptop/workstation (1-16 cores) | `:threads` |
-| Single node server (16-64 cores) | `:threads` or `:distributed` |
-| Multi-node cluster | `:mpi` |
-| HPC with many cores per node | `:hybrid` (MPI + threads) |
+Measure convergence, time, and peak memory for your problem. A supported
+backend with more workers can still be slower because of communication,
+compilation, or oversubscription. Sparse fill-in often dominates factor costs.
 
 ### Integration Points vs Workers
 
-The number of integration points should match or exceed your worker count:
-
-Needs workers, as above.
-
-```julia
-using FeastKit, Distributed, SparseArrays, LinearAlgebra
-
-n = 2000
-A = spdiagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))
-B = sparse(1.0I, n, n)
-interval = (0.0, 2.5e-5)   # the ten smallest eigenvalues
-
-# Rule of thumb: points = 2 × workers
-fpm = zeros(Int, 64)
-feastinit!(fpm)
-fpm[2] = max(2 * nworkers(), 8)  # Set integration points
-
-result = feast(A, B, interval, M0=20, fpm=fpm, backend=:distributed)
-```
+The distributed example also demonstrates setting `fpm[2]` to at least twice
+the worker count. It uses trapezoidal integration to allow those counts; Gauss
+and Zolotarev have restricted supported counts. More nodes change accuracy and
+work as well as task parallelism.
 
 ### Benchmarking
 
-Compare parallel performance:
+This small example checks the target count before reporting timings. Use
+warm-up runs and representative matrices for a performance study:
 
-```julia
+```@example parallel_benchmark
 using FeastKit, SparseArrays, LinearAlgebra
-
-n = 2000
-A = spdiagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))
-B = sparse(1.0I, n, n)
-interval = (0.0, 2.5e-5)
-
-# Compare backends (M0 is positional here)
-feast_parallel_comparison(A, B, interval, 20)
-
-# Detailed benchmarks
-FeastKit.pfeast_rci_benchmark(A, B, interval, 20; compare_serial=true)
-# Parallel RCI Performance Comparison
-# =====================================
-# Matrix size: 5000
-# Integration points: 16
-# Threads available: 8
-# Workers available: 4
-#
-# Parallel FeastKit (threaded):
-# Time: 2.345 seconds
-# Eigenvalues found: 15
-# Convergence loops: 3
-#
-# Serial FeastKit:
-# Time: 12.567 seconds
-# Thread speedup: 5.36x
+n = 200
+A = sparse(SymTridiagonal(2.0*ones(n), -ones(n-1)))
+B = spdiagm(0 => ones(n))
+interval = (0.0, 1.05*(2-2cos(10π/(n+1))))
+checked = feast(A, B, interval; subspace_size=12)
+@assert checked.converged && checked.M == 10
+# M0 is positional. Reports reflect this session; timings include compilation.
+feast_parallel_comparison(A, B, interval, 12)
+FeastKit.pfeast_rci_benchmark(A, B, interval, 12; compare_serial=true)
 ```
 
 ### Memory Considerations
 
-Parallel computation increases memory usage:
-
-| Backend | Memory per Worker | Total Overhead |
-|---------|------------------|----------------|
-| Threading | Shared | 1× base |
-| Distributed | Full copy | N× base |
-| MPI | Full copy | N× base |
-
-For memory-constrained systems, use threading or reduce `M0`.
-
----
+Threads share input matrices but need per-shift factors and work buffers.
+Distributed and MPI processes hold their own matrix data and assigned factors.
+There is no fixed total-memory multiplier: fill-in, caching, and subspace size
+matter. Reduce subspace width only while retaining room for all target roots.
 
 ## Troubleshooting
 
 ### Threading Not Working
 
-```julia
+```@example parallel_threads
 # Check thread count
 println(Threads.nthreads())  # Should be > 1
 
@@ -529,36 +375,19 @@ println(Threads.nthreads())  # Should be > 1
 
 ### Distributed Workers Not Found
 
-```julia
-# Check workers
-println(nworkers())  # Should be > 1
-
-# Add workers if needed
+```@example parallel_workers
 using Distributed
-addprocs(4)
-
-# Make sure FeastKit is loaded on all workers
-@everywhere using FeastKit
+println("Additional workers available: ", nprocs() > 1)
+# If false, use the complete Setup and Usage example above to add local workers.
 ```
 
 ### MPI Initialization Fails
 
-```julia
-# Check MPI availability
-println(mpi_available())  # Should be true
-
-# Common fixes:
-# 1. Set environment variable
-ENV["FEASTKIT_ENABLE_MPI"] = "true"
-
-# 2. Ensure MPI.jl is properly installed
-using Pkg
-Pkg.add("MPI")
-using MPI
-MPI.install_mpiexecjl()
-
-# 3. Run under mpiexec
-# mpiexec -n 4 julia your_script.jl
+```bash
+# Install MPI in the same project used to launch the script.
+julia --project -e 'using Pkg; Pkg.add("MPI")'
+# Run the complete example through the launcher selected by MPI.jl.
+julia --project -e 'using MPI; run(`$(MPI.mpiexec()) -n 2 julia --project feast_mpi.jl`)'
 ```
 
 ### Performance Not Scaling
@@ -569,15 +398,24 @@ MPI.install_mpiexecjl()
 
 Needs a multi-threaded session.
 
-```julia
-# Monitor parallel efficiency. FeastResult has no timing field, so measure the
-# calls themselves rather than reading `result.time`.
-t_serial   = @elapsed result_serial   = feast(A, B, interval, M0=20, backend=:serial)
-t_parallel = @elapsed result_parallel = feast(A, B, interval, M0=20, backend=:threads)
-
-speedup = t_serial / t_parallel
-efficiency = speedup / Threads.nthreads()
-println("Speedup: $(speedup)x, Efficiency: $(efficiency * 100)%")
+```@example parallel_efficiency
+using FeastKit, LinearAlgebra, SparseArrays
+A = spdiagm(0 => collect(1.0:40.0))
+B = spdiagm(0 => ones(40))
+interval = (0.5, 3.5)
+if Threads.nthreads() > 1
+    # Warm up each path before timing; this small example makes no speedup claim.
+    feast(A, B, interval; subspace_size=6, backend=:serial)
+    feast(A, B, interval; subspace_size=6, backend=:threads)
+    t_serial = @elapsed result_serial = feast(A, B, interval; subspace_size=6, backend=:serial)
+    t_parallel = @elapsed result_parallel = feast(A, B, interval; subspace_size=6, backend=:threads)
+    @assert result_serial.converged && result_parallel.converged
+    @assert result_parallel.M == result_serial.M == 3
+    @assert isapprox(result_parallel.values, result_serial.values; atol=1e-9)
+    println("Speedup: ", t_serial/t_parallel)
+else
+    println("Start Julia with --threads=2 or more to compare these paths.")
+end
 ```
 
 ---
@@ -627,7 +465,6 @@ determine_parallel_backend(parallel, comm)
 
 ---
 
-<div align="center">
-  <p><strong>Scale your eigenvalue computations!</strong></p>
-  <a href="performance.md">Performance Tips</a> · <a href="examples.md">Examples</a> · <a href="api_reference.md">API Reference</a>
-</div>
+**Scale your eigenvalue computations!**
+
+[Performance Tips](performance.md) · [Examples](examples.md) · [API Reference](api_reference.md)

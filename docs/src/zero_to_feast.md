@@ -49,6 +49,7 @@ using FeastKit, LinearAlgebra
 a = [2.0 -1.0; -1.0 2.0]
 res = feast(a, (0.1, 5.0), M0=2)
 @info "FeastKit OK" M=res.M info=res.info lambda=res.lambda[1:res.M]
+@assert res.converged && res.M == 2
 ```
 
 Expected: `info == 0` and two eigenvalues found near 1 and 3.
@@ -74,6 +75,7 @@ res = feast(A, (Emin, Emax), M0=16)
 
 @assert res.info == 0
 @info "Found" M=res.M vals=res.lambda[1:res.M]
+@assert res.converged && res.M == 10
 ```
 
 Tips:
@@ -99,6 +101,7 @@ M = spdiagm(0 => ones(n))                                        # mass
 # contain 230 eigenvalues. Take the ten smallest.
 res = feast(K, M, (0.0, 0.000985), M0=20)
 @info "Generalized" info=res.info M=res.M
+@assert res.converged && res.M == 10
 ```
 
 ---
@@ -149,6 +152,7 @@ end
 # Ten smallest eigenvalues: lambda_10 = 2 - 2cos(10π/(n+1)) ≈ 2.5e-6.
 res = feast(Aop, (0.0, 2.6e-6), M0=16, solver=tridiagonal_solve!)
 @info "Matrix-free" info=res.info M=res.M
+@assert res.converged && res.M == 10
 ```
 
 Notes:
@@ -177,6 +181,7 @@ center, radius = 1.0 + 1.0im, 3.0
 # and M0 can never exceed the matrix size.
 res = feast_general(G, I2, center, radius, M0=2)
 @info "Complex region" info=res.info M=res.M λ=res.lambda[1:res.M]
+@assert res.converged && res.M == 1
 ```
 
 ---
@@ -185,7 +190,7 @@ res = feast_general(G, I2, center, radius, M0=2)
 
 Parameters live in `fpm::Vector{Int}` (length ≥ 64):
 
-```julia
+```@example zf
 fpm = zeros(Int, 64)
 feastinit!(fpm)
 fpm[1] = 1     # print level (0=silent, 1=summary)
@@ -194,13 +199,15 @@ fpm[3] = 12    # tolerance exponent (target ~ 1e-12)
 fpm[4] = 30    # max refinement loops
 
 res = feast(A, (Emin, Emax), M0=20, fpm=fpm)   # A and the interval from section 3
+@assert res.converged && res.M == 10
 ```
 
 Expert controls (see docs for details):
 
 - Integration type: Gauss/Trapezoidal/Zolotarev via `fpm[16]`
 - Ellipse aspect ratio via `fpm[18]`
-- Custom contours: `feast_contour_expert`, `feast_contour_custom_weights!`
+- Full contours: `feast(A, feast_rectangle(...))` or `feast(A, feast_ellipse(...))`
+- Half-contour customization: `feast_contour_expert` with registration
 
 ---
 
@@ -229,16 +236,18 @@ Common issues and fixes:
 
 FeastKit supports threads, distributed workers, and MPI (if available):
 
-```julia
+```@example zf
 using FeastKit
 cap = feast_parallel_capabilities()
 @info "Parallel capabilities" cap
 
-# Use threads if available
-res_t = feast(A, (Emin, Emax), M0=20, parallel=:threads)
+# Automatic selection permits serial fallback. An explicit :threads
+# request requires a session started with multiple Julia threads.
+res_t = feast(A, (Emin, Emax); subspace_size=20, backend=:auto)
 
 # Or use distributed workers (addprocs required)
 # res_d = feast(A, (Emin, Emax), M0=20, parallel=:distributed)
+@assert res_t.converged && res_t.M == 10
 ```
 
 MPI paths require MPI.jl and a proper MPI environment.

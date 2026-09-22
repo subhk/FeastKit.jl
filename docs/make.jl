@@ -12,10 +12,10 @@ makedocs(
     checkdocs = :exports,
     # `@example` blocks are executed at build time, so a doc example that stops
     # working now fails the build instead of silently rotting on the site.
-    warnonly = [:missing_docs],
+    warnonly = false,
     authors = "FeastKit.jl Contributors",
     repo = Remotes.GitHub("subhk", "FeastKit.jl"),
-    doctest = false,
+    doctest = true,
     format = Documenter.HTML(
         prettyurls = get(ENV, "CI", "") == "true",
         canonical = "https://subhk.github.io/FeastKit.jl/stable/",
@@ -48,8 +48,11 @@ makedocs(
     ],
 )
 
-deploydocs(
-    repo = "github.com/subhk/FeastKit.jl.git",
-    devbranch = "main",
-    push_preview = true,
-)
+# Local builds only generate docs/build. The publishing workflow opts in.
+if get(ENV, "FEASTKIT_DOCS_DEPLOY", "false") == "true"
+    deploydocs(
+        repo = "github.com/subhk/FeastKit.jl.git",
+        devbranch = "main",
+        push_preview = true,
+    )
+end

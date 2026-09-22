@@ -1,0 +1,195 @@
+function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
+                                     B::AbstractMatrix{Complex{T}},
+                                     Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                                     comm::MPI.Comm = MPI.COMM_WORLD,
+                                     root::Int = 0,
+                                     solver::Symbol = :direct,
+                                     solver_tol::Real = 0.0,
+                                     solver_maxiter::Int = 500,
+                                     solver_restart::Int = 30) where T<:Real
+    rank = MPI.Comm_rank(comm)
+    N = size(A, 1)
+    size(A, 2) == N || throw(ArgumentError("Matrix A must be square"))
+    size(B) == (N, N) || throw(ArgumentError("Matrix B must match size of A"))
+    check_feast_grci_input(N, M0, Emid, r, fpm)
+    feastdefault!(fpm)
+    fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
+    solver_choice = _mpi_solver_choice(solver)
+    tol = _mpi_solver_tolerance(fpm,T,solver_tol)
+    krylov_workspace = solver_choice === :gmres ? _feast_krylov_workspace(N, T, solver_restart) : nothing
+
+    contour, custom_contour = _mpi_contour(T,fpm,Emid,r,root,comm; general=true)
+    ne = length(contour.Zne)
+    Zne_global, Wne_global = contour.Zne, contour.Wne
+
+    mpi_state = MPIFeastState{T}(comm, MPI.Comm_rank(comm), MPI.Comm_size(comm),
+                                 N, M0, ne, root)
+    _mpi_distribute_complex_contour!(mpi_state, Zne_global, Wne_global)
+
+    Q_basis = zeros(Complex{T}, N, M0)
+    _feast_seeded_subspace_complex!(Q_basis)
+    MPI.Bcast!(Q_basis, root, comm)
+
+    # Direct solves cache local factors only when fpm[10] requests storage.
+    # Iterative solves have nothing to cache.
+    local_factors = solver_choice == :direct ?
+        _mpi_factorize_contour(A,B,mpi_state.local_Zne,comm;store=fpm[10]==1) : nothing
+    if solver_choice == :direct && local_factors === nothing
+        return FeastGeneralResult{T}(Complex{T}[],zeros(Complex{T},N,0),0,T[],
+            Int(Feast_ERROR_LAPACK),T(Inf),0)
+    end
+    B_is_identity = (B == I)   # standard problem: skip per-loop identity matmuls
+    BQ_loop = similar(Q_basis)
+    Q_proj_local_buf = similar(Q_basis)
+    # In-place solve buffer. Sparse factors are UMFPACK and always ComplexF64
+    # (it promotes Float32 inputs); dense LU keeps Complex{T}.
+    Y_loop = A isa AbstractSparseMatrix ?
+        Matrix{Complex{promote_type(T, Float64)}}(undef, N, M0) : similar(Q_basis)
+
+    Q_proj = similar(Q_basis)
+    solutions = similar(Q_basis)
+    solutions_tmp = similar(Q_basis)
+    AQ = similar(Q_basis)
+    BQ = similar(Q_basis)
+    Ared = Matrix{Complex{T}}(undef, M0, M0)
+    Bred = Matrix{Complex{T}}(undef, M0, M0)
+    lambda_vec = Vector{Complex{T}}(undef, M0)
+    lambda_tmp = similar(lambda_vec)
+    perm = Vector{Int}(undef, M0)
+    res_vec = zeros(T, M0)
+    epsout_val = T(Inf)
+    info_code = Int(Feast_SUCCESS)
+    M_found = 0
+    loop_count = 0
+
+    for loop_idx in 0:fpm[4]
+        loop_count = loop_idx
+        local_success = false
+        local_Q_proj = Q_proj_local_buf
+        try
+            if solver_choice == :direct
+                # Apply each local resolvent to B*Q. General FEAST uses the
+                # full contour, so the weight is Wne[e] (no factor 2).
+                B_is_identity ? copyto!(BQ_loop, Q_basis) : mul!(BQ_loop, B, Q_basis)
+                local_success = _mpi_local_projection!(Q_proj_local_buf,local_factors,BQ_loop,
+                                                       mpi_state.local_Wne,Y_loop; scale=1)
+            else
+                local_Q_proj, local_success =
+                    mpi_compute_complex_general_projection(A, B, Q_basis,
+                                                           mpi_state.local_Zne,
+                                                           mpi_state.local_Wne, M0,
+                                                           solver_choice, _feast_inner_tol(solver_tol == 0.0, tol, epsout_val, loop_idx),
+                                                           solver_maxiter, solver_restart,
+                                                           comm; workspace=krylov_workspace)
+            end
+        catch err
+            @debug "MPI local general projection failed" exception=err
+            local_success = false
+        end
+        if _mpi_success_count(local_success, comm) != MPI.Comm_size(comm)
+            info_code = solver_choice == :direct ? Int(Feast_ERROR_LAPACK) : Int(Feast_ERROR_NO_CONVERGENCE)
+            M_found = 0
+            break
+        end
+
+        # Direct send/recv Allreduce into the persistent buffer — no fresh
+        # receive array per refinement loop.
+        MPI.Allreduce!(local_Q_proj, Q_proj, MPI.SUM, comm)
+        M = 0
+        success = _mpi_collective_try(comm) do
+            # Orthonormalize the filtered subspace before the (non-Hermitian)
+            # Rayleigh-Ritz: Ared = Qᴴ A Q, Bred = Qᴴ B Q. Fixes the rank-deficient
+            # reduced pencil that made the raw-Q_proj path return garbage.
+            Qo = Matrix(qr!(copyto!(AQ, Q_proj)).Q)
+            mul!(AQ, A, Qo)
+            mul!(Ared, adjoint(Qo), AQ)
+            if B_is_identity
+                # Qo orthonormal ⇒ Qᴴ B Q = I; skip the dense identity matmul.
+                fill!(Bred, zero(Complex{T}))
+                @inbounds for i in 1:size(Bred, 1)
+                    Bred[i, i] = one(Complex{T})
+                end
+            else
+                mul!(BQ, B, Qo)
+                mul!(Bred, adjoint(Qo), BQ)
+            end
+            F = eigen(Ared, Bred)
+            lambda_vec .= F.values
+            for idx in 1:M0
+                mul!(view(solutions, :, idx), Qo, view(F.vectors, :, idx))
+            end
+            M = _feast_reorder_by_gcontour!(lambda_vec, solutions, perm,
+                                            lambda_tmp, solutions_tmp,
+                                            Emid, r, fpm, M0;
+                                            contour=custom_contour ? contour : nothing)
+            if M == 0
+                return
+            end
+            for j in 1:M
+                qj = view(solutions, :, j)
+                nrm = norm(qj)
+                nrm > 0 && (qj ./= nrm)
+            end
+        end
+        if !success
+            info_code = Int(Feast_ERROR_LAPACK)
+            M_found = 0
+            break
+        end
+        M = MPI.bcast(M,root,comm)
+        if M == 0
+            info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+            M_found = 0
+            break
+        end
+        MPI.Bcast!(lambda_vec,root,comm)
+        MPI.Bcast!(solutions,root,comm)
+        if !mpi_compute_complex_residuals!(A,B,lambda_vec,solutions,res_vec,M,comm)
+            info_code = Int(Feast_ERROR_LAPACK)
+            M_found = 0
+            break
+        end
+        epsout_val = maximum(view(res_vec,1:M))
+        M_found = M
+        converged,exhausted = MPI.bcast((epsout_val<=feast_tolerance(fpm,T),loop_idx==fpm[4]),root,comm)
+        if converged || exhausted
+            info_code = _feast_exit_info(converged,M,M0,N)
+            break
+        end
+        copyto!(Q_basis,solutions)
+    end
+
+    M_found > 1 && feast_sort_general!(lambda_vec, solutions, res_vec, M_found)
+    return FeastGeneralResult{T}(lambda_vec[1:M_found],
+                                 solutions[:, 1:M_found], M_found,
+                                 res_vec[1:M_found], info_code,
+                                 epsout_val, loop_count)
+end
+
+function mpi_feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int},
+                           B::SparseMatrixCSC{Complex{T},Int},
+                           Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                           kwargs...) where T<:Real
+    return _mpi_feast_complex_general!(A, B, Emid, r, M0, fpm; kwargs...)
+end
+
+function mpi_feast_gcsrev!(A::SparseMatrixCSC{Complex{T},Int},
+                           Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                           kwargs...) where T<:Real
+    B = spdiagm(0 => fill(one(Complex{T}), size(A, 1)))
+    return mpi_feast_gcsrgv!(A, B, Emid, r, M0, fpm; kwargs...)
+end
+
+function mpi_feast_gegv!(A::Matrix{Complex{T}},
+                         B::Matrix{Complex{T}},
+                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                         kwargs...) where T<:Real
+    return _mpi_feast_complex_general!(A, B, Emid, r, M0, fpm; kwargs...)
+end
+
+function mpi_feast_geev!(A::Matrix{Complex{T}},
+                         Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
+                         kwargs...) where T<:Real
+    B = Matrix{Complex{T}}(I, size(A, 1), size(A, 1))
+    return mpi_feast_gegv!(A, B, Emid, r, M0, fpm; kwargs...)
+end

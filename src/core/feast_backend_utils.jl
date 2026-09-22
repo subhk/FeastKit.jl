@@ -1,139 +1,4 @@
-# Utility functions for parallel backend management and consistency
-
-# Convenience wrappers so Distributed functions are available when `Distributed` isn't imported by users
-nworkers() = Distributed.nworkers()
-workers() = Distributed.workers()
-
-# With no added workers Julia reports nworkers()==1 for the main process.
-# nprocs distinguishes that case from one actual worker plus the main process.
-_distributed_backend_ready() = Distributed.nprocs() > 1
-
-# Check if MPI is available
-function mpi_available()
-    return isdefined(FeastKit, :MPI_AVAILABLE) && FeastKit.MPI_AVAILABLE[]
-end
-
-# A caller-provided communicator is an explicit MPI opt-in, even if package
-# initialization happened before MPI.Init() set MPI_AVAILABLE[].
-_mpi_backend_ready(comm=nothing) = comm !== nothing || mpi_available()
-
-# Determine the available backend for a requested execution mode.
-function determine_parallel_backend(parallel::Symbol, comm=nothing)
-    if parallel == :mpi
-        # Explicit MPI request
-        if !_mpi_backend_ready(comm)
-            @warn "MPI requested but not available, falling back to distributed"
-            return _distributed_backend_ready() ? :distributed : (Threads.nthreads() > 1 ? :threads : :serial)
-        end
-        return :mpi
-        
-    elseif parallel == :distributed
-        return _distributed_backend_ready() ? :distributed : :serial
-        
-    elseif parallel == :threads
-        return Threads.nthreads() > 1 ? :threads : :serial
-        
-    elseif parallel == :serial
-        return :serial
-        
-    elseif parallel == :auto
-        # Automatic backend selection based on available resources
-        if _mpi_backend_ready(comm)
-            return :mpi
-        elseif _distributed_backend_ready()
-            return :distributed
-        elseif Threads.nthreads() > 1
-            return :threads
-        else
-            return :serial
-        end
-        
-    else
-        throw(ArgumentError("Unknown parallel backend: $parallel. Use :auto, :mpi, :distributed, :threads, or :serial"))
-    end
-end
-
-function _select_parallel_backend(requested::Symbol, comm=nothing; allow_fallback::Bool=false)
-    # Strict requests fail early with actionable setup guidance. Auto/fallback
-    # requests can still degrade to a backend that is actually available.
-    if !allow_fallback && requested == :mpi && !_mpi_backend_ready(comm)
-        throw(ArgumentError("Requested backend :mpi is not available. Initialize MPI and pass comm=MPI.COMM_WORLD, or use backend=:auto to allow fallback."))
-    elseif !allow_fallback && requested == :distributed && !_distributed_backend_ready()
-        throw(ArgumentError("Requested backend :distributed requires at least one Julia worker. Call Distributed.addprocs(...) first, or use backend=:auto to allow fallback."))
-    elseif !allow_fallback && requested == :threads && Threads.nthreads() <= 1
-        throw(ArgumentError("Requested backend :threads requires Julia to run with more than one thread. Start Julia with JULIA_NUM_THREADS>1, or use backend=:auto to allow fallback."))
-    end
-
-    selected = determine_parallel_backend(requested, comm)
-    if !allow_fallback && requested != :auto && selected != requested
-        throw(ArgumentError("Requested backend :$requested is not available (would fall back to :$selected). Use backend=:auto to allow fallback."))
-    end
-    return selected
-end
-
-function _backend_fallback(reason::AbstractString, strict_backend::Bool,
-                           A, B, interval, M0, fpm)
-    # Shared fallback path keeps warning text and serial execution behavior
-    # consistent across unsupported backend/storage combinations.
-    if strict_backend
-        throw(ArgumentError(reason))
-    end
-    @warn "$reason; falling back to serial execution"
-    return feast_serial(A, B, interval, M0, fpm)
-end
-
-function feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads;
-                            strict_backend::Bool = false)
-    if backend == :mpi && _mpi_backend_ready(comm)
-        if eltype(A) <: Real && eltype(B) <: Real
-            # Handle comm=nothing by omitting the keyword to use MPI.COMM_WORLD default
-            if comm === nothing
-                return mpi_feast(A, B, interval, M0=M0, fpm=fpm)
-            else
-                return mpi_feast(A, B, interval, M0=M0, fpm=fpm, comm=comm)
-            end
-        elseif eltype(A) <: Complex && eltype(B) <: Complex &&
-               ((A isa SparseMatrixCSC && B isa SparseMatrixCSC) ||
-                (A isa Matrix && B isa Matrix))
-            if comm === nothing
-                return mpi_feast(A, B, interval, M0=M0, fpm=fpm)
-            else
-                return mpi_feast(A, B, interval, M0=M0, fpm=fpm, comm=comm)
-            end
-        else
-            return _backend_fallback("MPI backend currently supports real symmetric and dense/sparse complex Hermitian problems",
-                                     strict_backend, A, B, interval, M0, fpm)
-        end
-    elseif backend in [:threads, :distributed]
-        if !(eltype(A) <: Real && eltype(B) <: Real)
-            return _backend_fallback("Threaded/distributed backends currently support real symmetric problems",
-                                     strict_backend, A, B, interval, M0, fpm)
-        end
-
-        if A isa SparseMatrixCSC && B isa SparseMatrixCSC
-            # Parallel sparse solvers mutate their inputs during factorization,
-            # so copy user matrices before handing them to backend-specific code.
-            return pfeast_scsrgv!(copy(A), copy(B), interval[1], interval[2], M0, fpm;
-                                  use_threads=(backend == :threads))
-        elseif A isa Matrix && B isa Matrix
-            if backend == :threads
-                # Re-enabled: the dense threaded path disagreed with serial only
-                # because it took real(q) of a complex Ritz vector without
-                # removing the global phase, which collapsed columns whose phase
-                # sat near +-i. See _feast_real_column!.
-                return pfeast_sygv!(copy(A), copy(B), interval[1], interval[2], M0, fpm;
-                                    use_threads=true)
-            end
-            return _backend_fallback("Dense distributed backend is not implemented; contour points are distributed across workers only for sparse storage",
-                                     strict_backend, A, B, interval, M0, fpm)
-        else
-            return _backend_fallback("Threaded/distributed backend requires both matrices to use the same dense or sparse storage",
-                                     strict_backend, A, B, interval, M0, fpm)
-        end
-    end
-    # Fall back to serial execution
-    return feast_serial(A, B, interval, M0, fpm)
-end
+# Serial storage dispatch and backend capability reporting.
 
 # Detect identity matrices for dispatching specialized routines
 function _is_identity_matrix(B::Matrix)
@@ -175,31 +40,31 @@ end
 
 # Serial Feast execution
 # All matrix types (dense and sparse) use the FEAST contour integration solver
-function feast_serial(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{T,T}, M0::Int, fpm::Vector{Int}) where T<:Real
+function feast_serial(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{T,T}, M0::Int, fpm::Vector{Int}; solver_options...) where T<:Real
     Emin, Emax = interval
     elem_type = eltype(A)
 
     if elem_type <: Real
         if isa(A, Matrix) && isa(B, Matrix)
             return feast_sygv!(A, B, convert(elem_type, Emin),
-                                convert(elem_type, Emax), M0, fpm)
+                                convert(elem_type, Emax), M0, fpm; solver_options...)
         elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
             if _is_identity_matrix(B)
-                return feast_scsrev!(A, Emin, Emax, M0, fpm)
+                return feast_scsrev!(A, Emin, Emax, M0, fpm; solver_options...)
             else
-                return feast_scsrgv!(A, B, Emin, Emax, M0, fpm)
+                return feast_scsrgv!(A, B, Emin, Emax, M0, fpm; solver_options...)
             end
         else
             throw(ArgumentError("Unsupported matrix storage types for real symmetric problems: $(typeof(A)), $(typeof(B))"))
         end
     elseif elem_type <: Complex
         if isa(A, Matrix) && isa(B, Matrix)
-            return feast_hegv!(A, B, Emin, Emax, M0, fpm)
+            return feast_hegv!(A, B, Emin, Emax, M0, fpm; solver_options...)
         elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
             if _is_identity_matrix(B)
-                return feast_hcsrev!(A, Emin, Emax, M0, fpm)
+                return feast_hcsrev!(A, Emin, Emax, M0, fpm; solver_options...)
             else
-                return feast_hcsrgv!(A, B, Emin, Emax, M0, fpm)
+                return feast_hcsrgv!(A, B, Emin, Emax, M0, fpm; solver_options...)
             end
         else
             throw(ArgumentError("Unsupported matrix storage types for complex Hermitian problems: $(typeof(A)), $(typeof(B))"))
@@ -210,11 +75,11 @@ function feast_serial(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{T,T}
 end
 
 function feast_general_serial(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
-                              center::Complex{T}, radius::T, M0::Int, fpm::Vector{Int}) where T<:Real
+                              center::Complex{T}, radius::T, M0::Int, fpm::Vector{Int}; solver_options...) where T<:Real
     if isa(A, Matrix) && isa(B, Matrix)
-        return feast_gegv!(A, B, center, radius, M0, fpm)
+        return feast_gegv!(A, B, center, radius, M0, fpm; solver_options...)
     elseif isa(A, SparseMatrixCSC) && isa(B, SparseMatrixCSC)
-        return feast_gcsrgv!(A, B, center, radius, M0, fpm)
+        return feast_gcsrgv!(A, B, center, radius, M0, fpm; solver_options...)
     else
         throw(ArgumentError("Unsupported matrix types for general problems: $(typeof(A)), $(typeof(B))"))
     end

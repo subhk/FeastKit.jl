@@ -1,0 +1,342 @@
+using Test
+using FeastKit
+using Distributed
+using LinearAlgebra
+using SparseArrays
+
+if !isdefined(@__MODULE__, :FeastTestFixtures)
+    include(joinpath(@__DIR__, "..", "support", "fixtures.jl"))
+end
+
+
+@testset "Distributed backend" begin
+    if get(ENV, "FEASTKIT_TEST_DISTRIBUTED", "false") == "true"
+        @test nworkers() >= 1
+        @test determine_parallel_backend(:distributed) == :distributed
+
+        n = 10
+        interval = (0.1, 3.9)
+        A, B, fpm = FeastTestFixtures.backend_problem(n; storage=sparse)
+
+        # CI starts fresh workers without @everywhere using FeastKit. The
+        # high-level backend must prepare them before dispatching any work.
+        startup = feast(A, B, interval; subspace_size=n, tol=1e-10, maxiter=20,
+                        quadrature_points=8, fpm=copy(fpm), backend=:distributed)
+        @test startup.info == 0
+        @test startup.M == count(x -> interval[1] <= x <= interval[2], eigvals(Matrix(A)))
+        @test all(remotecall_fetch(isdefined, pid, Main, :FeastKit) for pid in workers())
+
+        @testset "Distributed parallel RCI contributions" begin
+            f_rci = copy(fpm); feastdefault!(f_rci)
+            state = ParallelFeastState{Float64}(f_rci[2], n, true, false)
+            work = Matrix{Float64}(I,n,n)
+            pfeast_srci!(state,n,work,zeros(ComplexF64,n,n),zeros(n,n),zeros(n,n),
+                        f_rci,interval[1],interval[2],n,zeros(n),zeros(n,n),zeros(n))
+            pfeast_compute_all_contour_points!(state,Matrix(A),Matrix(B),work,n)
+            @test all(c -> norm(c[1]) > 0, state.moment_contributions)
+        end
+
+        # Compare both high-level backend selection and FEAST-prefixed parallel
+        # aliases against the same serial reference.
+        serial = feast(A, B, interval; M0=n, fpm=copy(fpm), backend=:serial)
+        # Instrument only the worker-side solve in this test. Numerical
+        # equality alone also passes if the coordinator does all the work.
+        for pid in workers()
+            Distributed.remotecall_eval(Main, [pid], quote
+                _feast_worker_projection_calls = 0
+                function FeastKit._pfeast_project_sparse_chunk(factors::FeastKit.Future,
+                                                               rhs::Matrix{ComplexF64},
+                                                               weights::Vector{ComplexF64})
+                    @assert factors.where == FeastKit.Distributed.myid()
+                    global _feast_worker_projection_calls += 1
+                    return invoke(FeastKit._pfeast_project_sparse_chunk,
+                                  Tuple{FeastKit.Future, AbstractMatrix, AbstractVector},
+                                  factors, rhs, weights)
+                end
+            end)
+        end
+        worker_calls() = [remotecall_fetch(() -> Main._feast_worker_projection_calls, pid)
+                          for pid in workers()]
+        distributed = feast(A, B, interval; M0=n, fpm=copy(fpm),
+                            backend=:distributed, strict_backend=true)
+        calls_highlevel = worker_calls()
+        @test all(>(0), calls_highlevel)
+        distributed_alias = pdfeast_scsrgv!(copy(A), copy(B), interval[1], interval[2],
+                                            n, copy(fpm); use_threads=false)
+        calls_alias = worker_calls()
+        @test all(calls_alias .> calls_highlevel)
+        distributed_standard_alias = pdfeast_scsrev!(copy(A), interval[1], interval[2],
+                                                     n, copy(fpm); use_threads=false)
+        @test all(worker_calls() .> calls_alias)
+
+        @test distributed.info == serial.info
+        @test distributed.M == serial.M
+        @test sort(distributed.lambda[1:distributed.M]) ≈ sort(serial.lambda[1:serial.M]) atol=1e-8
+        @test distributed_alias.info == serial.info
+        @test distributed_alias.M == serial.M
+        @test sort(distributed_alias.lambda[1:distributed_alias.M]) ≈ sort(serial.lambda[1:serial.M]) atol=1e-8
+        @test distributed_standard_alias.info == serial.info
+        @test distributed_standard_alias.M == serial.M
+        @test sort(distributed_standard_alias.lambda[1:distributed_standard_alias.M]) ≈ sort(serial.lambda[1:serial.M]) atol=1e-8
+    else
+        @info "Skipping distributed backend execution test (set FEASTKIT_TEST_DISTRIBUTED=true and add workers)"
+    end
+end
+
+@testset "MPI backend" begin
+    if get(ENV, "FEASTKIT_TEST_MPI", "false") == "true"
+        # This block is intended for mpiexec-driven jobs. It verifies direct API,
+        # high-level backend routing, and precision-prefixed aliases together.
+        @eval using MPI
+        @eval using Krylov
+        MPI.Init()
+        comm = MPI.COMM_WORLD
+        rank = MPI.Comm_rank(comm)
+        nranks = MPI.Comm_size(comm)
+        @test nranks > 1
+
+        @testset "MPI saturation $T $storage M0=$m" for T in (Float64, ComplexF64), storage in (Matrix, sparse), m in (1,3)
+            A_sat = storage(Matrix{T}(I,3,3))
+            f_sat = feastinit().fpm; feastdefault!(f_sat)
+            r_sat = mpi_feast(A_sat, copy(A_sat), (0.5,1.5); M0=m, fpm=copy(f_sat), comm=comm)
+            @test r_sat.info == (m == 1 ? Int(Feast_ERROR_M0) : 0)
+            @test r_sat.M == m
+            @test r_sat.lambda ≈ ones(m)
+            if T === ComplexF64
+                g_sat = mpi_feast_general(A_sat, copy(A_sat), 1.0+0im, 0.5; M0=m, fpm=copy(f_sat), comm=comm)
+                @test g_sat.info == (m == 1 ? Int(Feast_ERROR_M0) : 0)
+                @test g_sat.M == m
+                @test g_sat.lambda ≈ ones(m)
+            end
+        end
+
+        n = 10
+        interval = (0.1, 3.9)
+        A, B, fpm = FeastTestFixtures.backend_problem(n; storage=sparse)
+
+        @test determine_parallel_backend(:mpi, comm) == :mpi
+
+        result = mpi_feast(A, B, interval; M0=n, fpm=copy(fpm), comm=comm)
+        highlevel = feast(A, B, interval; M0=n, fpm=copy(fpm),
+                          backend=:mpi, strict_backend=true, comm=comm)
+        mpi_alias = pdfeast_scsrgv!(copy(A), copy(B), interval[1], interval[2],
+                                    n, copy(fpm); comm=comm)
+        mpi_standard_alias = pdfeast_scsrev!(copy(A), interval[1], interval[2],
+                                             n, copy(fpm); comm=comm)
+        expected = eigvals(Matrix(A))
+        expected_inside = sort(expected[interval[1] .<= expected .<= interval[2]])
+
+        @test result.info == 0
+        @test result.M == length(expected_inside)
+        @test sort(result.lambda[1:result.M]) ≈ expected_inside atol=1e-8
+        @test highlevel.info == 0
+        @test highlevel.M == length(expected_inside)
+        @test sort(highlevel.lambda[1:highlevel.M]) ≈ expected_inside atol=1e-8
+        @test mpi_alias.info == 0
+        @test mpi_alias.M == length(expected_inside)
+        @test sort(mpi_alias.lambda[1:mpi_alias.M]) ≈ expected_inside atol=1e-8
+        @test mpi_standard_alias.info == 0
+        @test mpi_standard_alias.M == length(expected_inside)
+        @test sort(mpi_standard_alias.lambda[1:mpi_standard_alias.M]) ≈ expected_inside atol=1e-8
+
+        n_complex = 4
+        complex_interval = (0.4, 1.6)
+        A_h = sparse(Diagonal(ComplexF64[0.5, 1.0, 1.5, 3.0]))
+        B_h = spdiagm(0 => ones(ComplexF64, n_complex))
+        fpm_h = zeros(Int, 64)
+        feastinit!(fpm_h)
+        fpm_h[1] = 0
+        fpm_h[2] = 8
+        fpm_h[4] = 12
+        fpm_h_iter = copy(fpm_h)
+        fpm_h_iter[3] = 8
+        expected_h = [0.5, 1.0, 1.5]
+
+        # Sparse complex Hermitian coverage includes direct and iterative alias
+        # paths because both should share the same MPI contour distribution.
+        herm_mpi = mpi_feast_hcsrgv!(copy(A_h), copy(B_h), complex_interval[1], complex_interval[2],
+                                     n_complex, copy(fpm_h); comm=comm)
+        herm_highlevel = feast(copy(A_h), copy(B_h), complex_interval; M0=n_complex,
+                               fpm=copy(fpm_h), backend=:mpi, strict_backend=true, comm=comm)
+        herm_alias = pzfeast_hcsrgv!(copy(A_h), copy(B_h), complex_interval[1], complex_interval[2],
+                                     n_complex, copy(fpm_h); comm=comm)
+        herm_iter_alias = pzifeast_hcsrgv!(copy(A_h), copy(B_h), complex_interval[1], complex_interval[2],
+                                           length(expected_h), copy(fpm_h_iter); comm=comm,
+                                           solver_tol=1e-10, solver_maxiter=100)
+
+        @test herm_mpi.info == 0
+        @test herm_mpi.M == length(expected_h)
+        @test sort(herm_mpi.lambda[1:herm_mpi.M]) ≈ expected_h atol=1e-8
+        @test herm_highlevel.info == 0
+        @test herm_highlevel.M == length(expected_h)
+        @test sort(herm_highlevel.lambda[1:herm_highlevel.M]) ≈ expected_h atol=1e-8
+        @test herm_alias.info == 0
+        @test herm_alias.M == length(expected_h)
+        @test sort(herm_alias.lambda[1:herm_alias.M]) ≈ expected_h atol=1e-8
+        # These iterative cases intentionally use a saturated trial subspace:
+        # accurate pairs are retained, but completeness cannot be certified.
+        @test herm_iter_alias.info == Int(Feast_ERROR_M0)
+        @test herm_iter_alias.M == length(expected_h)
+        @test sort(herm_iter_alias.lambda[1:herm_iter_alias.M]) ≈ expected_h atol=1e-8
+
+        center = 1.0 + 0.1im
+        radius = 1.3
+        A_g = sparse(Diagonal(ComplexF64[0.5 + 0.1im, 1.0 + 0.2im, 2.0 - 0.1im, 4.0 + 0.0im]))
+        B_g = spdiagm(0 => ones(ComplexF64, n_complex))
+        fpm_g = zeros(Int, 64)
+        feastinit!(fpm_g)
+        fpm_g[1] = 0
+        fpm_g[3] = 11
+        fpm_g[4] = 12
+        fpm_g[8] = 12
+        expected_g = ComplexF64[0.5 + 0.1im, 1.0 + 0.2im, 2.0 - 0.1im]
+        sort_complex(vals) = sort(collect(vals), by=x -> (round(real(x), digits=10),
+                                                          round(imag(x), digits=10)))
+
+        # General non-Hermitian MPI tests sort by rounded real/imaginary parts
+        # so equivalent eigenvalue ordering from different solvers is accepted.
+        general_mpi = mpi_feast_gcsrgv!(copy(A_g), copy(B_g), center, radius,
+                                        n_complex, copy(fpm_g); comm=comm)
+        general_highlevel = feast_general(copy(A_g), copy(B_g), center, radius;
+                                          M0=n_complex, fpm=copy(fpm_g),
+                                          backend=:mpi, strict_backend=true, comm=comm)
+        general_alias = pzfeast_gcsrgv!(copy(A_g), copy(B_g), center, radius,
+                                        n_complex, copy(fpm_g); comm=comm)
+        general_iter_alias = pzifeast_gcsrgv!(copy(A_g), copy(B_g), center, radius,
+                                              n_complex, copy(fpm_g); comm=comm,
+                                              solver_tol=1e-10, solver_maxiter=100)
+
+        @test general_mpi.info == 0
+        @test general_mpi.M == length(expected_g)
+        @test isapprox(sort_complex(general_mpi.lambda[1:general_mpi.M]), sort_complex(expected_g); atol=1e-8)
+        @test general_highlevel.info == 0
+        @test general_highlevel.M == length(expected_g)
+        @test isapprox(sort_complex(general_highlevel.lambda[1:general_highlevel.M]), sort_complex(expected_g); atol=1e-8)
+        @test general_alias.info == 0
+        @test general_alias.M == length(expected_g)
+        @test isapprox(sort_complex(general_alias.lambda[1:general_alias.M]), sort_complex(expected_g); atol=1e-8)
+        @test general_iter_alias.info == 0
+        @test general_iter_alias.M == length(expected_g)
+        @test isapprox(sort_complex(general_iter_alias.lambda[1:general_iter_alias.M]), sort_complex(expected_g); atol=1e-8)
+
+        for storage in (Matrix, sparse)
+            adaptive_h = feast(storage(A_h), storage(B_h), complex_interval;
+                M0=n_complex, fpm=copy(fpm_h), solver=:gmres,
+                backend=:mpi, comm=comm, solver_opts=(maxiter=100,))
+            adaptive_g = feast_general(storage(A_g), storage(B_g), center, radius;
+                M0=n_complex, fpm=copy(fpm_g), solver=:gmres,
+                backend=:mpi, comm=comm, solver_opts=(maxiter=100,))
+            @test adaptive_h.converged && adaptive_h.M == length(expected_h)
+            @test adaptive_g.converged && adaptive_g.M == length(expected_g)
+            @test sort(real.(adaptive_h.values)) ≈ sort(real.(expected_h)) atol=1e-8
+            @test sort_complex(adaptive_g.values) ≈ sort_complex(expected_g) atol=1e-8
+        end
+
+        A_hd = Matrix(A_h)
+        B_hd = Matrix(B_h)
+        # Dense MPI wrappers reuse the same expected spectra as the sparse cases,
+        # which catches storage-specific routing differences without new data.
+        dense_herm_mpi = mpi_feast_hegv!(copy(A_hd), copy(B_hd), complex_interval[1], complex_interval[2],
+                                         n_complex, copy(fpm_h); comm=comm)
+        dense_herm_highlevel = feast(copy(A_hd), copy(B_hd), complex_interval;
+                                     M0=n_complex, fpm=copy(fpm_h),
+                                     backend=:mpi, strict_backend=true, comm=comm)
+        dense_herm_alias = pzfeast_hegv!(copy(A_hd), copy(B_hd), complex_interval[1], complex_interval[2],
+                                         n_complex, copy(fpm_h); comm=comm)
+        dense_herm_iter_alias = pzifeast_hegv!(copy(A_hd), copy(B_hd),
+                                               complex_interval[1], complex_interval[2],
+                                               length(expected_h), copy(fpm_h_iter); comm=comm,
+                                               solver_tol=1e-10, solver_maxiter=100)
+        dense_herm_standard_mpi = mpi_feast_heev!(copy(A_hd), complex_interval[1], complex_interval[2],
+                                                  n_complex, copy(fpm_h); comm=comm)
+        dense_herm_standard_highlevel = feast(copy(A_hd), complex_interval;
+                                              M0=n_complex, fpm=copy(fpm_h),
+                                              backend=:mpi, strict_backend=true, comm=comm)
+        dense_herm_standard_alias = pzfeast_heev!(copy(A_hd), complex_interval[1], complex_interval[2],
+                                                  n_complex, copy(fpm_h); comm=comm)
+        dense_herm_standard_iter_alias = pzifeast_heev!(copy(A_hd), complex_interval[1], complex_interval[2],
+                                                        length(expected_h), copy(fpm_h_iter); comm=comm,
+                                                        solver_tol=1e-10, solver_maxiter=100)
+
+        @test dense_herm_mpi.info == 0
+        @test dense_herm_mpi.M == length(expected_h)
+        @test sort(dense_herm_mpi.lambda[1:dense_herm_mpi.M]) ≈ expected_h atol=1e-8
+        @test dense_herm_highlevel.info == 0
+        @test dense_herm_highlevel.M == length(expected_h)
+        @test sort(dense_herm_highlevel.lambda[1:dense_herm_highlevel.M]) ≈ expected_h atol=1e-8
+        @test dense_herm_alias.info == 0
+        @test dense_herm_alias.M == length(expected_h)
+        @test sort(dense_herm_alias.lambda[1:dense_herm_alias.M]) ≈ expected_h atol=1e-8
+        @test dense_herm_iter_alias.info == Int(Feast_ERROR_M0)
+        @test dense_herm_iter_alias.M == length(expected_h)
+        @test sort(dense_herm_iter_alias.lambda[1:dense_herm_iter_alias.M]) ≈ expected_h atol=1e-8
+        @test dense_herm_standard_mpi.info == 0
+        @test dense_herm_standard_mpi.M == length(expected_h)
+        @test sort(dense_herm_standard_mpi.lambda[1:dense_herm_standard_mpi.M]) ≈ expected_h atol=1e-8
+        @test dense_herm_standard_highlevel.info == 0
+        @test dense_herm_standard_highlevel.M == length(expected_h)
+        @test sort(dense_herm_standard_highlevel.lambda[1:dense_herm_standard_highlevel.M]) ≈ expected_h atol=1e-8
+        @test dense_herm_standard_alias.info == 0
+        @test dense_herm_standard_alias.M == length(expected_h)
+        @test sort(dense_herm_standard_alias.lambda[1:dense_herm_standard_alias.M]) ≈ expected_h atol=1e-8
+        @test dense_herm_standard_iter_alias.info == Int(Feast_ERROR_M0)
+        @test dense_herm_standard_iter_alias.M == length(expected_h)
+        @test sort(dense_herm_standard_iter_alias.lambda[1:dense_herm_standard_iter_alias.M]) ≈ expected_h atol=1e-8
+
+        A_gd = Matrix(A_g)
+        B_gd = Matrix(B_g)
+        dense_general_mpi = mpi_feast_gegv!(copy(A_gd), copy(B_gd), center, radius,
+                                            n_complex, copy(fpm_g); comm=comm)
+        dense_general_highlevel = feast_general(copy(A_gd), copy(B_gd), center, radius;
+                                                M0=n_complex, fpm=copy(fpm_g),
+                                                backend=:mpi, strict_backend=true, comm=comm)
+        dense_general_alias = pzfeast_gegv!(copy(A_gd), copy(B_gd), center, radius,
+                                            n_complex, copy(fpm_g); comm=comm)
+        dense_general_iter_alias = pzifeast_gegv!(copy(A_gd), copy(B_gd), center, radius,
+                                                  n_complex, copy(fpm_g); comm=comm,
+                                                  solver_tol=1e-10, solver_maxiter=100)
+        dense_general_standard_mpi = mpi_feast_geev!(copy(A_gd), center, radius,
+                                                     n_complex, copy(fpm_g); comm=comm)
+        dense_general_standard_highlevel = feast_general(copy(A_gd), center, radius;
+                                                         M0=n_complex, fpm=copy(fpm_g),
+                                                         backend=:mpi, strict_backend=true, comm=comm)
+        dense_general_standard_alias = pzfeast_geev!(copy(A_gd), center, radius,
+                                                     n_complex, copy(fpm_g); comm=comm)
+        dense_general_standard_iter_alias = pzifeast_geev!(copy(A_gd), center, radius,
+                                                           n_complex, copy(fpm_g); comm=comm,
+                                                           solver_tol=1e-10, solver_maxiter=100)
+
+        @test dense_general_mpi.info == 0
+        @test dense_general_mpi.M == length(expected_g)
+        @test isapprox(sort_complex(dense_general_mpi.lambda[1:dense_general_mpi.M]), sort_complex(expected_g); atol=1e-8)
+        @test dense_general_highlevel.info == 0
+        @test dense_general_highlevel.M == length(expected_g)
+        @test isapprox(sort_complex(dense_general_highlevel.lambda[1:dense_general_highlevel.M]), sort_complex(expected_g); atol=1e-8)
+        @test dense_general_alias.info == 0
+        @test dense_general_alias.M == length(expected_g)
+        @test isapprox(sort_complex(dense_general_alias.lambda[1:dense_general_alias.M]), sort_complex(expected_g); atol=1e-8)
+        @test dense_general_iter_alias.info == 0
+        @test dense_general_iter_alias.M == length(expected_g)
+        @test isapprox(sort_complex(dense_general_iter_alias.lambda[1:dense_general_iter_alias.M]), sort_complex(expected_g); atol=1e-8)
+        @test dense_general_standard_mpi.info == 0
+        @test dense_general_standard_mpi.M == length(expected_g)
+        @test isapprox(sort_complex(dense_general_standard_mpi.lambda[1:dense_general_standard_mpi.M]), sort_complex(expected_g); atol=1e-8)
+        @test dense_general_standard_highlevel.info == 0
+        @test dense_general_standard_highlevel.M == length(expected_g)
+        @test isapprox(sort_complex(dense_general_standard_highlevel.lambda[1:dense_general_standard_highlevel.M]), sort_complex(expected_g); atol=1e-8)
+        @test dense_general_standard_alias.info == 0
+        @test dense_general_standard_alias.M == length(expected_g)
+        @test isapprox(sort_complex(dense_general_standard_alias.lambda[1:dense_general_standard_alias.M]), sort_complex(expected_g); atol=1e-8)
+        @test dense_general_standard_iter_alias.info == 0
+        @test dense_general_standard_iter_alias.M == length(expected_g)
+        @test isapprox(sort_complex(dense_general_standard_iter_alias.lambda[1:dense_general_standard_iter_alias.M]), sort_complex(expected_g); atol=1e-8)
+
+        include("mpi_safety.jl")
+        include("mpi_api.jl")
+        test_mpi_api(comm)
+        rank == 0 && println("MPI backend verified on $nranks ranks")
+        MPI.Finalize()
+    else
+        @info "Skipping MPI backend execution test (run under mpiexec with FEASTKIT_TEST_MPI=true)"
+    end
+end

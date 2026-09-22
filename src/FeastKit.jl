@@ -141,6 +141,9 @@ function _feast_gmres_workspace end
 function _feast_gmres! end
 function _feast_gmres_solution end
 function _feast_bicgstab end
+function _feast_bicgstab_workspace end
+function _feast_bicgstab! end
+function _feast_bicgstab_solution end
 
 # MPI is likewise optional, provided by FeastKitMPIExt. All MPI runtime
 # decisions are deferred to __init__ so loading FeastKit never starts MPI.
@@ -155,7 +158,9 @@ include("core/feast_parameters.jl")
 include("core/feast_tools.jl")
 include("core/feast_contour_shapes.jl")
 include("core/feast_aux.jl")
+include("core/feast_initial_subspace.jl")
 include("parallel/feast_mpi_stubs.jl")
+include("core/feast_backend_policy.jl")
 include("core/feast_backend_utils.jl")
 include("kernel/feast_kernel.jl")
 include("dense/feast_dense.jl")
@@ -164,13 +169,28 @@ include("sparse/feast_sparse.jl")
 # problems. Included after both storage layers because they use the dense and
 # sparse shifted-solve helpers.
 include("core/feast_rci_drivers.jl")
+include("core/feast_mixed_precision.jl")
 include("banded/feast_banded.jl")
 include("interfaces/feast_precision_aliases.jl")
 include("parallel/feast_parallel.jl")
 include("parallel/feast_parallel_rci.jl")
 include("parallel/feast_parallel_comparison.jl")
+include("interfaces/feast_options.jl")
+include("interfaces/feast_preparation.jl")
+include("interfaces/feast_auto_subspace.jl")
+include("interfaces/feast_validation.jl")
+include("parallel/feast_backend_execution.jl")
 include("interfaces/feast_interfaces.jl")
+include("interfaces/feast_banded_interface.jl")
+include("interfaces/feast_polynomial_interface.jl")
+include("matrixfree/operators.jl")
+include("matrixfree/workspace.jl")
+include("matrixfree/solvers.jl")
+include("matrixfree/rci_drivers.jl")
 include("interfaces/feast_matfree.jl")
+include("matrixfree/polynomial.jl")
+include("interfaces/feast_contour_interface.jl")
+include("interfaces/feast_results.jl")
 include("deprecations.jl")
 
 function __init__()

@@ -182,25 +182,27 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                                   A::SparseMatrixCSC,
                                   B::SparseMatrixCSC,
                                   z::CT, tol::TR,
-                                  maxiter::Int, gmres_restart::Int) where {CT<:Complex, TR<:Real}
+                                  maxiter::Int, gmres_restart::Int; workspace=nothing) where {CT<:Complex, TR<:Real}
     N = size(A, 1)
-    op = SparseShiftedOperator(A, B, z, Vector{CT}(undef, N), Vector{CT}(undef, N))
+    buffers = workspace === nothing ? _feast_krylov_workspace(N, real(CT), gmres_restart) : workspace
+    op = SparseShiftedOperator(A, B, z, buffers.tmpA, buffers.tmpB)
     apply_shift! = (y, x) -> mul!(y, op, x)
     # Reuse the normalized block solver without materializing a dense matrix.
     return solve_dense_shifted!(dest, rhs, apply_shift!, :gmres,
-                                real(CT)(tol), maxiter, gmres_restart)
+                                real(CT)(tol), maxiter, gmres_restart; workspace=buffers)
 end
 
 function solve_shifted_iterative_identity!(dest::AbstractMatrix{CT},
                                            rhs::AbstractMatrix{CT},
                                            A::SparseMatrixCSC,
                                            z::CT, tol::TR,
-                                           maxiter::Int, gmres_restart::Int) where {CT<:Complex, TR<:Real}
+                                           maxiter::Int, gmres_restart::Int; workspace=nothing) where {CT<:Complex, TR<:Real}
     N = size(A, 1)
-    op = SparseIdentityShiftedOperator(A, z, Vector{CT}(undef, N))
+    buffers = workspace === nothing ? _feast_krylov_workspace(N, real(CT), gmres_restart) : workspace
+    op = SparseIdentityShiftedOperator(A, z, buffers.tmpA)
     apply_shift! = (y, x) -> mul!(y, op, x)
     return solve_dense_shifted!(dest, rhs, apply_shift!, :gmres,
-                                real(CT)(tol), maxiter, gmres_restart)
+                                real(CT)(tol), maxiter, gmres_restart; workspace=buffers)
 end
 
 """
@@ -218,7 +220,8 @@ problems.
                                                 solver::Symbol = :direct,
                                                 solver_tol::Real = 0.0,
                                                 solver_maxiter::Int = 500,
-                                                solver_restart::Int = 30) where T<:Real
+                                                solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
+    fpm = _feast_initial_parameters(fpm, initial_subspace)
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
@@ -226,6 +229,7 @@ problems.
     _check_complex_symmetric(B)
 
     feastdefault!(fpm)
+    fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
     check_feast_grci_input(N, M0, Emid, r, fpm)
 
     solver_choice = solver == :iterative ? :gmres : solver
@@ -237,8 +241,10 @@ problems.
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
         throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+    krylov_workspace = solver_choice === :gmres ? _feast_krylov_workspace(N, T, solver_restart) : nothing
 
     workspace = FeastWorkspaceComplex{T}(N, M0)
+    _feast_initial_subspace!(workspace.workc, initial_subspace)
     Q_basis = view(workspace.workc, :, 1:M0)
     _feast_seeded_subspace_complex!(Q_basis)
     shifted_solutions = workspace.q
@@ -312,8 +318,8 @@ problems.
                 rhs_iterative_block = view(rhs_iterative, :, 1:active_dim)
                 copyto!(rhs_iterative_block, rhs_block)
                 success = solve_shifted_iterative!(shifted_block, rhs_iterative_block,
-                                                   A, B, z, tol_value,
-                                                   solver_maxiter, solver_restart)
+                                                   A, B, z, _feast_inner_tol(solver_tol == 0.0, tol_value, epsout_val, loop_idx),
+                                                   solver_maxiter, solver_restart; workspace=krylov_workspace)
                 if !success
                     info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                     solve_failed = true
@@ -381,7 +387,7 @@ problems.
                 mul!(residual_vec, A, q_col)
                 mul!(Bq_vec, B, q_col)
                 @. residual_vec = residual_vec - lambda_vec[j] * Bq_vec
-                res_val = norm(residual_vec) / max(abs(lambda_vec[j]), one(T))
+                res_val = _feast_scaled_residual(residual_vec, Bq_vec, lambda_vec[j])
                 res_vec[j] = res_val
                 max_res = max(max_res, res_val)
             end
@@ -421,7 +427,7 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                        solver::Symbol = :direct,
                        solver_tol::Real = 0.0,
                        solver_maxiter::Int = 500,
-                       solver_restart::Int = 30) where T<:Real
+                       solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     size(B) == (N, N) || throw(ArgumentError("B must be same size as A"))
@@ -429,7 +435,7 @@ function feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     return _feast_symmetric_real(A, B, Emin, Emax, M0, fpm;
                                  solver=solver, solver_tol=solver_tol,
                                  solver_maxiter=solver_maxiter,
-                                 solver_restart=solver_restart)
+                                 solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function feast_scsrgvx!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
@@ -439,13 +445,13 @@ function feast_scsrgvx!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                         solver::Symbol = :direct,
                         solver_tol::Real = 0.0,
                         solver_maxiter::Int = 500,
-                        solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+                        solver_restart::Int = 30, initial_subspace=nothing) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
         feast_scsrgv!(A, B, Emin, Emax, M0, fpm;
                       solver=solver,
                       solver_tol=solver_tol,
                       solver_maxiter=solver_maxiter,
-                      solver_restart=solver_restart)
+                      solver_restart=solver_restart, initial_subspace=initial_subspace)
     end
 end
 
@@ -463,7 +469,7 @@ function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
                        solver::Symbol = :direct,
                        solver_tol::Real = 0.0,
                        solver_maxiter::Int = 500,
-                       solver_restart::Int = 30) where T<:Real
+                       solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     ishermitian(A) || throw(ArgumentError("Matrix A must be Hermitian for feast_hcsrev!"))
@@ -471,7 +477,7 @@ function feast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
     return _feast_hermitian_complex(A, nothing, Emin, Emax, M0, fpm;
                                    solver=solver, solver_tol=solver_tol,
                                    solver_maxiter=solver_maxiter,
-                                   solver_restart=solver_restart)
+                                   solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function feast_hcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
@@ -481,11 +487,11 @@ function feast_hcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
                         solver::Symbol = :direct,
                         solver_tol::Real = 0.0,
                         solver_maxiter::Int = 500,
-                        solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+                        solver_restart::Int = 30, initial_subspace=nothing) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
         feast_hcsrev!(A, Emin, Emax, M0, fpm;
                       solver=solver, solver_tol=solver_tol,
-                      solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                      solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
     end
 end
 
@@ -493,10 +499,10 @@ function zifeast_hcsrev!(A::SparseMatrixCSC{Complex{T},Int},
                          Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                          solver_tol::Real = 0.0,
                          solver_maxiter::Int = 500,
-                         solver_restart::Int = 30) where T<:Real
+                         solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return feast_hcsrev!(A, Emin, Emax, M0, fpm;
                          solver=:gmres, solver_tol=solver_tol,
-                         solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                         solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function zifeast_hcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
@@ -505,12 +511,12 @@ function zifeast_hcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
                           Wne::AbstractVector{Complex{TW}};
                           solver_tol::Real = 0.0,
                           solver_maxiter::Int = 500,
-                          solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+                          solver_restart::Int = 30, initial_subspace=nothing) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
         zifeast_hcsrev!(A, Emin, Emax, M0, fpm;
                         solver_tol=solver_tol,
                         solver_maxiter=solver_maxiter,
-                        solver_restart=solver_restart)
+                        solver_restart=solver_restart, initial_subspace=initial_subspace)
     end
 end
 
@@ -519,7 +525,7 @@ function feast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
                        solver::Symbol = :direct,
                        solver_tol::Real = 0.0,
                        solver_maxiter::Int = 500,
-                       solver_restart::Int = 30) where T<:Real
+                       solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     N = size(A, 1)
     size(A, 2) == N || throw(ArgumentError("A must be square"))
     size(B) == (N, N) || throw(ArgumentError("B must match the size of A"))
@@ -529,7 +535,7 @@ function feast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     return _feast_hermitian_complex(A, B, Emin, Emax, M0, fpm;
                                    solver=solver, solver_tol=solver_tol,
                                    solver_maxiter=solver_maxiter,
-                                   solver_restart=solver_restart)
+                                   solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function feast_hcsrgvx!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
@@ -539,11 +545,11 @@ function feast_hcsrgvx!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{C
                         solver::Symbol = :direct,
                         solver_tol::Real = 0.0,
                         solver_maxiter::Int = 500,
-                        solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+                        solver_restart::Int = 30, initial_subspace=nothing) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
         feast_hcsrgv!(A, B, Emin, Emax, M0, fpm;
                       solver=solver, solver_tol=solver_tol,
-                      solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                      solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
     end
 end
 
@@ -551,10 +557,10 @@ function zifeast_hcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{
                          Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                          solver_tol::Real = 0.0,
                          solver_maxiter::Int = 500,
-                         solver_restart::Int = 30) where T<:Real
+                         solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return feast_hcsrgv!(A, B, Emin, Emax, M0, fpm;
                          solver=:gmres, solver_tol=solver_tol,
-                         solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                         solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function zifeast_hcsrgvx!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
@@ -563,12 +569,12 @@ function zifeast_hcsrgvx!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC
                           Wne::AbstractVector{Complex{TW}};
                           solver_tol::Real = 0.0,
                           solver_maxiter::Int = 500,
-                          solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+                          solver_restart::Int = 30, initial_subspace=nothing) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
         zifeast_hcsrgv!(A, B, Emin, Emax, M0, fpm;
                         solver_tol=solver_tol,
                         solver_maxiter=solver_maxiter,
-                        solver_restart=solver_restart)
+                        solver_restart=solver_restart, initial_subspace=initial_subspace)
     end
 end
 
@@ -577,7 +583,8 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
                        solver::Symbol = :direct,
                        solver_tol::Real = 0.0,
                        solver_maxiter::Int = 500,
-                       solver_restart::Int = 30) where T<:Real
+                       solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
+    fpm = _feast_initial_parameters(fpm, initial_subspace)
     # Feast for sparse complex general eigenvalue problem
     # Solves: A*q = lambda*B*q where A and B are general sparse matrices
     
@@ -587,6 +594,7 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
 
     # Apply defaults FIRST before using any fpm values
     feastdefault!(fpm)
+    fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
 
     # Check inputs
     check_feast_grci_input(N, M0, Emid, r, fpm)
@@ -600,12 +608,14 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
     solver_is_iterative && !FEAST_KRYLOV_AVAILABLE[] &&
         throw(ArgumentError("Krylov.jl is required for iterative FEAST solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     tol_value = solver_tol == 0.0 ? T(10.0^(-fpm[3])) : T(solver_tol)
+    krylov_workspace = solver_choice === :gmres ? _feast_krylov_workspace(N, T, solver_restart) : nothing
     current_shift = Ref(zero(Complex{T}))
     rhs_iterative = solver_is_iterative ? zeros(Complex{T}, N, M0) : nothing
     rhs_buffer = Matrix{Complex{T}}(undef, N, M0)
 
     # Initialize workspace
     workspace = FeastWorkspaceComplex{T}(N, M0)
+    _feast_initial_subspace!(workspace.workc, initial_subspace)
     
     # Initialize variables for RCI
     ijob = Ref(-1)
@@ -683,7 +693,7 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
                 copyto!(rhs_iterative, rhs)
                 success = solve_shifted_iterative!(workc_block, rhs_iterative,
                                                    A, B, current_shift[],
-                                                   tol_value, solver_maxiter, solver_restart)
+                                                   _feast_inner_tol(solver_tol == 0.0, tol_value, epsout[], loop[]), solver_maxiter, solver_restart; workspace=krylov_workspace)
                 if !success
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     break
@@ -727,11 +737,11 @@ function feast_gcsrgvx!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{C
                         solver::Symbol = :direct,
                         solver_tol::Real = 0.0,
                         solver_maxiter::Int = 500,
-                        solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+                        solver_restart::Int = 30, initial_subspace=nothing) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
         feast_gcsrgv!(A, B, Emid, r, M0, fpm;
                       solver=solver, solver_tol=solver_tol,
-                      solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                      solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
     end
 end
 
@@ -742,11 +752,11 @@ function feast_gcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
                         solver::Symbol = :direct,
                         solver_tol::Real = 0.0,
                         solver_maxiter::Int = 500,
-                        solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+                        solver_restart::Int = 30, initial_subspace=nothing) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
         feast_gcsrev!(A, Emid, r, M0, fpm;
                       solver=solver, solver_tol=solver_tol,
-                      solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                      solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
     end
 end
 
@@ -756,13 +766,13 @@ function feast_scsrgv_complex!(A::SparseMatrixCSC{Complex{T},Int},
                                solver::Symbol = :direct,
                                solver_tol::Real = 0.0,
                                solver_maxiter::Int = 500,
-                               solver_restart::Int = 30) where T<:Real
+                               solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     _check_complex_symmetric(A)
     _check_complex_symmetric(B)
     return _feast_sparse_complex_symmetric(A, B, Emid, r, M0, fpm;
                                            solver=solver, solver_tol=solver_tol,
                                            solver_maxiter=solver_maxiter,
-                                           solver_restart=solver_restart)
+                                           solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function feast_scsrgvx_complex!(A::SparseMatrixCSC{Complex{T},Int},
@@ -773,11 +783,11 @@ function feast_scsrgvx_complex!(A::SparseMatrixCSC{Complex{T},Int},
                                 solver::Symbol = :direct,
                                 solver_tol::Real = 0.0,
                                 solver_maxiter::Int = 500,
-                                solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+                                solver_restart::Int = 30, initial_subspace=nothing) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
         feast_scsrgv_complex!(A, B, Emid, r, M0, fpm;
                               solver=solver, solver_tol=solver_tol,
-                              solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                              solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
     end
 end
 
@@ -786,12 +796,12 @@ function feast_scsrev_complex!(A::SparseMatrixCSC{Complex{T},Int},
                                solver::Symbol = :direct,
                                solver_tol::Real = 0.0,
                                solver_maxiter::Int = 500,
-                               solver_restart::Int = 30) where T<:Real
+                               solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     _check_complex_symmetric(A)
     B = spdiagm(0 => fill(Complex{T}(1), size(A, 1)))
     return feast_scsrgv_complex!(A, B, Emid, r, M0, fpm;
                                  solver=solver, solver_tol=solver_tol,
-                                 solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                                 solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function feast_scsrevx_complex!(A::SparseMatrixCSC{Complex{T},Int},
@@ -801,11 +811,11 @@ function feast_scsrevx_complex!(A::SparseMatrixCSC{Complex{T},Int},
                                 solver::Symbol = :direct,
                                 solver_tol::Real = 0.0,
                                 solver_maxiter::Int = 500,
-                                solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+                                solver_restart::Int = 30, initial_subspace=nothing) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
         feast_scsrev_complex!(A, Emid, r, M0, fpm;
                               solver=solver, solver_tol=solver_tol,
-                              solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                              solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
     end
 end
 
@@ -814,10 +824,10 @@ function zifeast_scsrgv_complex!(A::SparseMatrixCSC{Complex{T},Int},
                                  Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
                                  solver_tol::Real = 0.0,
                                  solver_maxiter::Int = 500,
-                                 solver_restart::Int = 30) where T<:Real
+                                 solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return feast_scsrgv_complex!(A, B, Emid, r, M0, fpm;
                                  solver=:gmres, solver_tol=solver_tol,
-                                 solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                                 solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function zifeast_scsrgvx_complex!(A::SparseMatrixCSC{Complex{T},Int},
@@ -827,12 +837,12 @@ function zifeast_scsrgvx_complex!(A::SparseMatrixCSC{Complex{T},Int},
                                   Wne::AbstractVector{Complex{TW}};
                                   solver_tol::Real = 0.0,
                                   solver_maxiter::Int = 500,
-                                  solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+                                  solver_restart::Int = 30, initial_subspace=nothing) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
         zifeast_scsrgv_complex!(A, B, Emid, r, M0, fpm;
                                 solver_tol=solver_tol,
                                 solver_maxiter=solver_maxiter,
-                                solver_restart=solver_restart)
+                                solver_restart=solver_restart, initial_subspace=initial_subspace)
     end
 end
 
@@ -840,10 +850,10 @@ function zifeast_scsrev_complex!(A::SparseMatrixCSC{Complex{T},Int},
                                  Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
                                  solver_tol::Real = 0.0,
                                  solver_maxiter::Int = 500,
-                                 solver_restart::Int = 30) where T<:Real
+                                 solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return feast_scsrev_complex!(A, Emid, r, M0, fpm;
                                  solver=:gmres, solver_tol=solver_tol,
-                                 solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                                 solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function zifeast_scsrevx_complex!(A::SparseMatrixCSC{Complex{T},Int},
@@ -852,12 +862,12 @@ function zifeast_scsrevx_complex!(A::SparseMatrixCSC{Complex{T},Int},
                                   Wne::AbstractVector{Complex{TW}};
                                   solver_tol::Real = 0.0,
                                   solver_maxiter::Int = 500,
-                                  solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+                                  solver_restart::Int = 30, initial_subspace=nothing) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
         zifeast_scsrev_complex!(A, Emid, r, M0, fpm;
                                 solver_tol=solver_tol,
                                 solver_maxiter=solver_maxiter,
-                                solver_restart=solver_restart)
+                                solver_restart=solver_restart, initial_subspace=initial_subspace)
     end
 end
 
@@ -867,12 +877,12 @@ function zifeast_gcsrevx!(A::SparseMatrixCSC{Complex{T},Int},
                           Wne::AbstractVector{Complex{TW}};
                           solver_tol::Real = 0.0,
                           solver_maxiter::Int = 500,
-                          solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+                          solver_restart::Int = 30, initial_subspace=nothing) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
         zifeast_gcsrev!(A, Emid, r, M0, fpm;
                         solver_tol=solver_tol,
                         solver_maxiter=solver_maxiter,
-                        solver_restart=solver_restart)
+                        solver_restart=solver_restart, initial_subspace=initial_subspace)
     end
 end
 
@@ -880,10 +890,10 @@ function zifeast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{
                          Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
                          solver_tol::Real = 0.0,
                          solver_maxiter::Int = 500,
-                         solver_restart::Int = 30) where T<:Real
+                         solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return feast_gcsrgv!(A, B, Emid, r, M0, fpm;
                          solver=:gmres, solver_tol=solver_tol,
-                         solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                         solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function zifeast_gcsrgvx!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Complex{T},Int},
@@ -892,12 +902,12 @@ function zifeast_gcsrgvx!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC
                           Wne::AbstractVector{Complex{TW}};
                           solver_tol::Real = 0.0,
                           solver_maxiter::Int = 500,
-                          solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+                          solver_restart::Int = 30, initial_subspace=nothing) where {T<:Real, TZ<:Real, TW<:Real}
     return with_custom_contour(fpm, Zne, Wne) do
         zifeast_gcsrgv!(A, B, Emid, r, M0, fpm;
                         solver_tol=solver_tol,
                         solver_maxiter=solver_maxiter,
-                        solver_restart=solver_restart)
+                        solver_restart=solver_restart, initial_subspace=initial_subspace)
     end
 end
 
@@ -918,12 +928,12 @@ function difeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                          Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                          solver_tol::Real = 0.0,
                          solver_maxiter::Int = 500,
-                         solver_restart::Int = 30) where T<:Real
+                         solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return feast_scsrgv!(A, B, Emin, Emax, M0, fpm;
                          solver=:gmres,
                          solver_tol=solver_tol,
                          solver_maxiter=solver_maxiter,
-                         solver_restart=solver_restart)
+                         solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function difeast_scsrgvx!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
@@ -932,12 +942,12 @@ function difeast_scsrgvx!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                           Wne::AbstractVector{Complex{TW}};
                           solver_tol::Real = 0.0,
                           solver_maxiter::Int = 500,
-                          solver_restart::Int = 30) where {T<:Real, TZ<:Real, TW<:Real}
+                          solver_restart::Int = 30, initial_subspace=nothing) where {T<:Real, TZ<:Real, TW<:Real}
     return feast_scsrgvx!(A, B, Emin, Emax, M0, fpm, Zne, Wne;
                           solver=:gmres,
                           solver_tol=solver_tol,
                           solver_maxiter=solver_maxiter,
-                          solver_restart=solver_restart)
+                          solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 # --- Sparse polynomial FEAST ---------------------------------------------
@@ -1039,6 +1049,7 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
     FEAST_KRYLOV_AVAILABLE[] ||
         throw(ArgumentError("Krylov.jl is required for matrix-free GMRES solves. Run `using Krylov` to load the FeastKitKrylovExt extension."))
     feastdefault!(fpm)
+    fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
 
     # The shared RCI kernel builds Q' A Q and Q' B Q from a compressed basis.
@@ -1049,13 +1060,14 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
     shifted = MatrixFreeShiftedOperator(N, zero(Complex{T}), A_matvec!, B_matvec!, T)
     rhs = Vector{Complex{T}}(undef, N)
     solve_failed = Ref(false)
+    krylov_workspace = _feast_gmres_workspace(N, Complex{T}; memory=gmres_restart)
     function linear_solver(Y, z, X)
         shifted.z = z
         for j in axes(X, 2)
             copyto!(rhs, view(X, :, j))
-            sol, solved = _feast_gmres(shifted, rhs;
-                                      rtol=gmres_rtol, atol=gmres_atol,
-                                      memory=gmres_restart, itmax=gmres_maxiter)
+            solved = _feast_gmres!(krylov_workspace, shifted, rhs;
+                                   rtol=gmres_rtol, atol=gmres_atol, itmax=gmres_maxiter)
+            sol = _feast_gmres_solution(krylov_workspace)
             if !solved
                 solve_failed[] = true
                 error("GMRES did not converge for column $j")
@@ -1122,7 +1134,7 @@ function feast_scsrev!(A::SparseMatrixCSC{T,Int},
                        solver::Symbol = :direct,
                        solver_tol::Real = 0.0,
                        solver_maxiter::Int = 500,
-                       solver_restart::Int = 30) where T<:Real
+                       solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     # Feast for sparse real symmetric standard eigenvalue problem
     # Solves: A*q = lambda*q where A is symmetric
     # This is equivalent to feast_scsrgv! with B = I
@@ -1133,7 +1145,7 @@ function feast_scsrev!(A::SparseMatrixCSC{T,Int},
     return _feast_symmetric_real(A, nothing, Emin, Emax, M0, fpm;
                                  solver=solver, solver_tol=solver_tol,
                                  solver_maxiter=solver_maxiter,
-                                 solver_restart=solver_restart)
+                                 solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function feast_gcsrev!(A::SparseMatrixCSC{Complex{T},Int},
@@ -1141,7 +1153,7 @@ function feast_gcsrev!(A::SparseMatrixCSC{Complex{T},Int},
                        solver::Symbol = :direct,
                        solver_tol::Real = 0.0,
                        solver_maxiter::Int = 500,
-                       solver_restart::Int = 30) where T<:Real
+                       solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     # Feast for sparse complex general standard eigenvalue problem
     # Solves: A*q = lambda*q where A is a general matrix
     # This is equivalent to feast_gcsrgv! with B = I
@@ -1155,15 +1167,15 @@ function feast_gcsrev!(A::SparseMatrixCSC{Complex{T},Int},
     # Call generalized version with B = I
     return feast_gcsrgv!(A, B, Emid, r, M0, fpm;
                          solver=solver, solver_tol=solver_tol,
-                         solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                         solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
 end
 
 function zifeast_gcsrev!(A::SparseMatrixCSC{Complex{T},Int},
                          Emid::Complex{T}, r::T, M0::Int, fpm::Vector{Int};
                          solver_tol::Real = 0.0,
                          solver_maxiter::Int = 500,
-                         solver_restart::Int = 30) where T<:Real
+                         solver_restart::Int = 30, initial_subspace=nothing) where T<:Real
     return feast_gcsrev!(A, Emid, r, M0, fpm;
                          solver=:gmres, solver_tol=solver_tol,
-                         solver_maxiter=solver_maxiter, solver_restart=solver_restart)
+                         solver_maxiter=solver_maxiter, solver_restart=solver_restart, initial_subspace=initial_subspace)
 end

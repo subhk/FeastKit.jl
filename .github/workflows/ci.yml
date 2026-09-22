@@ -70,12 +70,14 @@ jobs:
             using Distributed
             for count in (1, 2)
               pids = addprocs(count; exeflags=`--project=$(Base.active_project())`)
-              @everywhere using FeastKit, LinearAlgebra, SparseArrays
-              include("test/test_parallel_backends.jl")
-              include("test/test_contour_parallel_regressions.jl")
+              include("test/backends/execution.jl")
+              include("test/backends/contours.jl")
               rmprocs(pids)
             end
           '
+
+      - name: Verify distributed documentation example
+        run: julia --project docs/check_parallel_examples.jl distributed
 
   mpi-backend:
     name: MPI Backend
@@ -112,16 +114,25 @@ jobs:
             Pkg.develop(path=".")
             Pkg.add(["MPI", "Krylov", "Logging"])
             using MPI
-            run(`$(MPI.mpiexec()) -n 2 julia --project=$(env) test/test_parallel_backends.jl`)
+            run(`$(MPI.mpiexec()) -n 2 julia --project=$(env) test/backends/execution.jl`)
             # Separate process: fault tests deliberately inject rank-local
             # numerical failures. Bound the run to catch collective deadlocks.
-            for script in ("test/test_mpi_faults.jl", "test/test_mpi_rhs_faults.jl")
+            for script in ("test/backends/mpi_faults.jl", "test/backends/mpi_rhs_faults.jl")
                 cmd = `$(MPI.mpiexec()) -n 2 julia --project=$(env) $script`
                 p = run(pipeline(cmd, stdout=stdout, stderr=stderr); wait=false)
                 outcome = timedwait(() -> process_exited(p), 120.0)
                 outcome == :timed_out && kill(p)
                 wait(p)
                 outcome == :ok && success(p) || error("$script failed or timed out")
+            end
+            # Execute the exact MPI and hybrid scripts printed in the manual.
+            for mode in ("mpi", "mpi_aliases", "hybrid")
+              cmd = `$(MPI.mpiexec()) -n 2 julia --project=$(env) --threads=2 docs/check_parallel_examples.jl $mode`
+              p = run(pipeline(cmd, stdout=stdout, stderr=stderr); wait=false)
+              outcome = timedwait(() -> process_exited(p), 120.0)
+              outcome == :timed_out && kill(p)
+              wait(p)
+              outcome == :ok && success(p) || error("Documentation example $mode failed or timed out")
             end
           '
 

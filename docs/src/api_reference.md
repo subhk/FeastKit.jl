@@ -1,21 +1,15 @@
 # API Reference
 
-Complete reference for all FeastKit.jl functions, types, and interfaces.
+Reference for the public interfaces, supported controls, and result conventions.
 
 Blocks that show a bare call with no surrounding setup are **signatures**, not
-runnable snippets: `A`, `B`, `interval` and `fpm` are supplied by you. Blocks
-under an **Examples** heading are executed when these docs are built, so they
-run exactly as shown.
+runnable snippets: `A`, `B`, `interval` and `fpm` are supplied by you. Blocks labeled `@example` in the source execute during the build. Other
+blocks are signatures or templates unless they include their own setup.
 
-## Table of Contents
-
-- [Main Interfaces](#main-interfaces)
-- [Matrix-Free Interface](#matrix-free-interface) 
-- [Contour Integration](#contour-integration)
-- [Parallel Computing](#parallel-computing)
-- [Types and Structures](#types-and-structures)
-- [Utility Functions](#utility-functions)
-- [Error Codes](#error-codes)
+```@contents
+Pages = ["api_reference.md"]
+Depth = 2
+```
 
 ---
 
@@ -24,6 +18,12 @@ run exactly as shown.
 ### feast
 
 Main FeastKit interface for symmetric/Hermitian eigenvalue problems.
+
+For assembled matrices, real/complex dispatch follows the element type. The
+interval overload checks symmetry/Hermitian structure and rejects incompatible
+input; it does not switch to a general solve automatically. See
+[Matrix types: detected or declared?](@ref matrix-properties) for all four
+matrix cases, Julia wrappers, and matrix-free declarations.
 
 ```julia
 feast(A, interval; M0=10, fpm=nothing, kwargs...)
@@ -37,7 +37,16 @@ feast(A, B, interval; M0=10, fpm=nothing, kwargs...)
 
 **Keyword Arguments:**
 - `M0::Int=10`: Maximum number of eigenvalues to find
-- `fpm::Vector{Int}`: FeastKit parameter array (auto-initialized if `nothing`)
+- `subspace_size`: Positive width (alias for `M0`) or `:auto` for count estimation and bounded growth
+- `max_subspace_size`: Maximum width for `subspace_size=:auto` (default: matrix dimension)
+- `initial_subspace`: Optional `N × k` seed; supported by serial assembled and matrix-free solves
+- `mixed_precision`: Opt-in Float32 correction solves with Float64 residuals; dense Float64/ComplexF64, serial, direct solver only
+- `tol`: Outer residual tolerance (default `1e-12`), rounded down to a decimal power in `[1e-16, 1]`; Float32 retains a `sqrt(eps(Float32))` floor
+- `maxiter`: Maximum outer refinement iterations (default 20)
+- `quadrature_points`: Half-contour node count (default 8); subject to the integration rule's valid counts
+- `solver::Symbol=:direct`: Shifted linear solver, `:direct` or `:gmres` (`using Krylov` required for GMRES)
+- `solver_opts::NamedTuple`: Inner controls `(rtol=..., maxiter=..., restart=...)`; only for iterative solves
+- `fpm`: `Vector{Int}`, `FeastParameters`, or `nothing` (initialized automatically)
 - `backend::Symbol=:serial`: Execution backend (`:serial`, `:auto`, `:threads`, `:distributed`, `:mpi`)
 - `parallel::Union{Bool,Symbol}`: Legacy alias for `backend`
 - `strict_backend::Bool=false`: Compatibility switch for legacy `parallel` requests; explicit `backend` requests already fail if unavailable or unsupported
@@ -46,6 +55,35 @@ feast(A, B, interval; M0=10, fpm=nothing, kwargs...)
 
 **Returns:**
 - `FeastResult`: Results structure with eigenvalues and eigenvectors
+
+`result.values` and `result.vectors` alias `lambda` and `q`. Check
+`result.converged` (equivalent to `info == 0`); `result.message` explains the
+status and gives recovery guidance. The REPL display includes convergence,
+residual, refinement count, and a short eigenvalue preview.
+
+Named options that conflict with explicit `fpm` entries raise `ArgumentError`.
+Named `fpm` overrides operate on a copy. Supplying both `M0` and `subspace_size`
+is allowed only when they agree; `:auto` cannot be combined with `M0`.
+`mixed_precision=true` corresponds to `fpm[42]=1`; `fpm[42]` now defaults to
+`0`, and unsupported drivers reject `1` instead of silently ignoring it.
+See [Performance Guide](performance.md) for sizing costs, warm-start checks,
+adaptive inner tolerances, and mixed-precision fallback behavior.
+
+Serial assembled drivers support both solvers. Complex MPI drivers also support
+GMRES; real MPI, threaded, and distributed drivers support direct solves only.
+An explicit unsupported backend raises an error; `backend=:auto` permits fallback.
+
+Full contour overloads use the general solver and return `FeastGeneralResult`:
+
+```julia
+feast(A, contour::FeastKit.FeastContour; subspace_size=10, kwargs...)
+feast(A, B, contour::FeastKit.FeastContour; subspace_size=10, kwargs...)
+```
+
+Pass a full contour from `feast_circle`, `feast_ellipse`, or `feast_rectangle`.
+These overloads manage registration automatically and leave `fpm` unchanged.
+Specify the node count in the contour constructor; `quadrature_points`, if
+provided, must match. For matrix-free full-contour solves, use complex operators.
 
 **Examples:**
 ```@example apifeast
@@ -58,9 +96,11 @@ B = Matrix{Float64}(I, n, n)
 # Standard eigenvalue problem. Size M0 to the number of eigenvalues the
 # interval holds -- here 2 - 2cos(kπ/(n+1)) puts 7 of them below 0.05.
 result = feast(A, (0.0, 0.05), M0=10)
+@assert result.converged && result.M == 7
 
 # Generalized eigenvalue problem
 result = feast(A, B, (0.0, 0.05), M0=10)
+@assert result.converged && result.M == 7
 
 # With custom parameters. Always feastinit! before setting entries: on a bare
 # zeros(Int, 64) the zeros read as user-supplied values, not as "unset".
@@ -68,6 +108,7 @@ fpm = zeros(Int, 64)
 feastinit!(fpm)
 fpm[2] = 16  # 16 integration points
 result = feast(A, (0, 0.05), M0=10, fpm=fpm)
+@assert result.converged && result.M == 7
 
 result.info, result.M
 ```
@@ -76,27 +117,39 @@ result.info, result.M
 
 FeastKit interface for general (non-Hermitian) eigenvalue problems using circular contours.
 
+Accepts the same named controls as `feast`. Here `quadrature_points` sets the
+full-contour count (`fpm[8]`, default 16), and the result is `FeastGeneralResult`.
+
 ```julia
 feast_general(A, B, center, radius; M0=10, fpm=nothing)
 ```
 
 **Arguments:**
-- `A::AbstractMatrix{Complex}`: System matrix
-- `B::AbstractMatrix{Complex}`: Mass matrix  
+- `A::AbstractMatrix`: Real or complex system matrix
+- `B::AbstractMatrix`: Real or complex mass matrix; optional for a standard problem
 - `center::Complex`: Center of circular search region
 - `radius::Real`: Radius of circular search region
 
+This high-level interface promotes the matrices to a common complex
+floating-point type, including when the supplied matrices are real.
+
 **Examples:**
-```julia
-# Complex eigenvalue problem
-A = randn(ComplexF64, 100, 100)
-B = Matrix{ComplexF64}(I, 100, 100)
-result = feast_general(A, B, 1.0+0.5im, 2.0, M0=10)
+```@example api_general
+using FeastKit, LinearAlgebra
+A = Matrix(Diagonal(ComplexF64[0.5+0.1im, 1.0+0.2im, 4.0]))
+result = feast_general(A, 1.0+0.5im, 2.0; subspace_size=3)
+@assert result.converged && result.M == 2
+@assert isapprox(sort(result.values; by=real), [0.5+0.1im, 1.0+0.2im]; atol=1e-9)
+result.values
 ```
 
 ### feast_banded
 
 FeastKit interface for banded matrices.
+
+Accepts `subspace_size` (including `:auto`), `max_subspace_size`,
+`initial_subspace`, `mixed_precision`, `tol`, `maxiter`, `quadrature_points`, `solver`, and
+`solver_opts` with the same meaning as the assembled interval interface.
 
 ```julia  
 feast_banded(A, kla, interval; B=nothing, klb=0, M0=10, fpm=nothing)
@@ -169,8 +222,10 @@ LinearOperator{T}(A_mul!, size; kwargs...)
 - `issymmetric::Bool=false`: Matrix is symmetric
 - `ishermitian::Bool=false`: Matrix is Hermitian
 - `isposdef::Bool=false`: Matrix is positive definite
-- `At_mul!::Function`: Function for `A'*x` (optional)
-- `Ac_mul!::Function`: Function for `A†*x` (optional)
+- `At_mul!`: Function `(y, x)` for `transpose(A)*x` (default `nothing`)
+- `Ac_mul!`: Function `(y, x)` for `adjoint(A)*x` (default `nothing`)
+- `solve!`: Stored solve callback (default `nothing`); pass a shifted solve
+  explicitly as `solver=callback` when calling `feast`.
 
 **Examples:**
 ```@example apiop
@@ -214,6 +269,8 @@ function tridiagonal_solve!(Y, z, X)
 end
 
 result = feast(A_op, (0.0, 0.0025), M0=12, solver=tridiagonal_solve!)
+@assert result.converged && result.M == 3
+@assert isapprox(result.values, [2-2cos(k*π/(n+1)) for k in 1:3]; atol=1e-9)
 result.info, result.M
 ```
 
@@ -234,7 +291,7 @@ FeastKit.validate_companion_matrices
 
 ### MatrixVecFunction
 
-Alternative matrix-free operator with data storage.
+Alternative callback wrapper. Capture payload data in the callback; the operator has no `data` field.
 
 ```julia
 MatrixVecFunction{T}(mul!, size; kwargs...)
@@ -249,12 +306,12 @@ MatrixVecFunction{T}(mul!, size; kwargs...)
 Matrix-free FeastKit interfaces.
 
 ```julia
-# Symmetric/Hermitian problems
+# Real symmetric operator problems
 feast(A_op::MatrixFreeOperator, interval; kwargs...)
 feast(A_op::MatrixFreeOperator, B_op::MatrixFreeOperator, interval; kwargs...)
 
 # General problems  
-feast_general(A_op::MatrixFreeOperator{Complex}, B_op, center, radius; kwargs...)
+feast_general(A_op::MatrixFreeOperator{<:Complex}, B_op, center, radius; kwargs...)
 ```
 
 **Additional Keyword Arguments:**
@@ -323,7 +380,8 @@ feast_contour_expert(Emin, Emax, ne, integration_type=0, ellipse_ratio=100)
 - `Emin, Emax::Real`: Interval bounds
 - `ne::Int`: Number of integration points
 - `integration_type::Int`: 0=Gauss-Legendre, 1=Trapezoidal, 2=Zolotarev
-- `ellipse_ratio::Int`: Aspect ratio a/b × 100 (100 = circle)
+- `ellipse_ratio::Int`: Vertical/horizontal semiaxis ratio × 100
+  (100 = circle, 50 = half as tall as it is wide)
 
 **Examples:**
 ```@example apicontour
@@ -438,7 +496,11 @@ not an MPI communicator or a standalone solver. Construct it with the number
 of contour points and the subspace size. For an automatic solve, use
 `feast_parallel`:
 
-```julia
+```@example api_parallel_state
+using FeastKit, LinearAlgebra
+A = Matrix(Diagonal(collect(1.0:40.0)))
+B = Matrix{Float64}(I, 40, 40)
+interval = (0.5, 3.5)
 fpm = feastinit().fpm
 fpm[2] = 8  # Set the point count before constructing manual RCI state
 M0 = 10
@@ -446,6 +508,7 @@ state = ParallelFeastState{Float64}(fpm[2], M0, true, true)
 # Manual RCI callers pass state to pfeast_srci! and service its requested jobs.
 # Automatic solve (manages its own state):
 result = feast_parallel(A, B, interval; M0=M0, fpm=fpm)
+@assert result.converged && result.M == 3
 ```
 
 ```@docs
@@ -474,6 +537,11 @@ struct FeastResult{T<:Real, VT}
 end
 ```
 
+For linear eigenproblems, each residual is
+`norm(A*q - λ*B*q) / norm(B*q) / max(abs(λ), 1)`, with `B = I` for standard
+problems. Scaling both matrices by the same nonzero factor therefore preserves
+the convergence criterion. A zero `B*q` yields an infinite residual.
+
 **Access patterns:**
 ```@example apiresult
 using FeastKit, LinearAlgebra
@@ -493,12 +561,15 @@ FeastKit.FeastGeneralResult
 
 ### FeastContour
 
-Integration contour structure.
+Integration contour structure (`FeastKit.FeastContour`; not exported). The
+two-vector constructor remains supported. Rectangles store their actual corners
+separately from quadrature nodes for eigenvalue selection.
 
 ```julia
 struct FeastContour{T<:Real}
     Zne::Vector{Complex{T}}  # Integration nodes
     Wne::Vector{Complex{T}}  # Integration weights
+    vertices::Union{Nothing,Vector{Complex{T}}}  # Optional polygon boundary
 end
 ```
 
@@ -549,7 +620,8 @@ which is wrong for any problem with `B ≠ I`. The kernel tracks which of the tw
 `MULT_A`/`MULT_B` pairs is outstanding, so a caller simply multiplies the first
 `mode[]` columns of `q` every time.
 
-On exit, `info` is `Feast_SUCCESS` only when `epsout` met the tolerance;
+On exit, `info` is `Feast_SUCCESS` only when `epsout` met the tolerance and
+the subspace was not saturated (except a complete full-space solve);
 exhausting `fpm[4]` refinement loops reports `Feast_ERROR_NO_CONVERGENCE`.
 
 The `ifeast_srci!`, `ifeast_hrci!`, and `ifeast_grci!` entry points expose
@@ -591,11 +663,14 @@ Initialize FeastKit parameter array.
 feastinit!(fpm::Vector{Int})
 ```
 
-Sets default values for all FeastKit parameters.
+Sets all 64 entries to the unset sentinel `-111`. Solvers apply defaults later.
+Call this before assigning custom entries; `feastinit()` returns a wrapper
+with the same unset entries.
 
 ### feastdefault!
 
-Reset FeastKit parameters to defaults.
+Validate configured entries and fill unset entries with defaults. Existing
+explicit settings are preserved; call `feastinit!` first to reset all settings.
 
 ```julia
 feastdefault!(fpm::Vector{Int})
@@ -633,21 +708,54 @@ feast_summary(io::IO, result)            # write to any IO instead of stdout
 
 ### eigvals_feast
 
+```@docs
+FeastKit.eigvals_feast
+```
+
 Extract only eigenvalues from FeastKit calculation.
 
 ```julia
-eigvals_feast(A, interval; kwargs...)
+eigvals_feast(A, interval; check=false, kwargs...)
+eigvals_feast(A, B, interval; check=false, kwargs...)
 ```
+
+Set `check=true` to throw an `ErrorException` for any nonzero FEAST status,
+including a saturated subspace even when residuals are small. The error
+includes the status code and recovery guidance. The default `check=false`
+preserves the existing behavior of returning eigenvalues after an unsuccessful
+solve. It does not suppress input-validation or other exceptions from `feast`.
+Use `feast` directly when you need to inspect status, residuals, or partial results.
+All other keywords are forwarded to `feast`.
 
 **Returns:**
 - `Vector`: Eigenvalues found
 
-### eigen_feast  
+### eigen_feast
+
+```@docs
+FeastKit.eigen_feast
+```
 
 Return Eigen object from FeastKit calculation.
 
 ```julia
-eigen_feast(A, interval; kwargs...)
+eigen_feast(A, interval; check=false, kwargs...)
+eigen_feast(A, B, interval; check=false, kwargs...)
+```
+
+`check` has the same behavior as in `eigvals_feast`: `true` requires `info == 0`,
+and the default `false` preserves the returned eigenpairs without checking the
+status. Other keywords are forwarded to `feast`.
+
+```@example checked_wrappers
+using FeastKit, LinearAlgebra
+A = Matrix(Diagonal([1.0, 2.0, 3.0, 4.0]))
+B = Matrix{Float64}(I, 4, 4)
+values = eigvals_feast(A, (0.5, 2.5); subspace_size=3, check=true)
+decomposition = eigen_feast(A, B, (0.5, 2.5); subspace_size=3, check=true)
+@assert values ≈ [1.0, 2.0]
+@assert decomposition.values ≈ values
+decomposition.values
 ```
 
 **Returns:**
@@ -716,11 +824,14 @@ The `fpm` parameter array controls FeastKit behavior:
 | `fpm[10]` | Factorization cache | 1 | 1=store direct factorizations, 0=recompute |
 | `fpm[16]` | Integration type | 0 | 0=Gauss, 1=Trapezoidal, 2=Zolotarev |
 | `fpm[18]` | Ellipse ratio | 100 | Aspect ratio × 100 |
+| `fpm[42]` | Mixed precision | 0 | 1=serial dense Float64 residual inverse iteration with Float32 correction solves |
 
 The precision-aware `feast_tolerance(fpm, Float32)` floors the target at
 `sqrt(eps(Float32))`; `fpm[7]` is a legacy slot, not its active stopping
-control. For Gauss/Zolotarev, half-contour counts above 20 must be one of
-24, 32, 40, 48, or 56. See [Problem Setup](problem_setup.md) for the distinction
+control. Interval solvers require at least 3 half-contour points. For
+Gauss/Zolotarev, counts above 20 must be one of 24, 32, 40, 48, or 56. General
+full contours require at least 2 points; Gauss counts above 40 must be one of
+48, 64, 80, 96, or 112. See [Problem Setup](problem_setup.md) for the distinction
 between outer parameters and inner-solver tolerances.
 
 With `fpm[5]=1`, the real-symmetric, complex-Hermitian, and general RCI kernels
@@ -757,33 +868,23 @@ result.info, result.M
 
 ### Memory Usage
 
-| Problem Type | Memory per Eigenvalue | Total Memory |
-|--------------|----------------------|--------------|
-| Dense N×N | ~16N bytes | ~16NM bytes |
-| Sparse N×N | ~16N bytes | ~16NM bytes |  
-| Matrix-free N×N | ~16N bytes | ~16NM bytes |
+Subspace and projection workspaces scale as `O(N*M0 + M0^2)`, with several
+real and complex buffers. Dense matrices add `O(N^2)` storage, and cached
+complex LU factors can add `O(ne*N^2)`. Sparse LU storage depends on fill-in;
+it cannot be inferred from `nnz(A)` alone. Matrix-free GMRES also stores a
+Krylov basis and callback-owned buffers. See [Performance](performance.md).
 
-### Recommended Parameters
+### Choosing Controls
 
-| Problem Size | M0 | Integration Points | Tolerance |
-|--------------|----|--------------------|-----------|
-| N < 1,000 | 10-20 | 8-12 | 1e-12 |
-| 1,000 < N < 10,000 | 10-30 | 8-16 | 1e-10 |  
-| 10,000 < N < 100,000 | 10-50 | 12-20 | 1e-8 |
-| N > 100,000 | 10-100 | 16-32 | 1e-6 |
+Choose `subspace_size` from the expected enclosed eigenvalue count, including
+multiplicities, rather than from `N` alone. Choose outer `tol` from the required
+accuracy and input precision. Increase quadrature points if the filter does
+not adequately separate inside and outside eigenvalues.
 
 ### Solver Selection
 
-| Problem Type | Recommended Solver | Options |
-|--------------|-------------------|---------|
-| Symmetric positive definite | `:gmres` | `rtol=1e-8` |
-| Symmetric indefinite | `:gmres` | `restart=30` |
-| General non-symmetric | `:gmres` | `restart=50, rtol=1e-6` |
-| Well-conditioned | `:bicgstab` | `l=2` |
-
----
-
-<div align="center">
-  <p><strong>Complete API documentation for FeastKit.jl</strong></p>
-  ← [Getting Started](getting_started.md) | [Examples](examples.md)
-</div>
+Assembled solvers default to `:direct` and also accept `:gmres` on supported
+backends. Matrix-free solvers default to `:gmres` and additionally support
+`:bicgstab` or a callback. Iterative options are `rtol`, `maxiter`, and GMRES
+`restart`; matrix-free calls also accept `preconditioner`. Neither `:cg` nor
+a BiCGSTAB `l` option is supported. See [Matrix-Free Interface](matrix_free_interface.md).

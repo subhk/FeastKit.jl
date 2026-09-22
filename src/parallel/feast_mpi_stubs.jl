@@ -6,7 +6,7 @@
 # serial code paths can reference them without MPI installed.
 #
 # Calling one of these without MPI loaded raises a MethodError; the backend
-# selection in `feast_backend_utils.jl` guards every internal call site with
+# selection in `feast_backend_policy.jl` guards every internal call site with
 # `_mpi_backend_ready`, which is false unless the extension is active.
 
 """

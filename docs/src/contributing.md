@@ -2,15 +2,10 @@
 
 We welcome contributions to FeastKit.jl! This guide will help you get started.
 
-## Table of Contents
-
-- [Getting Started](#getting-started)
-- [Development Setup](#development-setup)
-- [Making Changes](#making-changes)
-- [Pull Request Process](#pull-request-process)
-- [Code Style](#code-style)
-- [Testing Guidelines](#testing-guidelines)
-- [Documentation](#documentation)
+```@contents
+Pages = ["contributing.md"]
+Depth = 2
+```
 
 ---
 
@@ -57,7 +52,6 @@ julia --project=.
 # Then, in that session:
 using Pkg
 Pkg.instantiate()
-Pkg.develop(path=".")
 
 using FeastKit
 ```
@@ -71,13 +65,13 @@ julia --project -e 'using Pkg; Pkg.test()'
 # With threading
 julia --project --threads=auto -e 'using Pkg; Pkg.test()'
 
-# Specific tests (interactive)
-julia --project
+# For individual test files, prepare the test dependencies as described
+# in the Testing Guide; Pkg.test installs test-only dependencies automatically.
 ```
 
 ```julia
-using Test
-include("test/runtests.jl")
+using Pkg
+Pkg.test()
 ```
 
 ---
@@ -112,8 +106,7 @@ git checkout -b fix/issue-number-description
 using Pkg
 Pkg.test()
 
-# Run specific tests interactively
-include("test/runtests.jl")
+# For individual test files, use the temporary environment in the Testing Guide.
 ```
 
 ### Commit Changes
@@ -184,22 +177,15 @@ git branch -d feature/your-feature-name
 
 ### Julia-Specific
 
-```julia
-# Good: Type-stable, explicit
-function solve_problem(A::Matrix{T}, B::Matrix{T}) where T<:Real
-    result = zeros(T, size(A, 1))
-    # ...
-    return result
-end
-
-# Avoid: Type-unstable
-function solve_problem(A, B)
-    result = similar(A[:, 1])  # Type inferred at runtime
-    # ...
-end
-```
+Write functions whose output types follow from their inputs and avoid abstractly
+typed fields in performance-critical structures. An unannotated argument does
+not itself make a function type-unstable: Julia specializes ordinary generic
+functions. Use `@code_warntype` with representative inputs to inspect inference.
 
 ### Docstrings
+
+Template for documenting a new function; replace the placeholder names,
+arguments, return description, example, and implementation together.
 
 ````julia
 """
@@ -237,7 +223,7 @@ end
 
 Tests are in `test/runtests.jl` and `test/test_*.jl`:
 
-```julia
+```@example contributor_test_structure
 using Test
 
 @testset "Feature Name" begin
@@ -258,11 +244,12 @@ end
 
 ### Example Test
 
-```julia
+```@example contributor_test
+using Test, FeastKit, LinearAlgebra
 @testset "feast_sygv!" begin
     # Setup. feast_sygv! takes dense `Matrix` arguments, and the interval has to
     # hold no more eigenvalues than M0: this one is 2 - 2cos(kπ/(n+1)), so
-    # (0.0, 1.0) would contain 23 of them and could never converge with M0 = 10.
+    # (0.0, 1.0) would contain 33 of them and could never converge with M0 = 10.
     n = 100
     A = Matrix(SymTridiagonal(2*ones(n), -ones(n-1)))
     B = Matrix(1.0I, n, n)
@@ -273,7 +260,7 @@ end
     @testset "Basic functionality" begin
         result = feast_sygv!(A, B, Emin, Emax, 10, copy(fpm))
         @test result.info == 0
-        @test result.M > 0
+        @test result.M == 7
         @test all(Emin .<= result.lambda[1:result.M] .<= Emax)
     end
 
@@ -299,17 +286,13 @@ end
 ### Building Docs Locally
 
 ```bash
-cd docs
-
-# Install dependencies
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
-
-# Build
-julia --project=. make.jl
-
-# Serve locally
-julia --project=. -e 'using LiveServer; serve(dir="build")'
+# From the repository root, build against this checkout.
+julia --project=docs -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate()'
+julia --project=docs --threads=2 docs/make.jl
 ```
+
+Open `docs/build/index.html` to view the local site. A local build does not
+publish. The documentation workflow enables publishing explicitly.
 
 ### Documentation Guidelines
 
@@ -335,7 +318,6 @@ julia --project=. -e 'using LiveServer; serve(dir="build")'
 
 ---
 
-<div align="center">
-  <p><strong>Thank you for contributing to FeastKit.jl!</strong></p>
-  <a href="developer_guide.md">Developer Guide</a> · <a href="testing.md">Testing Guide</a>
-</div>
+**Thank you for contributing to FeastKit.jl!**
+
+[Developer Guide](developer_guide.md) · [Testing Guide](testing.md)

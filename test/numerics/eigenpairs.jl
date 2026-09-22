@@ -256,7 +256,6 @@ fresh_fpm() = (v = zeros(Int, 64); feastinit!(v); v)
         @test mid.M == mid_true
 
         # A small count is only good to roughly +-1, which the docstring says.
-        lam(k) = 4 * sin(k * pi / (2 * (n + 1)))^2
         small_lo, small_hi = lam(100) - 1.0e-9, lam(108) + 1.0e-9
         small_est = feast_estimate_count(A, (small_lo, small_hi); nprobe = 32)
         @test abs(small_est - exact(small_lo, small_hi)) < 3

@@ -1,22 +1,35 @@
-using Test, FeastKit, LinearAlgebra, SparseArrays
+using Test, FeastKit, LinearAlgebra, SparseArrays, Random
 
 @testset "Generalized and specialized eigenproblems" begin
-    @testset "Matrix-free mass-weighted projector $T" for T in (Float64, ComplexF64)
-        # Keep the 1e10 mass contrast that exposes dropped directions, but
-        # normalize the pencil so absolute residuals are not dominated by
-        # platform-dependent roundoff in O(1e10) matrix products.
-        B = Matrix(Diagonal(T[1,1e-10,1e-10]))
+    @testset "Matrix-free mass-weighted projector $T mass=$mass" for T in (Float64, ComplexF64), mass in (1e-2, 1e-10)
+        # The 1e10 mass contrast exposes dropped directions when the projector
+        # omits B*Q. Its reduced pencil can amplify Float64 roundoff by 1e10,
+        # so use a tolerance above eps(Float64)*cond(B) for that fixture.
+        # Keep a better-conditioned case at the default 1e-12 tolerance.
+        tol = mass == 1e-10 ? 1e-5 : 1e-12
+        B = Matrix(Diagonal(T[1,mass,mass]))
         A = B * Diagonal(T[1,2,3])
         ao = LinearOperator{T}((y,x)->mul!(y,A,x),(3,3); issymmetric=true)
         bo = LinearOperator{T}((y,x)->mul!(y,B,x),(3,3); issymmetric=true)
         solve = (Y,z,X)->copyto!(Y,(z*B-A)\X)
-        r = T === Float64 ? feast(ao,bo,(0.5,2.5); M0=3,solver=solve) :
-            feast_general(ao,bo,1.5+0im,1.0; M0=3,solver=solve)
-        @test r.info == 0
-        @test r.M == 2
-        # The reduced pencil is ill-conditioned; completeness is the key
-        # regression, with an eigenvalue tolerance scaled to that condition.
-        @test sort(real.(r.lambda)) ≈ [1.,2.] atol=1e-5
+        @testset "Starting subspace seed=$seed" for seed in (nothing, 13, 99)
+            # Exercise the default subspace and complex starts that exposed
+            # roundoff-limited convergence in the ill-conditioned fixture.
+            initial = seed === nothing ? nothing : randn(MersenneTwister(seed), T, 3, 3)
+            options = (; M0=3, solver=solve, initial_subspace=initial)
+            mass == 1e-10 && (options = merge(options, (; tol)))
+            r = T === Float64 ? feast(ao,bo,(0.5,2.5); options...) :
+                feast_general(ao,bo,1.5+0im,1.0; options...)
+            @test r.info == 0
+            @test r.M == 2
+            @test sort(r.lambda; by=real) ≈ T[1,2] atol=tol
+            actual = map(1:r.M) do j
+                Aq, Bq = A*r.q[:,j], B*r.q[:,j]
+                norm(Aq-r.lambda[j]*Bq) / norm(Bq) / max(abs(r.lambda[j]),1)
+            end
+            @test maximum(actual) <= tol
+            @test r.res ≈ actual atol=10eps(Float64)
+        end
     end
     @testset "Specialized saturation $storage M0=$m" for storage in (:dense,:sparse,:banded), m in (1,3)
         A = Matrix{ComplexF64}(I,3,3)

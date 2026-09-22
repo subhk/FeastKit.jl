@@ -5,13 +5,14 @@
 # trial subspace and can never exceed the matrix dimension.
 a = [2.0 -1.0; -1.0 2.0]
 res = feast(a, (0.1, 5.0), M0=2)
-@info &quot;FeastKit OK&quot; M=res.M info=res.info lambda=res.lambda[1:res.M]</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">┌ Info: FeastKit OK
+@info &quot;FeastKit OK&quot; M=res.M info=res.info lambda=res.lambda[1:res.M]
+@assert res.converged &amp;&amp; res.M == 2</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">┌ Info: FeastKit OK
 │   M = 2
 │   info = 0
 │   lambda =
 │    2-element Vector{Float64}:
 │     0.9999999999999999
-└     2.9999999999999996</code></pre><p>Expected: <code>info == 0</code> and two eigenvalues found near 1 and 3.</p><hr/><h2 id="3)-First-Solve:-Standard-Symmetric-Problem"><a class="docs-heading-anchor" href="#3)-First-Solve:-Standard-Symmetric-Problem">3) First Solve: Standard Symmetric Problem</a><a id="3)-First-Solve:-Standard-Symmetric-Problem-1"></a><a class="docs-heading-anchor-permalink" href="#3)-First-Solve:-Standard-Symmetric-Problem" title="Permalink"></a></h2><p>Simple tridiagonal Laplacian (dense or sparse):</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, SparseArrays
+└     3.000000000000001</code></pre><p>Expected: <code>info == 0</code> and two eigenvalues found near 1 and 3.</p><hr/><h2 id="3)-First-Solve:-Standard-Symmetric-Problem"><a class="docs-heading-anchor" href="#3)-First-Solve:-Standard-Symmetric-Problem">3) First Solve: Standard Symmetric Problem</a><a id="3)-First-Solve:-Standard-Symmetric-Problem-1"></a><a class="docs-heading-anchor-permalink" href="#3)-First-Solve:-Standard-Symmetric-Problem" title="Permalink"></a></h2><p>Simple tridiagonal Laplacian (dense or sparse):</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, SparseArrays
 
 # 1D Laplacian on n points
 n = 200
@@ -24,14 +25,15 @@ Emin, Emax = 0.0, 0.02438
 res = feast(A, (Emin, Emax), M0=16)
 
 @assert res.info == 0
-@info &quot;Found&quot; M=res.M vals=res.lambda[1:res.M]</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">┌ Info: Found
+@info &quot;Found&quot; M=res.M vals=res.lambda[1:res.M]
+@assert res.converged &amp;&amp; res.M == 10</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">┌ Info: Found
 │   M = 10
 │   vals =
 │    10-element Vector{Float64}:
-│     0.00024428611869398804
-│     0.0009770847990681708
+│     0.0002442861186939874
+│     0.0009770847990681745
 │     ⋮
-└     0.02437941788098121</code></pre><p>Tips:</p><ul><li><code>M0</code> is the trial-subspace size; choose larger than the expected count, without exceeding the matrix dimension.</li><li>If <code>res.M == 0</code>, broaden the interval or validate bounds (see Section 8).</li></ul><hr/><h2 id="4)-Generalized-Problem-A-x-λ-B-x"><a class="docs-heading-anchor" href="#4)-Generalized-Problem-A-x-λ-B-x">4) Generalized Problem A x = λ B x</a><a id="4)-Generalized-Problem-A-x-λ-B-x-1"></a><a class="docs-heading-anchor-permalink" href="#4)-Generalized-Problem-A-x-λ-B-x" title="Permalink"></a></h2><p>Common in structural dynamics and PDEs:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, SparseArrays
+└     0.024379417880981163</code></pre><p>Tips:</p><ul><li><code>M0</code> is the trial-subspace size; choose larger than the expected count, without exceeding the matrix dimension.</li><li>If <code>res.M == 0</code>, broaden the interval or validate bounds (see Section 8).</li></ul><hr/><h2 id="4)-Generalized-Problem-A-x-λ-B-x"><a class="docs-heading-anchor" href="#4)-Generalized-Problem-A-x-λ-B-x">4) Generalized Problem A x = λ B x</a><a id="4)-Generalized-Problem-A-x-λ-B-x-1"></a><a class="docs-heading-anchor-permalink" href="#4)-Generalized-Problem-A-x-λ-B-x" title="Permalink"></a></h2><p>Common in structural dynamics and PDEs:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, SparseArrays
 
 n = 1000
 K = spdiagm(-1 =&gt; -ones(n-1), 0 =&gt; 2*ones(n), 1 =&gt; -ones(n-1))  # stiffness
@@ -40,7 +42,8 @@ M = spdiagm(0 =&gt; ones(n))                                        # mass
 # M = I here, so the spectrum is again 2 - 2cos(kπ/(n+1)): (0.0, 0.5) would
 # contain 230 eigenvalues. Take the ten smallest.
 res = feast(K, M, (0.0, 0.000985), M0=20)
-@info &quot;Generalized&quot; info=res.info M=res.M</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">┌ Info: Generalized
+@info &quot;Generalized&quot; info=res.info M=res.M
+@assert res.converged &amp;&amp; res.M == 10</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">┌ Info: Generalized
 │   info = 0
 └   M = 10</code></pre><hr/><h2 id="5)-Matrix-Free:-No-Matrix-Stored"><a class="docs-heading-anchor" href="#5)-Matrix-Free:-No-Matrix-Stored">5) Matrix-Free: No Matrix Stored</a><a id="5)-Matrix-Free:-No-Matrix-Stored-1"></a><a class="docs-heading-anchor-permalink" href="#5)-Matrix-Free:-No-Matrix-Stored" title="Permalink"></a></h2><p>When storing A is infeasible, supply y = A*x as a function:</p><pre><code class="language-julia hljs">using FeastKit
 
@@ -82,7 +85,8 @@ end
 
 # Ten smallest eigenvalues: lambda_10 = 2 - 2cos(10π/(n+1)) ≈ 2.5e-6.
 res = feast(Aop, (0.0, 2.6e-6), M0=16, solver=tridiagonal_solve!)
-@info &quot;Matrix-free&quot; info=res.info M=res.M</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">┌ Info: Matrix-free
+@info &quot;Matrix-free&quot; info=res.info M=res.M
+@assert res.converged &amp;&amp; res.M == 10</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">┌ Info: Matrix-free
 │   info = 0
 └   M = 10</code></pre><p>Notes:</p><ul><li>Use efficient BLAS/threading inside <code>matvec!</code> for speed.</li><li>Without a <code>solver=</code>, FEAST falls back to unpreconditioned GMRES. That struggles when the contour hugs a dense part of the spectrum, so supply a structured solve when you have one.</li></ul><hr/><h2 id="6)-Complex-Eigenvalues:-Non-Hermitian-Problems"><a class="docs-heading-anchor" href="#6)-Complex-Eigenvalues:-Non-Hermitian-Problems">6) Complex Eigenvalues: Non-Hermitian Problems</a><a id="6)-Complex-Eigenvalues:-Non-Hermitian-Problems-1"></a><a class="docs-heading-anchor-permalink" href="#6)-Complex-Eigenvalues:-Non-Hermitian-Problems" title="Permalink"></a></h2><p>Search in a circular region of the complex plane:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
 
@@ -95,19 +99,21 @@ center, radius = 1.0 + 1.0im, 3.0
 # Eigenvalues are 1.5 ± 3.8406i. Only 1.5 + 3.8406i lies inside this circle,
 # and M0 can never exceed the matrix size.
 res = feast_general(G, I2, center, radius, M0=2)
-@info &quot;Complex region&quot; info=res.info M=res.M λ=res.lambda[1:res.M]</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">┌ Info: Complex region
+@info &quot;Complex region&quot; info=res.info M=res.M λ=res.lambda[1:res.M]
+@assert res.converged &amp;&amp; res.M == 1</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">┌ Info: Complex region
 │   info = 0
 │   M = 1
 │   λ =
 │    1-element Vector{ComplexF64}:
-└     1.5 + 3.840572873934304im</code></pre><hr/><h2 id="7)-From-Defaults-to-Expert-Parameters"><a class="docs-heading-anchor" href="#7)-From-Defaults-to-Expert-Parameters">7) From Defaults to Expert Parameters</a><a id="7)-From-Defaults-to-Expert-Parameters-1"></a><a class="docs-heading-anchor-permalink" href="#7)-From-Defaults-to-Expert-Parameters" title="Permalink"></a></h2><p>Parameters live in <code>fpm::Vector{Int}</code> (length ≥ 64):</p><pre><code class="language-julia hljs">fpm = zeros(Int, 64)
+└     1.4999999999999998 + 3.8405728739343035im</code></pre><hr/><h2 id="7)-From-Defaults-to-Expert-Parameters"><a class="docs-heading-anchor" href="#7)-From-Defaults-to-Expert-Parameters">7) From Defaults to Expert Parameters</a><a id="7)-From-Defaults-to-Expert-Parameters-1"></a><a class="docs-heading-anchor-permalink" href="#7)-From-Defaults-to-Expert-Parameters" title="Permalink"></a></h2><p>Parameters live in <code>fpm::Vector{Int}</code> (length ≥ 64):</p><pre><code class="language-julia hljs">fpm = zeros(Int, 64)
 feastinit!(fpm)
 fpm[1] = 1     # print level (0=silent, 1=summary)
 fpm[2] = 16    # integration points (8–32 typical)
 fpm[3] = 12    # tolerance exponent (target ~ 1e-12)
 fpm[4] = 30    # max refinement loops
 
-res = feast(A, (Emin, Emax), M0=20, fpm=fpm)   # A and the interval from section 3</code></pre><p>Expert controls (see docs for details):</p><ul><li>Integration type: Gauss/Trapezoidal/Zolotarev via <code>fpm[16]</code></li><li>Ellipse aspect ratio via <code>fpm[18]</code></li><li>Custom contours: <code>feast_contour_expert</code>, <code>feast_contour_custom_weights!</code></li></ul><hr/><h2 id="8)-Validating-and-Troubleshooting"><a class="docs-heading-anchor" href="#8)-Validating-and-Troubleshooting">8) Validating and Troubleshooting</a><a id="8)-Validating-and-Troubleshooting-1"></a><a class="docs-heading-anchor-permalink" href="#8)-Validating-and-Troubleshooting" title="Permalink"></a></h2><p>Check that the interval contains eigenvalues:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+res = feast(A, (Emin, Emax), M0=20, fpm=fpm)   # A and the interval from section 3
+@assert res.converged &amp;&amp; res.M == 10</code></pre><p>Expert controls (see docs for details):</p><ul><li>Integration type: Gauss/Trapezoidal/Zolotarev via <code>fpm[16]</code></li><li>Ellipse aspect ratio via <code>fpm[18]</code></li><li>Full contours: <code>feast(A, feast_rectangle(...))</code> or <code>feast(A, feast_ellipse(...))</code></li><li>Half-contour customization: <code>feast_contour_expert</code> with registration</li></ul><hr/><h2 id="8)-Validating-and-Troubleshooting"><a class="docs-heading-anchor" href="#8)-Validating-and-Troubleshooting">8) Validating and Troubleshooting</a><a id="8)-Validating-and-Troubleshooting-1"></a><a class="docs-heading-anchor-permalink" href="#8)-Validating-and-Troubleshooting" title="Permalink"></a></h2><p>Check that the interval contains eigenvalues:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
 
 A = diagm(0 =&gt; [1.0, 2.0, 3.0, 4.0])
 bounds = feast_validate_interval(A, (1.5, 3.5))
@@ -116,8 +122,15 @@ bounds = feast_validate_interval(A, (1.5, 3.5))
 cap = feast_parallel_capabilities()
 @info &quot;Parallel capabilities&quot; cap
 
-# Use threads if available
-res_t = feast(A, (Emin, Emax), M0=20, parallel=:threads)
+# Automatic selection permits serial fallback. An explicit :threads
+# request requires a session started with multiple Julia threads.
+res_t = feast(A, (Emin, Emax); subspace_size=20, backend=:auto)
 
 # Or use distributed workers (addprocs required)
-# res_d = feast(A, (Emin, Emax), M0=20, parallel=:distributed)</code></pre><p>MPI paths require MPI.jl and a proper MPI environment.</p><hr/><h2 id="10)-Quick-Checklist"><a class="docs-heading-anchor" href="#10)-Quick-Checklist">10) Quick Checklist</a><a id="10)-Quick-Checklist-1"></a><a class="docs-heading-anchor-permalink" href="#10)-Quick-Checklist" title="Permalink"></a></h2><ul><li>[ ] Install and verify FeastKit</li><li>[ ] Choose search region and M0</li><li>[ ] Start dense/sparse; switch to matrix-free if needed</li><li>[ ] Tune parameters (fpm) for accuracy/performance</li><li>[ ] Scale up with threads/distributed/MPI</li><li>[ ] Validate results and residuals</li></ul><hr/><h2 id="Where-to-Go-Next"><a class="docs-heading-anchor" href="#Where-to-Go-Next">Where to Go Next</a><a id="Where-to-Go-Next-1"></a><a class="docs-heading-anchor-permalink" href="#Where-to-Go-Next" title="Permalink"></a></h2><ul><li>Getting Started: basics and common workflows</li><li>Matrix-Free Interface: large-scale problems without assembling matrices</li><li>Custom Contours: Gauss/Zolotarev and user-defined nodes/weights</li><li>Performance Guide: tuning and resource selection</li></ul><p>Happy computing!</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../problem_setup/">« Problem Setup</a><a class="docs-footer-nextpage" href="../getting_started/">Getting Started »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Thursday 10 September 2026 20:52">Thursday 10 September 2026</span>. Using Julia version 1.13.0.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+# res_d = feast(A, (Emin, Emax), M0=20, parallel=:distributed)
+@assert res_t.converged &amp;&amp; res_t.M == 10</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">┌ Info: Parallel capabilities
+│   cap =
+│    Dict{Symbol, Bool} with 3 entries:
+│      :threads     =&gt; 1
+│      :mpi         =&gt; 0
+└      :distributed =&gt; 0</code></pre><p>MPI paths require MPI.jl and a proper MPI environment.</p><hr/><h2 id="10)-Quick-Checklist"><a class="docs-heading-anchor" href="#10)-Quick-Checklist">10) Quick Checklist</a><a id="10)-Quick-Checklist-1"></a><a class="docs-heading-anchor-permalink" href="#10)-Quick-Checklist" title="Permalink"></a></h2><ul><li>[ ] Install and verify FeastKit</li><li>[ ] Choose search region and M0</li><li>[ ] Start dense/sparse; switch to matrix-free if needed</li><li>[ ] Tune parameters (fpm) for accuracy/performance</li><li>[ ] Scale up with threads/distributed/MPI</li><li>[ ] Validate results and residuals</li></ul><hr/><h2 id="Where-to-Go-Next"><a class="docs-heading-anchor" href="#Where-to-Go-Next">Where to Go Next</a><a id="Where-to-Go-Next-1"></a><a class="docs-heading-anchor-permalink" href="#Where-to-Go-Next" title="Permalink"></a></h2><ul><li>Getting Started: basics and common workflows</li><li>Matrix-Free Interface: large-scale problems without assembling matrices</li><li>Custom Contours: Gauss/Zolotarev and user-defined nodes/weights</li><li>Performance Guide: tuning and resource selection</li></ul><p>Happy computing!</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../problem_setup/">« Problem Setup</a><a class="docs-footer-nextpage" href="../getting_started/">Getting Started »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Tuesday 22 September 2026 01:16">Tuesday 22 September 2026</span>. Using Julia version 1.13.0.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

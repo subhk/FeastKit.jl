@@ -54,12 +54,12 @@ if result.M &gt; 0
     end
 end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">
 Eigenvalues found:
-  λ[1] = 0.8599354835724357
-  λ[2] = 0.9115916344879457
-  λ[3] = 0.964300750203349
-  λ[4] = 1.018011838053355
-  λ[5] = 1.072672936029345
-  λ[6] = 1.1282311630492579</code></pre><h3 id="Understanding-What-Happened"><a class="docs-heading-anchor" href="#Understanding-What-Happened">Understanding What Happened</a><a id="Understanding-What-Happened-1"></a><a class="docs-heading-anchor-permalink" href="#Understanding-What-Happened" title="Permalink"></a></h3><p>FeastKit searched in <code>[0.8094, 1.1846]</code> and returned the six enclosed eigenvalues. The example checks them against the known spectrum and verifies <code>result.converged</code>. The corresponding eigenvectors are columns of <code>result.q</code>.</p><hr/><h2 id="Basic-Usage-Patterns"><a class="docs-heading-anchor" href="#Basic-Usage-Patterns">Basic Usage Patterns</a><a id="Basic-Usage-Patterns-1"></a><a class="docs-heading-anchor-permalink" href="#Basic-Usage-Patterns" title="Permalink"></a></h2><h3 id="Pattern-1:-Standard-Eigenvalue-Problem"><a class="docs-heading-anchor" href="#Pattern-1:-Standard-Eigenvalue-Problem">Pattern 1: Standard Eigenvalue Problem</a><a id="Pattern-1:-Standard-Eigenvalue-Problem-1"></a><a class="docs-heading-anchor-permalink" href="#Pattern-1:-Standard-Eigenvalue-Problem" title="Permalink"></a></h3><p>For problems of the form <strong>A⋅x = λ⋅x</strong>:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+  λ[1] = 0.8599354835724344
+  λ[2] = 0.9115916344879452
+  λ[3] = 0.9643007502033493
+  λ[4] = 1.018011838053356
+  λ[5] = 1.0726729360293445
+  λ[6] = 1.1282311630492574</code></pre><h3 id="Understanding-What-Happened"><a class="docs-heading-anchor" href="#Understanding-What-Happened">Understanding What Happened</a><a id="Understanding-What-Happened-1"></a><a class="docs-heading-anchor-permalink" href="#Understanding-What-Happened" title="Permalink"></a></h3><p>FeastKit searched in <code>[0.8094, 1.1846]</code> and returned the six enclosed eigenvalues. The example checks them against the known spectrum and verifies <code>result.converged</code>. The corresponding eigenvectors are columns of <code>result.q</code>.</p><hr/><h2 id="Basic-Usage-Patterns"><a class="docs-heading-anchor" href="#Basic-Usage-Patterns">Basic Usage Patterns</a><a id="Basic-Usage-Patterns-1"></a><a class="docs-heading-anchor-permalink" href="#Basic-Usage-Patterns" title="Permalink"></a></h2><h3 id="Pattern-1:-Standard-Eigenvalue-Problem"><a class="docs-heading-anchor" href="#Pattern-1:-Standard-Eigenvalue-Problem">Pattern 1: Standard Eigenvalue Problem</a><a id="Pattern-1:-Standard-Eigenvalue-Problem-1"></a><a class="docs-heading-anchor-permalink" href="#Pattern-1:-Standard-Eigenvalue-Problem" title="Permalink"></a></h3><p>For problems of the form <strong>A⋅x = λ⋅x</strong>:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
 A = Matrix(Diagonal([1.0, 2.0, 3.0, 4.0]))
 result = feast(A, (0.5, 2.5); subspace_size=3)
 @assert result.converged &amp;&amp; result.M == 2
@@ -67,7 +67,7 @@ eigenvalues, eigenvectors = result.values, result.vectors
 @assert isapprox(eigenvalues, [1.0, 2.0]; atol=1e-10)
 eigenvalues</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2-element Vector{Float64}:
  0.9999999999999999
- 2.0</code></pre><p><strong>Real-world example:</strong></p><pre><code class="language-julia hljs">using FeastKit, SparseArrays
+ 1.9999999999999996</code></pre><p><strong>Real-world example:</strong></p><pre><code class="language-julia hljs">using FeastKit, SparseArrays
 
 # Large sparse matrix from discretized PDE
 n = 10000
@@ -79,7 +79,7 @@ A = spdiagm(-1 =&gt; -ones(n-1), 0 =&gt; 2*ones(n), 1 =&gt; -ones(n-1))
 result = feast(A, (0.0, 1.04e-5), M0=12)
 println(&quot;Smallest eigenvalues: $(result.lambda[1:result.M])&quot;)
 @assert result.converged &amp;&amp; result.M == 10
-@assert isapprox(result.values, [2-2cos(k*π/(n+1)) for k in 1:10]; atol=1e-9)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Smallest eigenvalues: [9.867630695115679e-8, 3.947052180676231e-7, 8.880867041383624e-7, 1.5788207164782994e-6, 2.466907186928343e-6, 3.55234602785545e-6, 4.835137132152467e-6, 6.315280373238366e-6, 7.992775605058007e-6, 9.867622662082374e-6]</code></pre><h3 id="Pattern-2:-Generalized-Eigenvalue-Problem"><a class="docs-heading-anchor" href="#Pattern-2:-Generalized-Eigenvalue-Problem">Pattern 2: Generalized Eigenvalue Problem</a><a id="Pattern-2:-Generalized-Eigenvalue-Problem-1"></a><a class="docs-heading-anchor-permalink" href="#Pattern-2:-Generalized-Eigenvalue-Problem" title="Permalink"></a></h3><p>For problems of the form <strong>A⋅x = λ⋅B⋅x</strong>:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+@assert isapprox(result.values, [2-2cos(k*π/(n+1)) for k in 1:10]; atol=1e-9)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Smallest eigenvalues: [9.867630695116938e-8, 3.9470521806763106e-7, 8.88086704138365e-7, 1.5788207164783104e-6, 2.4669071869283596e-6, 3.5523460278554445e-6, 4.83513713215248e-6, 6.315280373238331e-6, 7.99277560505802e-6, 9.867622662082355e-6]</code></pre><h3 id="Pattern-2:-Generalized-Eigenvalue-Problem"><a class="docs-heading-anchor" href="#Pattern-2:-Generalized-Eigenvalue-Problem">Pattern 2: Generalized Eigenvalue Problem</a><a id="Pattern-2:-Generalized-Eigenvalue-Problem-1"></a><a class="docs-heading-anchor-permalink" href="#Pattern-2:-Generalized-Eigenvalue-Problem" title="Permalink"></a></h3><p>For problems of the form <strong>A⋅x = λ⋅B⋅x</strong>:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
 B = Matrix(Diagonal([2.0, 3.0, 4.0]))
 A = B * Diagonal([1.0, 2.0, 4.0])
 result = feast(A, B, (0.5, 2.5); subspace_size=3)
@@ -100,7 +100,7 @@ result = feast(K, M, (ω²_min, ω²_max); subspace_size=3)
 
 frequencies_Hz = sqrt.(result.lambda[1:result.M]) / (2π)
 @assert isapprox(frequencies_Hz, [20.0, 50.0]; atol=1e-8)
-println(&quot;Natural frequencies: $frequencies_Hz Hz&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Natural frequencies: [19.999999999999996, 50.0] Hz</code></pre><h3 id="Pattern-3:-Matrix-Free-for-Large-Problems"><a class="docs-heading-anchor" href="#Pattern-3:-Matrix-Free-for-Large-Problems">Pattern 3: Matrix-Free for Large Problems</a><a id="Pattern-3:-Matrix-Free-for-Large-Problems-1"></a><a class="docs-heading-anchor-permalink" href="#Pattern-3:-Matrix-Free-for-Large-Problems" title="Permalink"></a></h3><p>Load <code>Krylov</code> for built-in iterative solves. This small stencil example checks the operator against its known spectrum. For larger problems, provide a structured shifted solve or a suitable preconditioner; see the <a href="../matrix_free_interface/">matrix-free guide</a>.</p><pre><code class="language-julia hljs">using FeastKit, Krylov, LinearAlgebra
+println(&quot;Natural frequencies: $frequencies_Hz Hz&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Natural frequencies: [20.000000000000004, 50.0] Hz</code></pre><h3 id="Pattern-3:-Matrix-Free-for-Large-Problems"><a class="docs-heading-anchor" href="#Pattern-3:-Matrix-Free-for-Large-Problems">Pattern 3: Matrix-Free for Large Problems</a><a id="Pattern-3:-Matrix-Free-for-Large-Problems-1"></a><a class="docs-heading-anchor-permalink" href="#Pattern-3:-Matrix-Free-for-Large-Problems" title="Permalink"></a></h3><p>Load <code>Krylov</code> for built-in iterative solves. This small stencil example checks the operator against its known spectrum. For larger problems, provide a structured shifted solve or a suitable preconditioner; see the <a href="../matrix_free_interface/">matrix-free guide</a>.</p><pre><code class="language-julia hljs">using FeastKit, Krylov, LinearAlgebra
 n = 12
 function A_multiply!(y, x)
     y .= 2 .* x
@@ -114,15 +114,15 @@ result = feast(A_op, (0.0, 0.6); subspace_size=4, tol=1e-9,
 @assert result.converged &amp;&amp; result.M == 3
 @assert isapprox(result.values, [2-2cos(k*π/(n+1)) for k in 1:3]; atol=1e-8)
 result.values</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">3-element Vector{Float64}:
- 0.058116365147895935
- 0.22908794869358023
- 0.5029785036577975</code></pre><h3 id="Pattern-4:-Complex-Eigenvalues"><a class="docs-heading-anchor" href="#Pattern-4:-Complex-Eigenvalues">Pattern 4: Complex Eigenvalues</a><a id="Pattern-4:-Complex-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Pattern-4:-Complex-Eigenvalues" title="Permalink"></a></h3><p>For non-symmetric matrices with complex eigenvalues:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+ 0.05811636514789597
+ 0.22908794869358026
+ 0.5029785036577981</code></pre><h3 id="Pattern-4:-Complex-Eigenvalues"><a class="docs-heading-anchor" href="#Pattern-4:-Complex-Eigenvalues">Pattern 4: Complex Eigenvalues</a><a id="Pattern-4:-Complex-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Pattern-4:-Complex-Eigenvalues" title="Permalink"></a></h3><p>For non-symmetric matrices with complex eigenvalues:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
 A = [0.0 -1.0; 1.0 0.0]  # Real nonsymmetric, with eigenvalues ±im
 result = feast_general(A, 0.0+1.0im, 0.5; subspace_size=2)
 @assert result.converged &amp;&amp; result.M == 1
 @assert isapprox(only(result.values), 1im; atol=1e-9)
 result.values</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">1-element Vector{ComplexF64}:
- 9.4039548065783e-38 + 0.9999999999999999im</code></pre><hr/><h2 id="Understanding-Results"><a class="docs-heading-anchor" href="#Understanding-Results">Understanding Results</a><a id="Understanding-Results-1"></a><a class="docs-heading-anchor-permalink" href="#Understanding-Results" title="Permalink"></a></h2><h3 id="The-FeastResult-Structure"><a class="docs-heading-anchor" href="#The-FeastResult-Structure">The FeastResult Structure</a><a id="The-FeastResult-Structure-1"></a><a class="docs-heading-anchor-permalink" href="#The-FeastResult-Structure" title="Permalink"></a></h3><p>Symmetric/Hermitian solves return <code>FeastResult</code>; general solves return <code>FeastGeneralResult</code>. Both expose these fields:</p><pre><code class="language-julia hljs">result = feast(A, (Emin, Emax), M0=10)
+ 0.0 + 0.9999999999999999im</code></pre><hr/><h2 id="Understanding-Results"><a class="docs-heading-anchor" href="#Understanding-Results">Understanding Results</a><a id="Understanding-Results-1"></a><a class="docs-heading-anchor-permalink" href="#Understanding-Results" title="Permalink"></a></h2><h3 id="The-FeastResult-Structure"><a class="docs-heading-anchor" href="#The-FeastResult-Structure">The FeastResult Structure</a><a id="The-FeastResult-Structure-1"></a><a class="docs-heading-anchor-permalink" href="#The-FeastResult-Structure" title="Permalink"></a></h3><p>Symmetric/Hermitian solves return <code>FeastResult</code>; general solves return <code>FeastGeneralResult</code>. Both expose these fields:</p><pre><code class="language-julia hljs">result = feast(A, (Emin, Emax), M0=10)
 
 # Eigenvalues and eigenvectors
 result.lambda    # Vector of eigenvalues
@@ -134,12 +134,12 @@ result.info      # 0 = success, &gt;0 = error code
 result.epsout    # Final residual
 result.loop      # Number of refinement iterations
 result.res       # Individual residuals</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">6-element Vector{Float64}:
- 1.8787680252457687e-14
- 1.1849787397034402e-13
- 1.1285282643509294e-13
- 1.2385465787367967e-13
- 2.0686739983601893e-14
- 9.336885195475068e-14</code></pre><h3 id="Interpreting-Status-Codes"><a class="docs-heading-anchor" href="#Interpreting-Status-Codes">Interpreting Status Codes</a><a id="Interpreting-Status-Codes-1"></a><a class="docs-heading-anchor-permalink" href="#Interpreting-Status-Codes" title="Permalink"></a></h3><pre><code class="language-julia hljs">if result.info == 0
+ 7.735779861785233e-15
+ 4.8889116655578395e-14
+ 4.655081929969381e-14
+ 5.201044827767259e-14
+ 9.15485995371628e-15
+ 4.3425021222925684e-14</code></pre><h3 id="Interpreting-Status-Codes"><a class="docs-heading-anchor" href="#Interpreting-Status-Codes">Interpreting Status Codes</a><a id="Interpreting-Status-Codes-1"></a><a class="docs-heading-anchor-permalink" href="#Interpreting-Status-Codes" title="Permalink"></a></h3><pre><code class="language-julia hljs">if result.info == 0
     println(&quot;Success! Found $(result.M) eigenvalues&quot;)
 elseif result.info == 1
     println(&quot;Error: Invalid matrix size&quot;)
@@ -162,10 +162,10 @@ println(&quot;All eigenvalues in interval: $(all(in_interval))&quot;)
 Q = result.q[:, 1:result.M]
 orthogonality_error = norm(Q&#39;*Q - I)
 println(&quot;Orthogonality error: $orthogonality_error&quot;)
-@assert all(in_interval) &amp;&amp; orthogonality_error &lt; 1e-8</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Final residual: 1.2385465787367967e-13
-Max individual residual: 1.2385465787367967e-13
+@assert all(in_interval) &amp;&amp; orthogonality_error &lt; 1e-8</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Final residual: 5.201044827767259e-14
+Max individual residual: 5.201044827767259e-14
 All eigenvalues in interval: true
-Orthogonality error: 1.5698521282870726e-15</code></pre><hr/><h2 id="Common-Workflows"><a class="docs-heading-anchor" href="#Common-Workflows">Common Workflows</a><a id="Common-Workflows-1"></a><a class="docs-heading-anchor-permalink" href="#Common-Workflows" title="Permalink"></a></h2><h3 id="Workflow-1:-Finding-Specific-Eigenvalues"><a class="docs-heading-anchor" href="#Workflow-1:-Finding-Specific-Eigenvalues">Workflow 1: Finding Specific Eigenvalues</a><a id="Workflow-1:-Finding-Specific-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Workflow-1:-Finding-Specific-Eigenvalues" title="Permalink"></a></h3><p><strong>Problem</strong>: You need the 10 eigenvalues closest to 5.0</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+Orthogonality error: 1.5153151233813845e-15</code></pre><hr/><h2 id="Common-Workflows"><a class="docs-heading-anchor" href="#Common-Workflows">Common Workflows</a><a id="Common-Workflows-1"></a><a class="docs-heading-anchor-permalink" href="#Common-Workflows" title="Permalink"></a></h2><h3 id="Workflow-1:-Finding-Specific-Eigenvalues"><a class="docs-heading-anchor" href="#Workflow-1:-Finding-Specific-Eigenvalues">Workflow 1: Finding Specific Eigenvalues</a><a id="Workflow-1:-Finding-Specific-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Workflow-1:-Finding-Specific-Eigenvalues" title="Permalink"></a></h3><p><strong>Problem</strong>: You need the 10 eigenvalues closest to 5.0</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
 W = Matrix(Diagonal(collect(range(0.0, 10.0; length=200))))
 center = 5.0
 # This example has a known spectrum, so the search can be bounded in advance.
@@ -180,16 +180,16 @@ closest_10 = result.values[sortperm(abs.(result.values .- center))[1:10]]
 expected = diag(W)[sortperm(abs.(diag(W) .- center))[1:10]]
 @assert isapprox(sort(closest_10), sort(expected); atol=1e-9)
 closest_10</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">10-element Vector{Float64}:
- 4.974874371859299
- 5.025125628140703
- 5.07537688442211
+ 4.974874371859297
+ 5.025125628140704
+ 5.075376884422107
  4.924623115577888
- 4.874371859296485
- 5.125628140703518
- 4.824120603015076
+ 4.874371859296484
+ 5.125628140703517
+ 4.824120603015077
  5.175879396984924
- 5.226130653266331
- 4.773869346733668</code></pre><h3 id="Workflow-2:-Eigenvalue-Counting"><a class="docs-heading-anchor" href="#Workflow-2:-Eigenvalue-Counting">Workflow 2: Eigenvalue Counting</a><a id="Workflow-2:-Eigenvalue-Counting-1"></a><a class="docs-heading-anchor-permalink" href="#Workflow-2:-Eigenvalue-Counting" title="Permalink"></a></h3><p><strong>Problem</strong>: How many eigenvalues are in <code>[0, 1]</code>?</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+ 5.226130653266332
+ 4.773869346733667</code></pre><h3 id="Workflow-2:-Eigenvalue-Counting"><a class="docs-heading-anchor" href="#Workflow-2:-Eigenvalue-Counting">Workflow 2: Eigenvalue Counting</a><a id="Workflow-2:-Eigenvalue-Counting-1"></a><a class="docs-heading-anchor-permalink" href="#Workflow-2:-Eigenvalue-Counting" title="Permalink"></a></h3><p><strong>Problem</strong>: How many eigenvalues are in <code>[0, 1]</code>?</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
 A = Matrix(Diagonal([0.1, 0.4, 0.9, 2.0]))
 # Use FeastKit to count eigenvalues
 result = feast(A, (0.0, 1.0), M0=4)  # Large M0 for counting
@@ -245,4 +245,4 @@ result = feast_general(A, B, center, radius, M0=10)
 if result.info == 0
     eigenvalues = result.lambda[1:result.M]
     eigenvectors = result.q[:, 1:result.M]
-end</code></pre><h3 id="Getting-Help"><a class="docs-heading-anchor" href="#Getting-Help">Getting Help</a><a id="Getting-Help-1"></a><a class="docs-heading-anchor-permalink" href="#Getting-Help" title="Permalink"></a></h3><ul><li>Full API: <a href="../api_reference/">API Reference</a></li><li>Issues: <a href="https://github.com/your-repo/FeastKit.jl/issues">GitHub Issues</a>  </li><li>Community: <a href="https://github.com/your-repo/FeastKit.jl/discussions">GitHub Discussions</a></li><li>Contact: your-email@domain.com</li></ul><hr/><p><strong>Congratulations! You&#39;re now ready to use FeastKit.jl effectively.</strong></p><p>Explore the <a href="../api_reference/">API Reference</a> · See more <a href="../examples/">Examples</a></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../zero_to_feast/">« Zero to FeastKit</a><a class="docs-footer-nextpage" href="../examples/">Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Tuesday 22 September 2026 01:26">Tuesday 22 September 2026</span>. Using Julia version 1.13.0.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+end</code></pre><h3 id="Getting-Help"><a class="docs-heading-anchor" href="#Getting-Help">Getting Help</a><a id="Getting-Help-1"></a><a class="docs-heading-anchor-permalink" href="#Getting-Help" title="Permalink"></a></h3><ul><li>Full API: <a href="../api_reference/">API Reference</a></li><li>Issues: <a href="https://github.com/your-repo/FeastKit.jl/issues">GitHub Issues</a>  </li><li>Community: <a href="https://github.com/your-repo/FeastKit.jl/discussions">GitHub Discussions</a></li><li>Contact: your-email@domain.com</li></ul><hr/><p><strong>Congratulations! You&#39;re now ready to use FeastKit.jl effectively.</strong></p><p>Explore the <a href="../api_reference/">API Reference</a> · See more <a href="../examples/">Examples</a></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../zero_to_feast/">« Zero to FeastKit</a><a class="docs-footer-nextpage" href="../examples/">Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Thursday 24 September 2026 20:14">Thursday 24 September 2026</span>. Using Julia version 1.13.0.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

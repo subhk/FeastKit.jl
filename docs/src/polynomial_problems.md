@@ -357,9 +357,18 @@ end
 
 ### Scaling and Conditioning
 
-Balancing coefficient norms can improve numerical scaling, but does not
-guarantee a well-conditioned polynomial. Transform the search region as well
-as the coefficients, and recover eigenvalues in the original units:
+`feast_polynomial`, `feast_gepev!`/`feast_hepev!`/`feast_sypev!` and the
+sparse polynomial solvers balance the coefficients before linearizing: they
+solve for `μ = λ/γ` with coefficients `δ γ^k A_k`, where
+`γ = (‖A_0‖/‖A_d‖)^(1/d)` and `δ` makes the largest scaled coefficient 1, and
+map the eigenvalues back. The result therefore does not depend on the units of
+the coefficients or of `λ`. (A caller-supplied `solver` for the matrix-free
+companion system is used as given, without balancing.)
+
+Balancing improves numerical scaling, but does not guarantee a
+well-conditioned polynomial. The same transformation written out by hand,
+transforming the search region as well as the coefficients and recovering
+eigenvalues in the original units:
 
 ```@example polynomial_scaling
 using FeastKit, LinearAlgebra
@@ -608,6 +617,13 @@ in one RCI loop. The kernel emits `Feast_RCI_FACTORIZE`, `Feast_RCI_SOLVE`,
 `Feast_RCI_MULT_A` and `Feast_RCI_DONE`; on `MULT_A` write `P(lambda[j]) * q[:, j]`
 into `workc[:, j]` for `j = 1:mode[]`.
 
+The first `MULT_A` requests arrive before any factorization: they evaluate `P`
+at `d+1` points of a circle on a random probe, and a discrete Fourier transform
+of the results gives the size of every coefficient. Residuals are then backward
+errors, `‖P(λ)x‖ / (Σₖ |λ|ᵏ ‖Aₖ‖ ‖x‖)`, which do not depend on the units of the
+coefficients or of `λ`. A caller that answers `MULT_A` generically needs no
+change.
+
 ### Choosing a contour
 
 `feast_srcipev!` and `feast_grcipev!` recover eigenvalues from the contour
@@ -634,6 +650,16 @@ good = feast_srcipev!(coeffs, 2, 2.5 + 0.0im, 1.0, 3, copy(fpm))
 @assert isapprox(sort(real.(good.values)), [2.0, 3.0]; atol=1e-8)
 sort(real.(good.lambda[1:good.M]))
 ```
+
+The moment method also has no refinement filter of the kind linear FEAST
+iterates, so eigenvalues *outside* the disc but close to it leak into the
+moments at the size of the quadrature error — for the trapezoidal rule about
+`(r/d)^ne`, with `d` their distance from the centre and `ne = fpm[8]`. When they
+are not well separated from the disc, the reduced problem gains spurious
+eigenvalues that never converge (`info = 5`). Use the trapezoidal rule
+(`fpm[16] = 1`) with enough points (24–32 or more), keep the disc away from
+nearby eigenvalues, or use `feast_polynomial`/`feast_gepev!`, which linearize
+the problem and refine iteratively.
 
 Centred on the origin the same disc holds every root together with its
 negative, and the method has nothing to work with:

@@ -45,6 +45,98 @@ quietly(f) = with_logger(f, NullLogger())
         end
     end
 
+    @testset "Oblique spurious pairs in non-normal problems" begin
+        # Two eigenvalues inside the circle, two real ones just outside, then
+        # a conjugate pair 0.2 ± 2i whose equal filter response makes the
+        # M0 = 5 subspace hold only half of it. The one-sided Rayleigh-Ritz of
+        # this non-normal matrix then mixes an in-region eigenvector into the
+        # leftover direction, so the spurious pair's own filter response is
+        # high; counting the in-region directions of the whole subspace is
+        # what exposes it. It used to end in info=5 after the full loop budget.
+        n = 8
+        D = zeros(n, n)
+        for (i, v) in enumerate((0.0, 0.4, 1.3, -0.95))
+            D[i, i] = v
+        end
+        D[5, 5] = D[6, 6] = 0.2
+        D[5, 6], D[6, 5] = 2.0, -2.0
+        for i in 7:n
+            D[i, i] = 3.0 + i
+        end
+        V = I + 0.4 .* [sin(i * j + 1.0) for i in 1:n, j in 1:n] ./ sqrt(n)
+        A = V * D / V
+        for storage in (Matrix, sparse)
+            r = quietly(() -> feast_general(storage(A), 0.2 + 0im, 0.5; M0=5))
+            @test r.info == 0
+            @test r.M == 2
+            @test sort(real.(r.values)) ≈ [0.0, 0.4] atol=1e-10
+        end
+
+        # The restricted filter's eigenvalues count the kept directions: a
+        # projector onto two coordinates keeps two of four trial directions,
+        # however the trial basis mixes them.
+        X = [1.0 0.2 0.3 0.1; 0.5 1.0 0.1 0.2; 0.3 0.4 1.0 0.6; 0.2 0.1 0.5 1.0;
+             0.7 0.3 0.2 0.9; 0.1 0.8 0.6 0.3]
+        P = Diagonal([1.0, 1.0, 0.0, 0.0, 0.0, 0.0])
+        @test FeastKit._feast_filter_rank(P * X, X) == 2
+        @test FeastKit._feast_filter_rank(0.9 .* X, X) == 4
+    end
+
+    @testset "Polynomial solvers do not depend on units" begin
+        # P(λ) = λ²I - diag(1², …, 40²): roots ±1 … ±40. The disc holds 4, 5, 6.
+        nn = 40
+        K = Matrix(Diagonal([-(float(j))^2 for j in 1:nn]))
+        C = zeros(nn, nn)
+        Mm = Matrix{Float64}(I, nn, nn)
+        expected = [4.0, 5.0, 6.0]
+        center, radius = 5.0 + 0.0im, 1.2
+        fpm_moments() = (f = feastinit().fpm; f[8] = 32; f[16] = 1; f)
+        paths = [
+            ("moments", (c, z, r) -> feast_srcipev!(c, 2, z, r, 8, fpm_moments())),
+            ("companion", (c, z, r) -> feast_polynomial([ComplexF64.(A) for A in c], z, r; M0=8)),
+            ("sparse companion", (c, z, r) -> feast_scsrpev!(sparse.(c), 2, z, r, 8, feastinit().fpm)),
+        ]
+        for (label, solve) in paths
+            residuals = Float64[]
+            for (coeffs, z, r, back) in (([K, C, Mm], center, radius, 1.0),
+                                         ([1e-8 .* K, 1e-8 .* C, 1e-8 .* Mm], center, radius, 1.0),
+                                         ([1e8 .* K, 1e8 .* C, 1e8 .* Mm], center, radius, 1.0),
+                                         ([K, C ./ 1e4, Mm ./ 1e8], 1e4 * center, 1e4 * radius, 1e4),
+                                         ([K, C .* 1e4, Mm .* 1e8], 1e-4 * center, 1e-4 * radius, 1e-4))
+                result = quietly(() -> solve(coeffs, z, r))
+                @test result.info == 0
+                @test result.M == 3
+                @test sort(real.(result.values)) ./ back ≈ expected rtol=1e-10
+                push!(residuals, result.epsout)
+            end
+            # One problem in five sets of units: one residual, up to roundoff.
+            @test maximum(residuals) <= 10 * minimum(residuals) + 1e-15
+        end
+        # Matrix-free operators go through GMRES on the companion system, so a
+        # smaller instance (roots ±1 … ±12) keeps the solves quick.
+        ops = c -> [LinearOperator{ComplexF64}((y, x) -> mul!(y, ComplexF64.(A), x), size(A)) for A in c]
+        Ks = Matrix(Diagonal([-(float(j))^2 for j in 1:12]))
+        Cs, Ms = zeros(12, 12), Matrix{Float64}(I, 12, 12)
+        for (coeffs, z, r, back) in (([Ks, Cs, Ms], center, radius, 1.0),
+                                     ([1e-8 .* Ks, 1e-8 .* Cs, 1e-8 .* Ms], center, radius, 1.0),
+                                     ([Ks, Cs ./ 1e4, Ms ./ 1e8], 1e4 * center, 1e4 * radius, 1e4))
+            result = quietly(() -> feast_polynomial(ops(coeffs), z, r; M0=8,
+                                                    solver_opts=(rtol=1e-13, maxiter=500, restart=30)))
+            @test result.info == 0 && result.M == 3
+            @test sort(real.(result.values)) ./ back ≈ expected rtol=1e-10
+        end
+
+        # Validation verdicts are relative to the size of the terms.
+        x = zeros(ComplexF64, 12); x[5] = 1
+        for s in (1e-12, 1.0, 1e12)
+            coeff_ops = ops([s .* Ks, s .* Cs, s .* Ms])
+            A_comp, B_comp = FeastKit._matrix_free_polynomial_companion_operators(coeff_ops)
+            v = FeastKit.validate_companion_matrices(A_comp.A_mul!, B_comp.A_mul!, coeff_ops,
+                                                     5.0 + 0im, x)
+            @test v.polynomial_valid && v.companion_valid
+        end
+    end
+
     @testset "Screening keeps genuine pairs" begin
         rng = MersenneTwister(1)
         keep = Vector{Bool}(undef, 3)

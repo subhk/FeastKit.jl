@@ -1138,8 +1138,10 @@ end
             # columns are the previous loop's in-region Ritz vectors.
             if loop[] >= _FEAST_SPURIOUS_MIN_LOOPS
                 Mprev = fpm[52]
-                kept = _feast_screen_spurious!(state.keep, q, state.Q0, res, Mprev,
-                                               feast_tolerance(fpm, T))
+                active = state.active
+                kept = _feast_screen_spurious!(state.keep, view(q, :, 1:active),
+                                               view(state.Q0, :, 1:active), res, Mprev,
+                                               feast_tolerance(fpm, T); filter_rank=true)
                 if kept !== nothing
                     # q was the accumulator; the Ritz vectors live in Q0.
                     copyto!(view(q, :, 1:Mprev), view(state.Q0, :, 1:Mprev))
@@ -1452,6 +1454,59 @@ function _ensure_poly_rci_state!(state::FeastPolyRCIState{T}, N::Int,
     return state
 end
 
+# Request P(z_m) r at the next evaluation points z_m = s·exp(2πi m/(d+1)). A
+# request carries at most M0 columns, so a narrow subspace takes several rounds.
+function _feast_poly_request_probes!(state::FeastPolyRCIState{T}, dmax::Int, M0::Int,
+                                     lambda::AbstractVector{Complex{T}},
+                                     q::AbstractMatrix{Complex{T}},
+                                     mode::Ref{Int}, ijob::Ref{Int}) where T<:Real
+    first = state.probe_next
+    count = min(M0, dmax + 2 - first)
+    s = state.probe_scale
+    @inbounds for j in 1:count
+        m = first + j - 2
+        lambda[j] = s * cis(T(2π) * m / (dmax + 1))
+        copyto!(view(q, :, j), state.probe)
+    end
+    state.probe_count = count
+    mode[] = count
+    ijob[] = Int(Feast_RCI_MULT_A)
+    return nothing
+end
+
+# ‖A_i r‖ for i = 0:d from the samples P(z_m) r on the circle |z| = s: their
+# discrete Fourier transform is s^i A_i r, exactly.
+function _feast_poly_coefficient_norms(values::AbstractMatrix{Complex{T}}, s::T,
+                                       dmax::Int) where T<:Real
+    N = size(values, 1)
+    norms = Vector{T}(undef, dmax + 1)
+    buf = Vector{Complex{T}}(undef, N)
+    for i in 0:dmax
+        fill!(buf, zero(Complex{T}))
+        for m in 0:dmax
+            w = cis(-T(2π) * i * m / (dmax + 1))
+            @inbounds for row in 1:N
+                buf[row] += w * values[row, m + 1]
+            end
+        end
+        norms[i + 1] = norm(buf) / ((dmax + 1) * s^i)
+    end
+    return norms
+end
+
+# Tisseur's backward-error normalization Σ_i |λ|^i ‖A_i‖; zero when the
+# coefficient sizes are unknown.
+function _feast_poly_backward_scale(norms::AbstractVector{T}, λ) where T<:Real
+    a = abs(λ)
+    acc = zero(T)
+    p = one(T)
+    for c in norms
+        acc += p * c
+        p *= a
+    end
+    return acc
+end
+
 """
     _feast_beyn_reduce!(state, rank_tol)
 
@@ -1652,8 +1707,22 @@ end
 
         loop[] = 0
 
-        Ze[] = Zne[1]
-        ijob[] = Int(Feast_RCI_FACTORIZE)
+        # Before the first sweep, measure how large each coefficient is: P(z)
+        # at d+1 points of the circle through the farthest contour node,
+        # applied to one random unit probe (see FeastPolyRCIState).
+        probe_rng = MersenneTwister(hash((N, dmax, :poly_probe)))
+        probe = Vector{Complex{T}}(undef, N)
+        @inbounds for i in 1:N
+            probe[i] = Complex{T}(randn(probe_rng, T), randn(probe_rng, T))
+        end
+        probe ./= norm(probe)
+        state.probe = probe
+        state.probe_values = zeros(Complex{T}, N, dmax + 1)
+        s = _feast_residual_scale(Zne)
+        state.probe_scale = s > zero(T) && isfinite(s) ? T(s) : one(T)
+        state.coeff_norms = T[]
+        state.probe_next = 1
+        _feast_poly_request_probes!(state, dmax, M0, lambda, q, mode, ijob)
         return
     end
 
@@ -1771,6 +1840,28 @@ end
     end
 
     if ijob[] == Int(Feast_RCI_MULT_A)
+        if state.probe_next > 0
+            # workc holds P(z_m) r for the requested evaluation points.
+            first = state.probe_next
+            count = state.probe_count
+            copyto!(view(state.probe_values, :, first:(first + count - 1)),
+                    view(workc, :, 1:count))
+            state.probe_next = first + count
+            if state.probe_next <= dmax + 1
+                _feast_poly_request_probes!(state, dmax, M0, lambda, q, mode, ijob)
+                return
+            end
+            state.probe_next = 0
+            state.coeff_norms = _feast_poly_coefficient_norms(state.probe_values,
+                                                              state.probe_scale, dmax)
+            fill!(lambda, zero(Complex{T}))
+            fill!(q, zero(Complex{T}))
+            mode[] = 0
+            Ze[] = Zne[1]
+            ijob[] = Int(Feast_RCI_FACTORIZE)
+            return
+        end
+
         M = fpm[52]  # Get M from fpm
         max_res = zero(T)
         if !state.initialized
@@ -1779,10 +1870,12 @@ end
         for j in 1:M
             # The caller writes P(lambda_j) * q_j into workc, so the polynomial
             # residual is that column's norm -- there is no separate lambda*q
-            # term to subtract, unlike the linear kernels.
+            # term to subtract, unlike the linear kernels. Normalized as a
+            # backward error, it is the same whatever units P and λ are in.
             qnorm = norm(view(q, :, j))
-            denom = max(abs(lambda[j]), one(T)) * max(qnorm, eps(T))
-            res[j] = norm(view(workc, :, j)) / denom
+            scale = _feast_poly_backward_scale(state.coeff_norms, lambda[j])
+            (scale > zero(T) && isfinite(scale)) || (scale = max(abs(lambda[j]), one(T)))
+            res[j] = norm(view(workc, :, j)) / (scale * max(qnorm, eps(T)))
             max_res = max(max_res, res[j])
         end
         epsout[] = max_res

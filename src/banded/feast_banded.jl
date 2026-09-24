@@ -1058,7 +1058,11 @@ required for complex-symmetric pencils.
         # The sweep has filtered the previous loop's Ritz vectors (Q_basis);
         # their filter response separates genuine pairs from spurious ones.
         if loop_idx >= _FEAST_SPURIOUS_MIN_LOOPS
-            kept = _feast_screen_spurious!(keep, Q_proj, Q_basis, res_vec, M_found, eps_tol)
+            # Complex-symmetric Rayleigh-Ritz is oblique, so also count the
+            # in-region directions of the whole subspace.
+            kept = _feast_screen_spurious!(keep, view(Q_proj, :, 1:active_dim),
+                                           view(Q_basis, :, 1:active_dim), res_vec,
+                                           M_found, eps_tol; filter_rank=true)
             if kept !== nothing
                 # The solves overwrote shifted_solutions; the pairs live in Q_basis.
                 copyto!(view(shifted_solutions, :, 1:M_found), view(Q_basis, :, 1:M_found))

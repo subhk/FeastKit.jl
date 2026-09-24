@@ -344,7 +344,11 @@ problems.
         # The sweep has filtered the previous loop's Ritz vectors (Q_basis);
         # their filter response separates genuine pairs from spurious ones.
         if loop_idx >= _FEAST_SPURIOUS_MIN_LOOPS
-            kept = _feast_screen_spurious!(keep, Q_proj, Q_basis, res_vec, M_found, eps_tol)
+            # Complex-symmetric Rayleigh-Ritz is oblique, so also count the
+            # in-region directions of the whole subspace.
+            kept = _feast_screen_spurious!(keep, view(Q_proj, :, 1:active_dim),
+                                           view(Q_basis, :, 1:active_dim), res_vec,
+                                           M_found, eps_tol; filter_rank=true)
             if kept !== nothing
                 # The solves overwrote shifted_solutions; the pairs live in Q_basis.
                 copyto!(view(shifted_solutions, :, 1:M_found), view(Q_basis, :, 1:M_found))
@@ -1009,20 +1013,28 @@ function _feast_sparse_pep!(coeffs::Vector{SparseMatrixCSC{Complex{T},Int}}, d::
     N = _check_polynomial_coeffs(coeffs, d)
     CT = Complex{T}
 
+    # Balance first, as the dense feast_pep! does: solve for μ = λ/γ with
+    # coefficients δγ^(k-1) A_k (see _feast_polynomial_balance).
+    γ, δ = _feast_polynomial_balance([T(norm(Ak)) for Ak in coeffs])
+    coeff_scale = [δ * γ^(k - 1) for k in 1:d+1]
+
     # First companion form for P(λ) = A_1 + λA_2 + … + λ^d A_{d+1}:
     #   A_lin = [ 0 I … 0 ; … ; -A_1 … -A_d ],  B_lin = diag(I, …, I, A_{d+1})
     Iblk = sparse(one(CT) * I, N, N)
-    bottom = reduce(hcat, [-Ak for Ak in coeffs[1:d]])
+    bottom = reduce(hcat, [-coeff_scale[k] .* coeffs[k] for k in 1:d])
     A_lin = d > 1 ?
         vcat(hcat(spzeros(CT, (d - 1) * N, N), blockdiag(ntuple(_ -> Iblk, d - 1)...)),
              bottom) : bottom
-    B_lin = d > 1 ? blockdiag(ntuple(_ -> Iblk, d - 1)..., coeffs[d + 1]) : coeffs[d + 1]
+    B_top = coeff_scale[d + 1] .* coeffs[d + 1]
+    B_lin = d > 1 ? blockdiag(ntuple(_ -> Iblk, d - 1)..., B_top) : B_top
 
-    result = feast_gcsrgv!(A_lin, B_lin, Emid, r, M0 * d, fpm)
+    result = _feast_with_scaled_contour(fpm, T, γ) do inner
+        feast_gcsrgv!(A_lin, B_lin, Emid / γ, r / γ, M0 * d, inner)
+    end
 
     # Eigenvectors of the original problem are the first N components.
     M = result.M
-    return FeastGeneralResult{T}(result.lambda[1:M], result.q[1:N, 1:M], M,
+    return FeastGeneralResult{T}(γ .* result.lambda[1:M], result.q[1:N, 1:M], M,
                                  result.res[1:M], result.info, result.epsout,
                                  result.loop)
 end

@@ -261,6 +261,18 @@ end
         FeastKit._feast_poly_grci!(ijob, dmax, N, Ze, work, workc, Aq, Bq,
                                    fpm, epsout, loop, Emid, r, M0, lambda, q,
                                    mode, res, info, Zne, Wne; state=state)
+        # The kernel first measures the coefficient sizes: answer its MULT_A
+        # probe requests (here for P = I) until it asks for a factorization.
+        probe_requests = 0
+        while ijob[] == Int(FeastKit.Feast_RCI_MULT_A)
+            probe_requests += 1
+            workc[:, 1:mode[]] .= q[:, 1:mode[]]
+            FeastKit._feast_poly_grci!(ijob, dmax, N, Ze, work, workc, Aq, Bq,
+                                       fpm, epsout, loop, Emid, r, M0, lambda, q,
+                                       mode, res, info, Zne, Wne; state=state)
+        end
+        @test probe_requests == 2   # d + 1 = 3 evaluation points, M0 = 2 per request
+        @test state.coeff_norms ≈ [1.0, 0.0, 0.0] atol=1e-12
         @test ijob[] == Int(FeastKit.Feast_RCI_FACTORIZE)
 
         _repeat_feast_poly_solve_step!(ijob, dmax, N, Ze, work, workc, Aq, Bq,

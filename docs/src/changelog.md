@@ -17,6 +17,18 @@
   and no longer counted. They used to block convergence for the whole loop
   budget (`info = 5`) or be returned as eigenvalues, including by
   `eigvals_feast` and `eigen_feast`.
+- For non-Hermitian and complex-symmetric problems, a spurious pair built by
+  the oblique Rayleigh-Ritz from an in-region eigenvector plus an unresolved
+  conjugate pair is also recognized: the filter restricted to the subspace
+  shows no more in-region directions than converged pairs.
+- Polynomial eigenproblems no longer depend on units. The companion-based
+  solvers (`feast_polynomial`, `feast_gepev!` and relatives, the sparse
+  `*csrpev!` family) balance the coefficients before linearizing, and the
+  moment-method kernel behind `feast_srcipev!`/`feast_grcipev!` measures
+  residuals as backward errors `‖P(λ)x‖ / (Σ|λ|ᵏ‖Aₖ‖ ‖x‖)`. That kernel measures
+  the coefficient sizes with extra `MULT_A` requests before its first
+  factorization. `validate_companion_matrices` judges residuals relative to
+  the size of their terms.
 - A search region with no eigenvalues now returns `info = 0` with `M = 0`
   instead of `info = 5`. A caller-supplied starting subspace is first checked
   with independent probes.

@@ -255,10 +255,21 @@ mutable struct FeastPolyRCIState{T<:Real}
     basis::Matrix{Complex{T}}   # leading left singular vectors of S0
     rank::Int
     residual::Vector{Complex{T}}
+    # Coefficient sizes ‖A_i r‖ for a random unit probe r, measured before the
+    # first sweep from P(z) r at d+1 points of a circle (see
+    # `_feast_poly_coefficient_norms`). Residuals are Tisseur's backward error
+    # ‖P(λ)x‖ / (Σ|λ|^i ‖A_i‖ ‖x‖), which does not depend on units.
+    coeff_norms::Vector{T}
+    probe::Vector{Complex{T}}
+    probe_values::Matrix{Complex{T}}
+    probe_next::Int             # next evaluation point to request; 0 once measured
+    probe_count::Int            # evaluation points in the outstanding request
+    probe_scale::T              # radius of the evaluation circle
 
     function FeastPolyRCIState{T}() where T<:Real
         empty = Matrix{Complex{T}}(undef, 0, 0)
-        new{T}(false, copy(empty), copy(empty), copy(empty), 0, Complex{T}[])
+        new{T}(false, copy(empty), copy(empty), copy(empty), 0, Complex{T}[],
+               T[], Complex{T}[], copy(empty), 0, 0, one(T))
     end
 end
 

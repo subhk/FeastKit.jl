@@ -109,7 +109,7 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
         if loop_idx >= _FEAST_SPURIOUS_MIN_LOOPS
             kept = rank == root ?
                 _feast_screen_spurious!(keep, Q_proj, Q_basis, res_vec, M_found,
-                                        feast_tolerance(fpm, T)) : nothing
+                                        feast_tolerance(fpm, T); filter_rank=true) : nothing
             kept = MPI.bcast(kept, root, comm)
             if kept !== nothing
                 MPI.Bcast!(keep, root, comm)

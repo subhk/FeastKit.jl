@@ -850,6 +850,50 @@ function _feast_banded_spectral_scale(R::AbstractMatrix, applyA!, applyB!)
     return _feast_spectral_scale(AR, BR)
 end
 
+"""
+    _feast_polynomial_balance(norms) -> (γ, δ)
+
+Balance a polynomial eigenproblem `Σ λ^i A_i` before linearizing it, from the
+coefficient sizes `norms[i+1] = ‖A_i‖`: solve for `μ = λ/γ` with coefficients
+`δ γ^i A_i`, where `γ = (‖A_0‖/‖A_d‖)^(1/d)` balances the extreme coefficients and
+`δ` makes the largest scaled coefficient 1 (the parameter scaling of Fan, Lin
+and Van Dooren, generalized by Betcke). Rescaling every coefficient, or
+measuring `λ` in other units, yields the same balanced problem, so the
+companion solve and its convergence test do not depend on either.
+"""
+function _feast_polynomial_balance(norms::AbstractVector{T}) where T<:Real
+    d = length(norms) - 1
+    γ = d >= 1 && norms[1] > zero(T) && norms[end] > zero(T) ?
+        (norms[1] / norms[end])^(one(T) / d) : one(T)
+    (isfinite(γ) && γ > zero(T)) || (γ = one(T))
+    largest = zero(T)
+    p = one(T)
+    for c in norms
+        largest = max(largest, p * c)
+        p *= γ
+    end
+    δ = largest > zero(T) && isfinite(largest) ? inv(largest) : one(T)
+    return γ, δ
+end
+
+# Run `f(fpm_inner)` on a copy of `fpm` whose registered custom contour, if any,
+# is rescaled for the balanced variable μ = λ/γ; `f` sees the scaled region.
+# The caller's registration is left untouched.
+function _feast_with_scaled_contour(f, fpm::Vector{Int}, ::Type{T}, γ::T) where T<:Real
+    inner = copy(fpm)
+    contour = feast_get_custom_contour(T, fpm)
+    contour === nothing && return f(inner)
+    inner[29] = 0   # a fresh registration must not replace the caller's
+    scaled = FeastContour{T}(contour.Zne ./ γ, contour.Wne ./ γ,
+                             contour.vertices === nothing ? nothing : contour.vertices ./ γ)
+    feast_set_custom_contour!(inner, scaled)
+    try
+        return f(inner)
+    finally
+        feast_clear_custom_contour!(inner)
+    end
+end
+
 # Magnitude of the search region: the fallback floor when no spectral scale is
 # available (FEAST's own convention, α = max(|Emin|, |Emax|)). A closed contour
 # uses its farthest node, which also covers user-registered contours that
@@ -888,7 +932,56 @@ const _FEAST_SPURIOUS_RESPONSE = 0.25
 const _FEAST_SPURIOUS_MIN_LOOPS = 2
 
 """
-    _feast_screen_spurious!(keep, Y, X, res, M, tol)
+    _feast_filter_rank(Y, X)
+
+Number of eigendirections in `span(X)` that the contour filter keeps: the
+eigenvalues `μ` of the filter restricted to that subspace, `G = X⁺ Y` with
+`Y = ρ(B⁻¹A) X`, that reach `_FEAST_SPURIOUS_RESPONSE` in magnitude. Once the
+subspace holds the region's eigenvectors, `G` approximates the restriction of
+the spectral projector, whose eigenvalues are 1 on in-region directions and 0
+elsewhere — independently of how the Rayleigh-Ritz basis mixes them.
+
+`G` comes from the normal equations `(XᴴX) G = XᴴY`, which touch `X` and `Y`
+only through two small products. When `XᴴX` is too ill-conditioned for that,
+a pivoted QR of `X` drops its dependent columns instead.
+"""
+function _feast_filter_rank(Y::AbstractMatrix, X::AbstractMatrix)
+    m = size(X, 2)
+    m == 0 && return 0
+    RT = real(eltype(X))
+    G = nothing
+    gram = X' * X
+    chol = cholesky!(Hermitian(gram); check=false)
+    if issuccess(chol)
+        dU = abs.(diag(chol.U))
+        # The Gram matrix squares the conditioning of X; accept it only while
+        # X itself stays well inside sqrt(eps)-conditioning.
+        if minimum(dU) > eps(RT)^(1 // 4) * maximum(dU)
+            G = chol \ (X' * Y)
+        end
+    end
+    if G === nothing
+        F = qr(X, ColumnNorm())
+        d = abs.(diag(F.R))
+        (isempty(d) || !(d[1] > zero(RT))) && return 0
+        r = count(>(sqrt(eps(RT)) * d[1]), d)
+        p = F.p[1:r]
+        # X[:, p] = Q R, so X_r⁺ = R_r⁻¹ Q_rᴴ for the leading r pivoted columns.
+        QtY = (F.Q' * Y[:, p])[1:r, :]
+        G = UpperTriangular(F.R[1:r, 1:r]) \ QtY
+    end
+    μ = try
+        eigvals(G)
+    catch err
+        @debug "Restricted filter eigenvalues failed; skipping the rank check" exception=err
+        return m
+    end
+    all(isfinite, μ) || return m
+    return count(v -> abs(v) >= _FEAST_SPURIOUS_RESPONSE, μ)
+end
+
+"""
+    _feast_screen_spurious!(keep, Y, X, res, M, tol; filter_rank=false)
 
 Classify the previous loop's in-region Ritz pairs using the contour sweep that
 has just filtered their vectors: column `j` of `Y` is `ρ(B⁻¹A) * X[:, j]`.
@@ -901,6 +994,13 @@ such a mixture when the out-of-region eigenvalues are damped equally, so left
 alone it blocks convergence until the loop budget runs out, and is reported as
 an eigenvalue.
 
+For a non-normal pencil the one-sided (oblique) Rayleigh-Ritz can also build a
+spurious vector that contains an in-region eigenvector already represented by a
+converged pair, so its own response stays high. `filter_rank=true` then counts
+the in-region directions of the whole subspace instead
+([`_feast_filter_rank`](@ref), over the columns of `X` and `Y`): when there are
+no more of them than converged pairs, every unconverged pair is spurious.
+
 Returns the number of genuine pairs when every unconverged pair is spurious,
 so that the caller can finish with the converged ones (`keep` marks them), and
 `nothing` while some genuine pair is still converging. Kernels that integrate
@@ -909,27 +1009,30 @@ the filtered vector.
 """
 function _feast_screen_spurious!(keep::AbstractVector{Bool}, Y::AbstractMatrix,
                                  X::AbstractMatrix, res::AbstractVector, M::Int,
-                                 tol::Real)
+                                 tol::Real; filter_rank::Bool = false)
     M > 0 || return nothing
-    spurious = false
+    nconverged = 0
+    all_weak = true
     @inbounds for j in 1:M
         if res[j] <= tol
             keep[j] = true
+            nconverged += 1
             continue
         end
+        keep[j] = false
         xnorm = norm(view(X, :, j))
         ynorm = norm(view(Y, :, j))
-        # A genuine pair that is still converging: keep refining.
-        (xnorm > zero(xnorm) && ynorm < _FEAST_SPURIOUS_RESPONSE * xnorm) || return nothing
-        keep[j] = false
-        spurious = true
+        (xnorm > zero(xnorm) && ynorm < _FEAST_SPURIOUS_RESPONSE * xnorm) || (all_weak = false)
     end
-    spurious || return nothing
-    kept = 0
-    @inbounds for j in 1:M
-        kept += keep[j]
-    end
-    return kept
+    nconverged == M && return nothing
+    all_weak && return nconverged
+    # A pair with a strong response is either still converging or, for a
+    # non-normal pencil, an oblique mixture that reuses a converged direction.
+    # With nothing converged there is nothing to reuse, and a subspace with any
+    # in-region direction could not pass the count, so skip it.
+    nconverged > 0 && filter_rank && _feast_filter_rank(Y, X) <= nconverged &&
+        return nconverged
+    return nothing
 end
 
 # Move the pairs marked in `keep[1:M]` to the front of `lambda`, the columns of

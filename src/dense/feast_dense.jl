@@ -546,6 +546,12 @@ function feast_pep!(A::Vector{Matrix{Complex{T}}}, d::Int,
         size(A[i]) == (N, N) || throw(ArgumentError("All matrices must be same size"))
     end
     
+    # Balance first (see _feast_polynomial_balance): the companion pencil is
+    # built for μ = λ/γ with coefficients δγ^(k-1) A[k], so neither the size
+    # of the coefficients nor the units of λ affect the solve.
+    γ, δ = _feast_polynomial_balance([T(norm(Ak)) for Ak in A])
+    coeff_scale = [δ * γ^(k - 1) for k in 1:d+1]
+
     # Linearize the polynomial eigenvalue problem
     # Convert to generalized eigenvalue problem of size d*N
     DN = d * N
@@ -570,7 +576,7 @@ function feast_pep!(A::Vector{Matrix{Complex{T}}}, d::Int,
 
     # Last row blocks: -A[1] through -A[d] (coefficients of λ^0 through λ^{d-1})
     for j in 1:d
-        A_lin[(d-1)*N+1:d*N, (j-1)*N+1:j*N] .= -A[j]
+        A_lin[(d-1)*N+1:d*N, (j-1)*N+1:j*N] .= -coeff_scale[j] .* A[j]
     end
 
     # Diagonal identity blocks in B_lin (first d-1 blocks)
@@ -579,14 +585,17 @@ function feast_pep!(A::Vector{Matrix{Complex{T}}}, d::Int,
     end
 
     # Last diagonal block: A[d+1] (coefficient of λ^d)
-    B_lin[(d-1)*N+1:d*N, (d-1)*N+1:d*N] .= A[d+1]
-    
-    # Solve linearized problem
-    result = feast_gegv!(A_lin, B_lin, Emid, r, M0*d, fpm)
-    
+    B_lin[(d-1)*N+1:d*N, (d-1)*N+1:d*N] .= coeff_scale[d+1] .* A[d+1]
+
+    # Solve the linearized problem for μ = λ/γ over the correspondingly scaled
+    # search region.
+    result = _feast_with_scaled_contour(fpm, T, γ) do inner
+        feast_gegv!(A_lin, B_lin, Emid / γ, r / γ, M0*d, inner)
+    end
+
     # Extract original eigenvectors (first N components)
     M = result.M
-    lambda = result.lambda[1:M]
+    lambda = γ .* result.lambda[1:M]
     q_orig = result.q[1:N, 1:M]
 
     return FeastGeneralResult{T}(lambda, q_orig, M, result.res[1:M],
@@ -999,7 +1008,11 @@ Hermitian/general dense paths.
         # The sweep has filtered the previous loop's Ritz vectors (Q_basis);
         # their filter response separates genuine pairs from spurious ones.
         if loop_idx >= _FEAST_SPURIOUS_MIN_LOOPS
-            kept = _feast_screen_spurious!(keep, Q_proj, Q_basis, res_vec, M_found, eps_tol)
+            # Complex-symmetric Rayleigh-Ritz is oblique, so also count the
+            # in-region directions of the whole subspace.
+            kept = _feast_screen_spurious!(keep, view(Q_proj, :, 1:active_dim),
+                                           view(Q_basis, :, 1:active_dim), res_vec,
+                                           M_found, eps_tol; filter_rank=true)
             if kept !== nothing
                 # The solves overwrote shifted_solutions; the pairs live in Q_basis.
                 copyto!(view(shifted_solutions, :, 1:M_found), view(Q_basis, :, 1:M_found))

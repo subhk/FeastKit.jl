@@ -2,7 +2,6 @@
 # Each contour point is solved independently using distributed computing
 
 using Distributed
-using SharedArrays
 using LinearAlgebra
 
 function _pfeast_dense_shifted_system!(dest::AbstractMatrix{Complex{T}},

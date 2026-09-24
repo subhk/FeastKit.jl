@@ -546,6 +546,12 @@ function feast_pep!(A::Vector{Matrix{Complex{T}}}, d::Int,
         size(A[i]) == (N, N) || throw(ArgumentError("All matrices must be same size"))
     end
     
+    # Balance first (see _feast_polynomial_balance): the companion pencil is
+    # built for μ = λ/γ with coefficients δγ^(k-1) A[k], so neither the size
+    # of the coefficients nor the units of λ affect the solve.
+    γ, δ = _feast_polynomial_balance([T(norm(Ak)) for Ak in A])
+    coeff_scale = [δ * γ^(k - 1) for k in 1:d+1]
+
     # Linearize the polynomial eigenvalue problem
     # Convert to generalized eigenvalue problem of size d*N
     DN = d * N
@@ -570,7 +576,7 @@ function feast_pep!(A::Vector{Matrix{Complex{T}}}, d::Int,
 
     # Last row blocks: -A[1] through -A[d] (coefficients of λ^0 through λ^{d-1})
     for j in 1:d
-        A_lin[(d-1)*N+1:d*N, (j-1)*N+1:j*N] .= -A[j]
+        A_lin[(d-1)*N+1:d*N, (j-1)*N+1:j*N] .= -coeff_scale[j] .* A[j]
     end
 
     # Diagonal identity blocks in B_lin (first d-1 blocks)
@@ -579,14 +585,17 @@ function feast_pep!(A::Vector{Matrix{Complex{T}}}, d::Int,
     end
 
     # Last diagonal block: A[d+1] (coefficient of λ^d)
-    B_lin[(d-1)*N+1:d*N, (d-1)*N+1:d*N] .= A[d+1]
-    
-    # Solve linearized problem
-    result = feast_gegv!(A_lin, B_lin, Emid, r, M0*d, fpm)
-    
+    B_lin[(d-1)*N+1:d*N, (d-1)*N+1:d*N] .= coeff_scale[d+1] .* A[d+1]
+
+    # Solve the linearized problem for μ = λ/γ over the correspondingly scaled
+    # search region.
+    result = _feast_with_scaled_contour(fpm, T, γ) do inner
+        feast_gegv!(A_lin, B_lin, Emid / γ, r / γ, M0*d, inner)
+    end
+
     # Extract original eigenvectors (first N components)
     M = result.M
-    lambda = result.lambda[1:M]
+    lambda = γ .* result.lambda[1:M]
     q_orig = result.q[1:N, 1:M]
 
     return FeastGeneralResult{T}(lambda, q_orig, M, result.res[1:M],
@@ -915,6 +924,11 @@ Hermitian/general dense paths.
     contour === nothing && (contour = feast_gcontour(Emid, r, fpm))
     Zne = contour.Zne
     Wne = contour.Wne
+    res_scale = _feast_residual_floor(
+        _feast_spectral_scale(A, B_is_identity ? nothing : B_matrix, Q_basis),
+        _feast_residual_scale(Zne))
+    keep = Vector{Bool}(undef, M0)
+    empty_region = false
     # fpm[10] = 1 (default) keeps one factorization per contour point alive for
     # the whole solve; fpm[10] = 0 keeps a single slot and refactorizes, trading
     # time for the fpm[2] * N^2 complex words the full cache would otherwise hold.
@@ -991,6 +1005,27 @@ Hermitian/general dense paths.
         end
         solve_failed && break
 
+        # The sweep has filtered the previous loop's Ritz vectors (Q_basis);
+        # their filter response separates genuine pairs from spurious ones.
+        if loop_idx >= _FEAST_SPURIOUS_MIN_LOOPS
+            # Complex-symmetric Rayleigh-Ritz is oblique, so also count the
+            # in-region directions of the whole subspace.
+            kept = _feast_screen_spurious!(keep, view(Q_proj, :, 1:active_dim),
+                                           view(Q_basis, :, 1:active_dim), res_vec,
+                                           M_found, eps_tol; filter_rank=true)
+            if kept !== nothing
+                # The solves overwrote shifted_solutions; the pairs live in Q_basis.
+                copyto!(view(shifted_solutions, :, 1:M_found), view(Q_basis, :, 1:M_found))
+                M_found = _feast_compact_pairs!(lambda_vec, shifted_solutions, res_vec,
+                                                keep, M_found)
+                epsout_val = M_found > 0 ? maximum(view(res_vec, 1:M_found)) : zero(T)
+                info_code = M_found == 0 ? Int(Feast_SUCCESS) :
+                            _feast_exit_info(true, M_found, M0, N)
+                empty_region = M_found == 0
+                break
+            end
+        end
+
         try
             rank = _feast_qr_compress!(solutions_tmp, Q_proj, active_dim;
                                        rank_tol=sqrt(eps(T)))
@@ -1027,7 +1062,11 @@ Hermitian/general dense paths.
                                             lambda_tmp, solutions_tmp,
                                             Emid, r, fpm, rank)
             if M == 0
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                # No Ritz value inside the contour: it encloses no eigenvalues.
+                M_found = 0
+                epsout_val = zero(T)
+                info_code = Int(Feast_SUCCESS)
+                empty_region = true
                 break
             end
 
@@ -1052,7 +1091,7 @@ Hermitian/general dense paths.
                     mul!(Bq_vec, B_matrix, q_col)
                     @. residual_vec = residual_vec - lambda_vec[j] * Bq_vec
                 end
-                res_val = _feast_scaled_residual(residual_vec, B_is_identity ? q_col : Bq_vec, lambda_vec[j])
+                res_val = _feast_scaled_residual(residual_vec, B_is_identity ? q_col : Bq_vec, lambda_vec[j], res_scale)
                 res_vec[j] = res_val
                 max_res = max(max_res, res_val)
             end
@@ -1074,7 +1113,7 @@ Hermitian/general dense paths.
         end
     end
 
-    if M_found == 0 && info_code == Int(Feast_SUCCESS)
+    if M_found == 0 && info_code == Int(Feast_SUCCESS) && !empty_region
         info_code = Int(Feast_ERROR_NO_CONVERGENCE)
     end
     M_found > 1 && feast_sort_general!(lambda_vec, shifted_solutions, res_vec, M_found)

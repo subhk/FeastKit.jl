@@ -49,6 +49,18 @@ function _mpi_collective_try(f, comm)
     return _mpi_success_count(success,comm) == MPI.Comm_size(comm)
 end
 
+# Residual floor for the MPI drivers. The spectral-scale probe multiplies by A
+# and B, so like every other rank-local operation it must fail collectively:
+# returns `nothing` on every rank when it failed on any, otherwise root's value.
+function _mpi_residual_floor(A, B, Q, region, root, comm)
+    σ = zero(float(real(eltype(Q))))
+    ok = _mpi_collective_try(comm) do
+        σ = _feast_spectral_scale(A, B, Q)
+    end
+    ok || return nothing
+    return MPI.bcast(_feast_residual_floor(σ, region), root, comm)
+end
+
 function _mpi_factorize_contour(A, B, nodes, comm; store=true)
     store || return _MPIUncachedFactors(A,B,nodes)
     factors = try

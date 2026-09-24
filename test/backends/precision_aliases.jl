@@ -95,5 +95,6 @@ include(joinpath(@__DIR__, "..", "support", "setup.jl"))
     FeastKit.pdfeast_srci!(state, n, work, workc, Aq, Sq, copy(fpm64),
                            0.4, 1.6, n, lambda, q, res)
     @test state.info == Int(Feast_SUCCESS)
-    @test state.ijob == Int(Feast_RCI_FACTORIZE)
+    # The shared kernel asks for its spectral-scale probes before any solve.
+    @test state.ijob == Int(Feast_RCI_MULT_A)
 end

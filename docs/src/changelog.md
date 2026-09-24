@@ -2,6 +2,62 @@
 
 ## Unreleased
 
+### Correctness
+
+- Residuals are now measured against the spectral scale of the pencil,
+  `‖Ax - λBx‖ / (‖Bx‖ max(|λ|, σ))`, instead of a fixed floor of 1. The old
+  floor made the convergence test absolute for small-magnitude problems, so a
+  change of units could turn a converged solve into one that accepted
+  inaccurate or spurious eigenpairs with `info = 0`. `σ` is measured on random
+  probes before the first contour sweep, which adds one `MULT_A`/`MULT_B`
+  request at the start of every RCI loop; callers that answer those requests
+  generically need no change.
+- Spurious Ritz pairs — mixtures of out-of-region eigenvectors whose Rayleigh
+  quotient falls inside the region — are recognized by their filter response
+  and no longer counted. They used to block convergence for the whole loop
+  budget (`info = 5`) or be returned as eigenvalues, including by
+  `eigvals_feast` and `eigen_feast`.
+- For non-Hermitian and complex-symmetric problems, a spurious pair built by
+  the oblique Rayleigh-Ritz from an in-region eigenvector plus an unresolved
+  conjugate pair is also recognized: the filter restricted to the subspace
+  shows no more in-region directions than converged pairs.
+- Polynomial eigenproblems no longer depend on units. The companion-based
+  solvers (`feast_polynomial`, `feast_gepev!` and relatives, the sparse
+  `*csrpev!` family) balance the coefficients before linearizing, and the
+  moment-method kernel behind `feast_srcipev!`/`feast_grcipev!` measures
+  residuals as backward errors `‖P(λ)x‖ / (Σ|λ|ᵏ‖Aₖ‖ ‖x‖)`. That kernel measures
+  the coefficient sizes with extra `MULT_A` requests before its first
+  factorization. `validate_companion_matrices` judges residuals relative to
+  the size of their terms.
+- A search region with no eigenvalues now returns `info = 0` with `M = 0`
+  instead of `info = 5`. A caller-supplied starting subspace is first checked
+  with independent probes.
+- `eigvals_feast` and `eigen_feast` with `check=false` log a warning when the
+  solve did not converge.
+- The generalized interval check bounds the spectrum of the pencil `(A, B)`,
+  not of `A`, so it no longer warns about intervals that contain eigenvalues.
+- `feast_matvec` adapts its inner GMRES tolerance to the outer residual, so it
+  can reach the default tolerance; its GMRES options are now keywords.
+- The sparse complex-symmetric solver keeps a caller's `initial_subspace`
+  instead of overwriting it.
+
+### Other fixes
+
+- MPI is detected automatically again when `FEASTKIT_ENABLE_MPI=true`, MPI is
+  loaded and initialized; the check used to run before the extension loaded,
+  so it never succeeded. Calling an MPI entry point without `using MPI` now
+  says what to load.
+- Added `FeastLinearOperator`, an unambiguous alias for `LinearOperator` when
+  LinearOperators.jl is also loaded.
+- `ParallelFeastState` accepts the unset contour count of `feastinit().fpm`.
+- `pfeast_rci_benchmark` reports the number of integration points its runs
+  use; it printed 0.
+- Fixed the README examples, which are now executed by the test suite together
+  with the example scripts; documented the differences from Fortran FEAST.
+- Removed the unused SharedArrays dependency.
+
+### Earlier unreleased changes
+
 - Reuse GMRES workspaces across contour nodes and sweeps; reuse matrix-free
   BiCGSTAB workspaces across right-hand sides and shifts.
 - Adapt default inner tolerances in general, complex-symmetric, banded,

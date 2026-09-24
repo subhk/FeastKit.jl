@@ -21,6 +21,7 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
     contour, custom_contour = _mpi_contour(T,fpm,Emid,r,root,comm; general=true)
     ne = length(contour.Zne)
     Zne_global, Wne_global = contour.Zne, contour.Wne
+    keep = Vector{Bool}(undef, M0)
 
     mpi_state = MPIFeastState{T}(comm, MPI.Comm_rank(comm), MPI.Comm_size(comm),
                                  N, M0, ne, root)
@@ -39,6 +40,12 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
             Int(Feast_ERROR_LAPACK),T(Inf),0)
     end
     B_is_identity = (B == I)   # standard problem: skip per-loop identity matmuls
+    # Every rank measures on the same broadcast basis; root's value is used.
+    res_scale = _mpi_residual_floor(A, B_is_identity ? nothing : B, Q_basis,
+                                    _feast_residual_scale(Zne_global), root, comm)
+    res_scale === nothing && return FeastGeneralResult{T}(Complex{T}[],zeros(Complex{T},N,0),0,T[],
+        solver_choice == :direct ? Int(Feast_ERROR_LAPACK) : Int(Feast_ERROR_NO_CONVERGENCE),
+        T(Inf),0)
     BQ_loop = similar(Q_basis)
     Q_proj_local_buf = similar(Q_basis)
     # In-place solve buffer. Sparse factors are UMFPACK and always ComplexF64
@@ -95,6 +102,24 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
         # Direct send/recv Allreduce into the persistent buffer — no fresh
         # receive array per refinement loop.
         MPI.Allreduce!(local_Q_proj, Q_proj, MPI.SUM, comm)
+
+        # Q_proj is the filtered image of the previous loop's Ritz vectors
+        # (Q_basis); the root classifies them by filter response and every
+        # rank follows. `solutions` still holds those pairs.
+        if loop_idx >= _FEAST_SPURIOUS_MIN_LOOPS
+            kept = rank == root ?
+                _feast_screen_spurious!(keep, Q_proj, Q_basis, res_vec, M_found,
+                                        feast_tolerance(fpm, T); filter_rank=true) : nothing
+            kept = MPI.bcast(kept, root, comm)
+            if kept !== nothing
+                MPI.Bcast!(keep, root, comm)
+                M_found = _feast_compact_pairs!(lambda_vec, solutions, res_vec, keep, M_found)
+                epsout_val = M_found > 0 ? maximum(view(res_vec, 1:M_found)) : zero(T)
+                info_code = M_found == 0 ? Int(Feast_SUCCESS) :
+                            _feast_exit_info(true, M_found, M0, N)
+                break
+            end
+        end
         M = 0
         success = _mpi_collective_try(comm) do
             # Orthonormalize the filtered subspace before the (non-Hermitian)
@@ -138,13 +163,16 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
         end
         M = MPI.bcast(M,root,comm)
         if M == 0
-            info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+            # No Ritz value inside the region: it holds no eigenvalues.
+            info_code = Int(Feast_SUCCESS)
+            epsout_val = zero(T)
             M_found = 0
             break
         end
         MPI.Bcast!(lambda_vec,root,comm)
         MPI.Bcast!(solutions,root,comm)
-        if !mpi_compute_complex_residuals!(A,B,lambda_vec,solutions,res_vec,M,comm)
+        if !mpi_compute_complex_residuals!(A,B,lambda_vec,solutions,res_vec,M,comm;
+                                           scale=res_scale)
             info_code = Int(Feast_ERROR_LAPACK)
             M_found = 0
             break

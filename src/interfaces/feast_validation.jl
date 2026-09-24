@@ -76,3 +76,41 @@ function feast_validate_interval(A::AbstractMatrix{Complex{T}}, interval::Tuple{
 
     return (min_est, max_est)
 end
+
+"""
+    feast_validate_interval(A, B, interval)
+
+Check `interval` against the spectrum of the pencil `(A, B)`, with `B`
+Hermitian positive definite. Every eigenvalue of `A x = λ B x` is a quotient
+`(x'Ax) / (x'Bx)`, so Gershgorin bounds `[a₋, a₊]` for `A` and `[b₋, b₊]`
+for `B` bound the spectrum whenever `b₋ > 0`. Bounding `A` alone, as the
+standard-problem check does, says nothing about the pencil: `A = B = 2I` has
+every eigenvalue at 1.
+
+Warns when the interval misses the bound. Returns the bound, or
+`(-Inf, Inf)` when Gershgorin cannot certify `B` positive definite, in which
+case no warning is issued.
+"""
+function feast_validate_interval(A::AbstractMatrix, B::AbstractMatrix,
+                                 interval::Tuple{Real,Real})
+    Emin, Emax = interval
+    if Emin >= Emax
+        throw(ArgumentError("Invalid interval: Emin must be less than Emax"))
+    end
+
+    a_lo, a_hi = _gershgorin_bounds(A)
+    b_lo, b_hi = _gershgorin_bounds(B)
+    R = float(promote_type(typeof(a_lo), typeof(b_lo)))
+    b_lo > zero(b_lo) || return (typemin(R), typemax(R))
+
+    # λ = a / b with a in [a_lo, a_hi] and b in [b_lo, b_hi], b > 0.
+    min_est = R(a_lo < 0 ? a_lo / b_lo : a_lo / b_hi)
+    max_est = R(a_hi < 0 ? a_hi / b_hi : a_hi / b_lo)
+
+    if Emax < min_est || Emin > max_est
+        @warn "Search interval [$Emin, $Emax] may not contain eigenvalues. " *
+              "Estimated eigenvalue range: [$(min_est), $(max_est)]"
+    end
+
+    return (min_est, max_est)
+end

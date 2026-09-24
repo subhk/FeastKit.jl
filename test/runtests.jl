@@ -41,6 +41,7 @@ include("support/setup.jl")
         include("numerics/solver_failures.jl")
         include("numerics/projection_scaling.jl")
         include("numerics/projectors_and_scaling.jl")
+        include("numerics/robustness.jl")
     end
     @testset "Parallel backends" begin
         include("backends/threaded.jl")
@@ -50,5 +51,6 @@ include("support/setup.jl")
     end
     @testset "Documentation" begin
         include("docs/examples.jl")
+        include("docs/example_scripts.jl")
     end
 end

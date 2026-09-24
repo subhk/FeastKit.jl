@@ -39,9 +39,11 @@ using Test, FeastKit, LinearAlgebra, SparseArrays, Random
                 @test occursin("subspace_size", message)
                 @test occursin("feast(...)", message)
             end
-            # Both unchecked forms preserve the previous return types and partial values.
+            # Both unchecked forms preserve the previous return types and
+            # partial values, and warn that the values are unverified.
             for keywords in ((;), (; check=false))
-                partial = wrapper(args...; subspace_size=1, keywords...)
+                partial = @test_logs (:warn, r"did not converge \(info=2\)") wrapper(
+                    args...; subspace_size=1, keywords...)
                 @test partial isa (wrapper === eigvals_feast ? Vector : Eigen)
                 values = wrapper === eigvals_feast ? partial : partial.values
                 @test values ≈ [1.0] atol=1e-10

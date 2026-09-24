@@ -74,6 +74,16 @@ end
 LinearOperator(A_mul!::FA, size::Tuple{Int, Int}; kwargs...) where FA =
     LinearOperator{Float64}(A_mul!, size; kwargs...)
 
+"""
+    FeastLinearOperator
+
+Alias of FeastKit's [`LinearOperator`](@ref). LinearOperators.jl, commonly
+loaded alongside Krylov.jl, also exports a `LinearOperator`; with both packages
+loaded the unqualified name becomes ambiguous, and `FeastLinearOperator`
+(or `FeastKit.LinearOperator`) refers to FeastKit's type unambiguously.
+"""
+const FeastLinearOperator = LinearOperator
+
 # Interface functions
 Base.size(op::MatrixFreeOperator) = op.size
 Base.size(op::MatrixFreeOperator, dim::Int) = op.size[dim]

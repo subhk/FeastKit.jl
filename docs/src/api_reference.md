@@ -276,6 +276,8 @@ result.info, result.M
 
 ```@docs
 FeastKit.LinearOperator
+FeastKit.FeastLinearOperator
+FeastKit.feast_matvec
 FeastKit.MatrixVecFunction
 FeastKit.MatrixFreeOperator
 FeastKit.feast
@@ -538,9 +540,13 @@ end
 ```
 
 For linear eigenproblems, each residual is
-`norm(A*q - λ*B*q) / norm(B*q) / max(abs(λ), 1)`, with `B = I` for standard
-problems. Scaling both matrices by the same nonzero factor therefore preserves
-the convergence criterion. A zero `B*q` yields an infinite residual.
+`norm(A*q - λ*B*q) / norm(B*q) / max(abs(λ), σ)`, with `B = I` for standard
+problems. `σ` is the spectral scale of the pencil, `‖A R‖ / ‖B R‖` for a block
+of random probes `R`, measured once before the first contour sweep. Pairs with
+`|λ| ≥ σ` are thus judged relative to their eigenvalue and smaller ones by
+backward error. Scaling both matrices by a common factor, or `A` alone (a
+change of units), leaves every residual and convergence decision unchanged. A
+zero `B*q` yields an infinite residual.
 
 **Access patterns:**
 ```@example apiresult
@@ -604,7 +610,10 @@ silently restarting and returning `M = 0`.
 
 #### Jobs a caller must handle
 
-One refinement loop of `feast_srci!` / `feast_hrci!` issues:
+Once, right after initialization, the kernels issue `Feast_RCI_MULT_A` then
+`Feast_RCI_MULT_B` on `q[:, 1:mode[]]`, which then holds random probes; they
+measure the spectral scale that residuals are relative to. After that, one
+refinement loop of `feast_srci!` / `feast_hrci!` issues:
 
 1. `Feast_RCI_FACTORIZE` / `Feast_RCI_SOLVE`, once per contour point — factorize
    `Ze*B - A` and solve it against `B * work`.
@@ -622,7 +631,11 @@ which is wrong for any problem with `B ≠ I`. The kernel tracks which of the tw
 
 On exit, `info` is `Feast_SUCCESS` only when `epsout` met the tolerance and
 the subspace was not saturated (except a complete full-space solve);
-exhausting `fpm[4]` refinement loops reports `Feast_ERROR_NO_CONVERGENCE`.
+exhausting `fpm[4]` refinement loops reports `Feast_ERROR_NO_CONVERGENCE`. A
+region with no eigenvalues ends with `Feast_SUCCESS` and `mode[] == 0`. A loop
+can also end directly after a contour sweep, when the sweep shows that every
+unconverged Ritz pair is spurious; `Feast_RCI_DONE` then reports the converged
+pairs, and callers need no special handling.
 
 The `ifeast_srci!`, `ifeast_hrci!`, and `ifeast_grci!` entry points expose
 IFEAST-compatible RCI names. They are solver-neutral wrappers around the base
@@ -691,10 +704,15 @@ Validate search interval and estimate eigenvalue bounds.
 
 ```julia
 feast_validate_interval(A, interval)
+feast_validate_interval(A, B, interval)   # generalized problem A x = λ B x
 ```
 
 **Returns:**
 - `Tuple{Real,Real}`: Estimated eigenvalue bounds using Gershgorin circles
+
+```@docs
+FeastKit.feast_validate_interval(::AbstractMatrix, ::AbstractMatrix, ::Tuple{Real,Real})
+```
 
 ### feast_summary
 

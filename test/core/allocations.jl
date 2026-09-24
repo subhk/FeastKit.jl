@@ -198,15 +198,23 @@ end
         Bq = similar(res, size(A, 1))
         residual = similar(res, size(A, 1))
 
+        # Without a search region the floor is the largest |λ|, so the helper
+        # stays unit-free; solvers pass their spectral scale explicitly.
         expected = [
             norm(A * q[:, j] - lambda[j] * (B * q[:, j])) /
-            (max(abs(lambda[j]), 1.0) * norm(B * q[:, j]))
+            (max(abs(lambda[j]), maximum(abs, lambda)) * norm(B * q[:, j]))
             for j in 1:length(lambda)
         ]
 
         FeastKit.feast_residual!(A, B, lambda, q, res, length(lambda),
                                  Aq, Bq, residual)
         @test res ≈ expected
+        FeastKit.feast_residual!(A, B, lambda, q, res, length(lambda),
+                                 Aq, Bq, residual; scale=10.0)
+        @test res ≈ [norm(A * q[:, j] - lambda[j] * (B * q[:, j])) /
+                     (10.0 * norm(B * q[:, j])) for j in 1:length(lambda)]
+        FeastKit.feast_residual!(A, B, lambda, q, res, length(lambda),
+                                 Aq, Bq, residual)
 
         _repeat_feast_residual_scratch!(A, B, lambda, q, res, Aq, Bq,
                                         residual, 1)
@@ -253,6 +261,18 @@ end
         FeastKit._feast_poly_grci!(ijob, dmax, N, Ze, work, workc, Aq, Bq,
                                    fpm, epsout, loop, Emid, r, M0, lambda, q,
                                    mode, res, info, Zne, Wne; state=state)
+        # The kernel first measures the coefficient sizes: answer its MULT_A
+        # probe requests (here for P = I) until it asks for a factorization.
+        probe_requests = 0
+        while ijob[] == Int(FeastKit.Feast_RCI_MULT_A)
+            probe_requests += 1
+            workc[:, 1:mode[]] .= q[:, 1:mode[]]
+            FeastKit._feast_poly_grci!(ijob, dmax, N, Ze, work, workc, Aq, Bq,
+                                       fpm, epsout, loop, Emid, r, M0, lambda, q,
+                                       mode, res, info, Zne, Wne; state=state)
+        end
+        @test probe_requests == 2   # d + 1 = 3 evaluation points, M0 = 2 per request
+        @test state.coeff_norms ≈ [1.0, 0.0, 0.0] atol=1e-12
         @test ijob[] == Int(FeastKit.Feast_RCI_FACTORIZE)
 
         _repeat_feast_poly_solve_step!(ijob, dmax, N, Ze, work, workc, Aq, Bq,

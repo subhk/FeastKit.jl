@@ -814,31 +814,270 @@ function feast_sort_general!(lambda::Vector{Complex{T}}, q::Matrix{Complex{T}},
     return nothing
 end
 
-# Normalize by B*q so a common rescaling of A and B cannot change convergence.
-# The unit floor applies to the eigenvalue, not the matrix scale; this also
-# handles zero eigenvalues without dividing by norm(A*q). A common null vector
-# of A and B cannot certify a finite eigenvalue, so a zero B*q is rejected.
-@inline function _feast_scaled_residual(residual, Bq, lambda)
-    bnorm = norm(Bq)
-    return bnorm > zero(bnorm) ?
-        (norm(residual) / bnorm) / max(abs(lambda), one(bnorm)) : oftype(bnorm, Inf)
+# Residuals are measured as ||A x - λ B x|| / (||B x|| max(|λ|, σ)), where σ is
+# the spectral scale of the pencil. An eigenpair with |λ| >= σ is judged
+# relative to its eigenvalue; one with |λ| < σ by backward error, which is what
+# floating point -- and an inexact inner solver -- can actually deliver. Because
+# σ scales with the pencil, rescaling A (a change of units) leaves every
+# residual, and so every convergence decision, unchanged. The previous floor
+# was a fixed 1, which made the test absolute for small-magnitude problems:
+# any vector passed at scale 1e-8, and near-zero eigenvalues of large matrices
+# could never converge.
+
+# σ estimated from a probe block R as ||A R||_F / ||B R||_F: the root-mean-square
+# eigenvalue magnitude for a normal pencil. Returns zero when the probes give
+# no usable scale (for example A = 0), so the caller can fall back.
+function _feast_spectral_scale(AR::AbstractMatrix, BR::AbstractMatrix)
+    na = norm(AR)
+    nb = norm(BR)
+    σ = nb > zero(nb) ? na / nb : zero(na)
+    return isfinite(σ) ? σ : zero(σ)
 end
 
-# Compute residual norms
+# Driver-side estimate for solver loops that hold A and B themselves.
+_feast_spectral_scale(A, B, R::AbstractMatrix) =
+    _feast_spectral_scale(A * R, B === nothing ? R : B * R)
+
+# The same estimate for storage that is only reachable through mat-vecs, such
+# as LAPACK band storage: `applyA!(y, x)` and `applyB!(y, x)` write A*x and B*x.
+function _feast_banded_spectral_scale(R::AbstractMatrix, applyA!, applyB!)
+    AR = similar(R)
+    BR = similar(R)
+    for j in axes(R, 2)
+        applyA!(view(AR, :, j), view(R, :, j))
+        applyB!(view(BR, :, j), view(R, :, j))
+    end
+    return _feast_spectral_scale(AR, BR)
+end
+
+"""
+    _feast_polynomial_balance(norms) -> (γ, δ)
+
+Balance a polynomial eigenproblem `Σ λ^i A_i` before linearizing it, from the
+coefficient sizes `norms[i+1] = ‖A_i‖`: solve for `μ = λ/γ` with coefficients
+`δ γ^i A_i`, where `γ = (‖A_0‖/‖A_d‖)^(1/d)` balances the extreme coefficients and
+`δ` makes the largest scaled coefficient 1 (the parameter scaling of Fan, Lin
+and Van Dooren, generalized by Betcke). Rescaling every coefficient, or
+measuring `λ` in other units, yields the same balanced problem, so the
+companion solve and its convergence test do not depend on either.
+"""
+function _feast_polynomial_balance(norms::AbstractVector{T}) where T<:Real
+    d = length(norms) - 1
+    γ = d >= 1 && norms[1] > zero(T) && norms[end] > zero(T) ?
+        (norms[1] / norms[end])^(one(T) / d) : one(T)
+    (isfinite(γ) && γ > zero(T)) || (γ = one(T))
+    largest = zero(T)
+    p = one(T)
+    for c in norms
+        largest = max(largest, p * c)
+        p *= γ
+    end
+    δ = largest > zero(T) && isfinite(largest) ? inv(largest) : one(T)
+    return γ, δ
+end
+
+# Run `f(fpm_inner)` on a copy of `fpm` whose registered custom contour, if any,
+# is rescaled for the balanced variable μ = λ/γ; `f` sees the scaled region.
+# The caller's registration is left untouched.
+function _feast_with_scaled_contour(f, fpm::Vector{Int}, ::Type{T}, γ::T) where T<:Real
+    inner = copy(fpm)
+    contour = feast_get_custom_contour(T, fpm)
+    contour === nothing && return f(inner)
+    inner[29] = 0   # a fresh registration must not replace the caller's
+    scaled = FeastContour{T}(contour.Zne ./ γ, contour.Wne ./ γ,
+                             contour.vertices === nothing ? nothing : contour.vertices ./ γ)
+    feast_set_custom_contour!(inner, scaled)
+    try
+        return f(inner)
+    finally
+        feast_clear_custom_contour!(inner)
+    end
+end
+
+# Magnitude of the search region: the fallback floor when no spectral scale is
+# available (FEAST's own convention, α = max(|Emin|, |Emax|)). A closed contour
+# uses its farthest node, which also covers user-registered contours that
+# (Emid, r) do not describe.
+_feast_residual_scale(Emin::Real, Emax::Real) = max(abs(Emin), abs(Emax))
+_feast_residual_scale(Zne::AbstractVector{<:Complex}) =
+    isempty(Zne) ? zero(real(eltype(Zne))) : maximum(abs, Zne)
+
+# The residual floor: the measured spectral scale, or the region magnitude.
+_feast_residual_floor(spectral::Real, region::Real) =
+    spectral > zero(spectral) ? oftype(float(region), spectral) : float(region)
+
+# Normalize by B*q so a common rescaling of A and B cannot change convergence,
+# and by max(|λ|, scale) so that rescaling A alone cannot either (see above).
+# The floor also handles zero eigenvalues without dividing by norm(A*q). A
+# common null vector of A and B cannot certify a finite eigenvalue, so a zero
+# B*q is rejected.
+@inline function _feast_scaled_residual(residual, Bq, lambda, scale)
+    bnorm = norm(Bq)
+    denom = max(abs(lambda), abs(scale))
+    return bnorm > zero(bnorm) && denom > zero(denom) ?
+        (norm(residual) / bnorm) / denom : oftype(bnorm, Inf)
+end
+
+# A contour filter maps eigenvalues inside the region to |ρ(λ)| of roughly 1
+# (about 1/2 on the boundary) and damps everything outside. A Ritz vector whose
+# filtered image has shrunk below this fraction of its own norm is dominated by
+# out-of-region eigenvectors, even when its Rayleigh quotient happens to land
+# inside the region.
+const _FEAST_SPURIOUS_RESPONSE = 0.25
+
+# Refinement loops that must have completed before a Ritz pair may be declared
+# spurious. By then every in-region eigendirection has been amplified relative
+# to the out-of-region ones at least twice, so a genuine pair that is still
+# converging has a filter response near |ρ(λ)| >= 1/2.
+const _FEAST_SPURIOUS_MIN_LOOPS = 2
+
+"""
+    _feast_filter_rank(Y, X)
+
+Number of eigendirections in `span(X)` that the contour filter keeps: the
+eigenvalues `μ` of the filter restricted to that subspace, `G = X⁺ Y` with
+`Y = ρ(B⁻¹A) X`, that reach `_FEAST_SPURIOUS_RESPONSE` in magnitude. Once the
+subspace holds the region's eigenvectors, `G` approximates the restriction of
+the spectral projector, whose eigenvalues are 1 on in-region directions and 0
+elsewhere — independently of how the Rayleigh-Ritz basis mixes them.
+
+`G` comes from the normal equations `(XᴴX) G = XᴴY`, which touch `X` and `Y`
+only through two small products. When `XᴴX` is too ill-conditioned for that,
+a pivoted QR of `X` drops its dependent columns instead.
+"""
+function _feast_filter_rank(Y::AbstractMatrix, X::AbstractMatrix)
+    m = size(X, 2)
+    m == 0 && return 0
+    RT = real(eltype(X))
+    G = nothing
+    gram = X' * X
+    chol = cholesky!(Hermitian(gram); check=false)
+    if issuccess(chol)
+        dU = abs.(diag(chol.U))
+        # The Gram matrix squares the conditioning of X; accept it only while
+        # X itself stays well inside sqrt(eps)-conditioning.
+        if minimum(dU) > eps(RT)^(1 // 4) * maximum(dU)
+            G = chol \ (X' * Y)
+        end
+    end
+    if G === nothing
+        F = qr(X, ColumnNorm())
+        d = abs.(diag(F.R))
+        (isempty(d) || !(d[1] > zero(RT))) && return 0
+        r = count(>(sqrt(eps(RT)) * d[1]), d)
+        p = F.p[1:r]
+        # X[:, p] = Q R, so X_r⁺ = R_r⁻¹ Q_rᴴ for the leading r pivoted columns.
+        QtY = (F.Q' * Y[:, p])[1:r, :]
+        G = UpperTriangular(F.R[1:r, 1:r]) \ QtY
+    end
+    μ = try
+        eigvals(G)
+    catch err
+        @debug "Restricted filter eigenvalues failed; skipping the rank check" exception=err
+        return m
+    end
+    all(isfinite, μ) || return m
+    return count(v -> abs(v) >= _FEAST_SPURIOUS_RESPONSE, μ)
+end
+
+"""
+    _feast_screen_spurious!(keep, Y, X, res, M, tol; filter_rank=false)
+
+Classify the previous loop's in-region Ritz pairs using the contour sweep that
+has just filtered their vectors: column `j` of `Y` is `ρ(B⁻¹A) * X[:, j]`.
+
+Converged pairs (`res[j] <= tol`) are kept. An unconverged pair whose filter
+response `‖Y[:, j]‖ / ‖X[:, j]‖` is below `_FEAST_SPURIOUS_RESPONSE` is spurious:
+its vector is made of out-of-region eigenvectors mixed so that its Rayleigh
+quotient falls inside the region. Nothing further filtering can do separates
+such a mixture when the out-of-region eigenvalues are damped equally, so left
+alone it blocks convergence until the loop budget runs out, and is reported as
+an eigenvalue.
+
+For a non-normal pencil the one-sided (oblique) Rayleigh-Ritz can also build a
+spurious vector that contains an in-region eigenvector already represented by a
+converged pair, so its own response stays high. `filter_rank=true` then counts
+the in-region directions of the whole subspace instead
+([`_feast_filter_rank`](@ref), over the columns of `X` and `Y`): when there are
+no more of them than converged pairs, every unconverged pair is spurious.
+
+Returns the number of genuine pairs when every unconverged pair is spurious,
+so that the caller can finish with the converged ones (`keep` marks them), and
+`nothing` while some genuine pair is still converging. Kernels that integrate
+over half the contour must pass the real part of their accumulator, which is
+the filtered vector.
+"""
+function _feast_screen_spurious!(keep::AbstractVector{Bool}, Y::AbstractMatrix,
+                                 X::AbstractMatrix, res::AbstractVector, M::Int,
+                                 tol::Real; filter_rank::Bool = false)
+    M > 0 || return nothing
+    nconverged = 0
+    all_weak = true
+    @inbounds for j in 1:M
+        if res[j] <= tol
+            keep[j] = true
+            nconverged += 1
+            continue
+        end
+        keep[j] = false
+        xnorm = norm(view(X, :, j))
+        ynorm = norm(view(Y, :, j))
+        (xnorm > zero(xnorm) && ynorm < _FEAST_SPURIOUS_RESPONSE * xnorm) || (all_weak = false)
+    end
+    nconverged == M && return nothing
+    all_weak && return nconverged
+    # A pair with a strong response is either still converging or, for a
+    # non-normal pencil, an oblique mixture that reuses a converged direction.
+    # With nothing converged there is nothing to reuse, and a subspace with any
+    # in-region direction could not pass the count, so skip it.
+    nconverged > 0 && filter_rank && _feast_filter_rank(Y, X) <= nconverged &&
+        return nconverged
+    return nothing
+end
+
+# Move the pairs marked in `keep[1:M]` to the front of `lambda`, the columns of
+# `vectors`, and `res`, preserving their order. Returns how many were kept.
+function _feast_compact_pairs!(lambda::AbstractVector, vectors::AbstractMatrix,
+                               res::AbstractVector, keep::AbstractVector{Bool}, M::Int)
+    kept = 0
+    @inbounds for j in 1:M
+        keep[j] || continue
+        kept += 1
+        if kept != j
+            lambda[kept] = lambda[j]
+            res[kept] = res[j]
+            copyto!(view(vectors, :, kept), view(vectors, :, j))
+        end
+    end
+    return kept
+end
+
+# Without a search region to measure against, fall back to the largest Ritz
+# value so that the residual stays unit-free.
+function _feast_default_residual_scale(lambda::AbstractVector, M::Int)
+    T = real(eltype(lambda))
+    M > 0 || return one(T)
+    scale = maximum(abs, view(lambda, 1:M))
+    return scale > zero(scale) ? T(scale) : one(T)
+end
+
+# Compute residual norms. `scale` is the residual floor σ (see
+# `_feast_scaled_residual`); solvers pass their spectral scale, and without it
+# the largest |λ| among the pairs is used so the result stays unit-free.
 function feast_residual!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
-                        lambda::Vector{T}, q::Matrix{T}, res::Vector{T}, 
-                        M::Int) where T<:Real
+                        lambda::Vector{T}, q::Matrix{T}, res::Vector{T},
+                        M::Int; scale = nothing) where T<:Real
     N = size(A, 1)
     Aq = Vector{T}(undef, N)
     Bq = Vector{T}(undef, N)
     residual = Vector{T}(undef, N)
-    return feast_residual!(A, B, lambda, q, res, M, Aq, Bq, residual)
+    return feast_residual!(A, B, lambda, q, res, M, Aq, Bq, residual; scale=scale)
 end
 
 function feast_residual!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                         lambda::Vector{T}, q::Matrix{T}, res::Vector{T},
                         M::Int, Aq::AbstractVector{T}, Bq::AbstractVector{T},
-                        residual::AbstractVector{T}) where T<:Real
+                        residual::AbstractVector{T}; scale = nothing) where T<:Real
     N = size(A, 1)
     @boundscheck begin
         size(A, 2) == N || throw(DimensionMismatch("A must be square"))
@@ -851,6 +1090,7 @@ function feast_residual!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         length(residual) >= N || throw(BoundsError(residual, N))
     end
 
+    α = scale === nothing ? _feast_default_residual_scale(lambda, M) : scale
     for j in 1:M
         # Relative residual, independent of the scaling of the pencil and q.
         qj = view(q, :, j)
@@ -860,7 +1100,7 @@ function feast_residual!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         @inbounds @simd for i in 1:N
             residual[i] = Aq[i] - λ * Bq[i]
         end
-        res[j] = _feast_scaled_residual(residual, Bq, λ)
+        res[j] = _feast_scaled_residual(residual, Bq, λ, α)
     end
 
     return nothing

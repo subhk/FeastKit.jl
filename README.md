@@ -106,8 +106,10 @@ result = feast(A_sparse, (0.5, 1.5); subspace_size=30)
 ### Complex Eigenvalue Problems
 
 ```julia
+using Random
+
 # For general complex matrices, use circular search region
-A_complex = randn(ComplexF64, 50, 50)
+A_complex = randn(MersenneTwister(1), ComplexF64, 50, 50)
 B_complex = Matrix{ComplexF64}(I, 50, 50)
 
 # Search in circle centered at origin with radius 2
@@ -131,20 +133,21 @@ feast_set_defaults!(fpm.fpm,
                    tolerance_exp=14,       # Higher precision
                    max_refinement=30)      # More refinement loops
 
-# Use custom parameters
-result = feast(A, (0.5, 1.5), M0=10, fpm=fpm.fpm)
+# Use custom parameters. The interval holds 19 eigenvalues, so leave room.
+result = feast(A, (0.5, 1.5); subspace_size=30, fpm=fpm.fpm)
+@assert result.converged result.message
 ```
 
 ### Banded Matrices
 
 ```julia
-# For banded matrices stored in LAPACK format
+# For banded matrices stored in LAPACK upper-band format
 n = 100
-k = 2  # Number of super-diagonals
-A_banded = zeros(k+1, n)
-# ... fill A_banded with appropriate values ...
+k = 1  # Number of super-diagonals
+A_banded = full_to_banded(A, k)  # (k+1) x n band storage of the tridiagonal A
 
-result = feast_banded(A_banded, k, (0.5, 1.5), M0=10)
+result = feast_banded(A_banded, k, (0.5, 1.5); subspace_size=30)
+@assert result.converged result.message
 ```
 
 ### FEAST-Compatible Routine Names
@@ -210,7 +213,10 @@ function B_mul!(y, x)
 end
 
 # Use matrix-free interface
-result = feast_matvec(A_mul!, B_mul!, n, (0.5, 1.5), M0=10)
+# Matrix-free solves default to GMRES, which needs Krylov.jl loaded.
+using Krylov
+result = feast_matvec(A_mul!, B_mul!, n, (0.5, 1.5); M0=30)
+@assert result.converged result.message
 ```
 
 ## Parallel Computing
@@ -236,10 +242,10 @@ acceptable.
 ```julia
 # Prefer the explicit backend keyword for new code.
 # Threaded backend supports dense and sparse real symmetric problems.
-result = feast(A_sparse, (0.5, 1.5), M0=10, backend=:threads)
+result = feast(A_sparse, (0.5, 1.5), subspace_size=30, backend=:threads)
 
 # Let FeastKit choose a backend and fall back if needed.
-result = feast(A_sparse, (0.5, 1.5), M0=10, backend=:auto)
+result = feast(A_sparse, (0.5, 1.5), subspace_size=30, backend=:auto)
 ```
 
 The older `parallel=:threads` keyword remains supported as an alias. Both dense
@@ -255,7 +261,7 @@ using Distributed
 addprocs(4)
 
 # Use distributed computing for contour integration
-result = feast(A_sparse, (0.5, 1.5), M0=10, backend=:distributed)
+result = feast(A_sparse, (0.5, 1.5), subspace_size=30, backend=:distributed)
 ```
 
 ### MPI Support for HPC Clusters
@@ -271,13 +277,13 @@ MPI.Init()
 
 # Basic MPI FeastKit
 comm = MPI.COMM_WORLD
-result = feast(A, B, (0.5, 1.5), M0=10, backend=:mpi, comm=comm)
+result = feast(A, B, (0.5, 1.5), subspace_size=30, backend=:mpi, comm=comm)
 
 # Explicit MPI interface with communicator
-result = mpi_feast(A, B, (0.5, 1.5), M0=10, comm=comm)
+result = mpi_feast(A, B, (0.5, 1.5), M0=30, comm=comm)
 
 # Hybrid MPI + threading (best for modern HPC)
-result = feast_hybrid(A, B, (0.5, 1.5), M0=10, 
+result = feast_hybrid(A, B, (0.5, 1.5), M0=30,
                      comm=comm, use_threads_per_rank=true)
 ```
 
@@ -315,13 +321,14 @@ if rank == 0
     println("Running FeastKit on $size MPI processes with $(Threads.nthreads()) threads each")
 end
 
-# Large eigenvalue problem
+# Large eigenvalue problem. FEAST targets a slice of the spectrum: (1.0, 1.01)
+# holds 19 of the 10,000 eigenvalues. Keep M0 about 1.5x that count.
 n = 10000
 A = spdiagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))
-B = sparse(I, n, n)
+B = sparse(1.0I, n, n)
 
 # Hybrid MPI + threading execution
-result = feast_hybrid(A, B, (0.5, 1.5), M0=20, 
+result = feast_hybrid(A, B, (1.0, 1.01), M0=30,
                      comm=comm, use_threads_per_rank=true)
 
 if rank == 0
@@ -334,54 +341,56 @@ MPI.Finalize()
 
 ### Parallel RCI Interface
 
-For advanced users, a parallel RCI interface is available:
+For advanced users, a parallel RCI interface is available. The kernel asks
+for contour solves (`PARALLEL_SOLVE`) and for products with `A` and `B`:
 
 ```julia
-using FeastKit
+using FeastKit, LinearAlgebra
 
-# Create parallel state
-state = ParallelFeastState{Float64}(ne=8, M0=10, use_parallel=true, use_threads=true)
+n = 100
+A = diagm(-1 => -ones(n-1), 0 => 2*ones(n), 1 => -ones(n-1))
+B = Matrix{Float64}(I, n, n)
+Emin, Emax, M0 = 0.5, 1.5, 30
+fpm = feastinit().fpm
 
-# Initialize workspace
-N = size(A, 1)
-work = randn(N, M0)
-workc = zeros(ComplexF64, N, M0)
-Aq = zeros(M0, M0)
-Sq = zeros(M0, M0)
-lambda = zeros(M0)
-q = zeros(N, M0)
-res = zeros(M0)
+# Arguments: contour points, subspace size, use_parallel, use_threads
+state = ParallelFeastState{Float64}(fpm[2], M0, true, true)
 
-# RCI loop
+work = randn(n, M0)                 # initial trial subspace
+workc = zeros(ComplexF64, n, M0)
+Aq, Sq = zeros(M0, M0), zeros(M0, M0)
+lambda, q, res = zeros(M0), zeros(n, M0), zeros(M0)
+
 while true
-    pfeast_srci!(state, N, work, workc, Aq, Sq, fpm, 
-                Emin, Emax, M0, lambda, q, res)
-    
-    if state.ijob == Feast_RCI_PARALLEL_SOLVE.value
+    pfeast_srci!(state, n, work, workc, Aq, Sq, fpm,
+                 Emin, Emax, M0, lambda, q, res)
+
+    if state.ijob == Int(FeastKit.Feast_RCI_PARALLEL_SOLVE)
         # Solve all contour points in parallel
         pfeast_compute_all_contour_points!(state, A, B, work, M0)
-        
-    elseif state.ijob == Feast_RCI_MULT_A.value
-        # Compute A*q for residual calculation
-        M = state.mode
-        work[:, 1:M] .= A * q[:, 1:M]
-        
-    elseif state.ijob == Feast_RCI_DONE.value
+    elseif state.ijob == Int(Feast_RCI_MULT_A)
+        work[:, 1:state.mode] .= A * q[:, 1:state.mode]
+    elseif state.ijob == Int(Feast_RCI_MULT_B)
+        work[:, 1:state.mode] .= B * q[:, 1:state.mode]
+    elseif state.ijob == Int(Feast_RCI_DONE)
         break
     end
 end
+
+@assert state.info == 0
+println("Found $(state.mode) eigenvalues: ", lambda[1:state.mode])
 ```
 
 ### Automatic Backend Selection
 
 ```julia
 # FeastKit automatically selects the best available backend and can fall back
-result = feast(A, B, (0.5, 1.5), M0=10, backend=:auto)
+result = feast(A, B, (0.5, 1.5), subspace_size=30, backend=:auto)
 
 # Manual backend selection fails if that backend cannot run the problem
-result = feast(A, B, (0.5, 1.5), M0=10, backend=:mpi, comm=comm)
-result = feast(A_sparse, B_sparse, (0.5, 1.5), M0=10, backend=:threads)
-result = feast(A, B, (0.5, 1.5), M0=10, backend=:serial)
+result = feast(A, B, (0.5, 1.5), subspace_size=30, backend=:mpi, comm=comm)
+result = feast(A_sparse, B_sparse, (0.5, 1.5), subspace_size=30, backend=:threads)
+result = feast(A, B, (0.5, 1.5), subspace_size=30, backend=:serial)
 ```
 
 ## Algorithm Overview
@@ -408,7 +417,9 @@ For the convenience wrappers, use
 `eigvals_feast(A, interval; check=true, ...)` or
 `eigen_feast(A, B, interval; check=true, ...)` to throw an error with recovery
 guidance for any nonzero FEAST status. Both default to `check=false` for
-compatibility. Use `feast` directly to inspect status and partial results.
+compatibility, and then log a warning when the solve did not converge. Use
+`feast` directly to inspect status and partial results. A search region that
+contains no eigenvalues is a complete answer: `info == 0` with `M == 0`.
 The original fields remain available:
 
 ```julia
@@ -416,16 +427,23 @@ struct FeastResult{T<:Real, VT}
     lambda::Vector{T}      # Computed eigenvalues
     q::Matrix{VT}          # Computed eigenvectors  
     M::Int                 # Number of eigenvalues found
-    res::Vector{T}         # Residual norms
+    res::Vector{T}         # Relative residuals (see below)
     info::Int              # Exit status (0 = success)
     epsout::T              # Final residual
     loop::Int              # Number of refinement loops
 end
 ```
 
+Residuals are `‖A x - λ B x‖ / (‖B x‖ max(|λ|, σ))`, where `σ` is the spectral
+scale of the pencil, measured on random probes before the first contour sweep.
+Pairs with `|λ| ≥ σ` are judged relative to their eigenvalue and smaller ones by
+backward error, and a change of units (rescaling `A`) leaves every residual and
+convergence decision unchanged. Eigenvectors are normalized to unit 2-norm; for
+generalized problems they are `B`-orthogonal but not `B`-normalized.
+
 ## Error Codes
 
-- `info = 0`: Successful convergence
+- `info = 0`: Successful convergence (including an empty search region, `M == 0`)
 - `info = 1`: Invalid matrix size N
 - `info = 2`: Invalid or saturated search subspace; increase `subspace_size` or narrow the region
 - `info = 3`: Invalid search interval (Emin >= Emax)
@@ -436,9 +454,29 @@ end
 - `info = 8`: LAPACK error
 - `info = 9`: Invalid FeastKit parameters
 
+### Porting from Fortran FEAST
+
+The precision-prefixed aliases (`dfeast_syev!` and friends) take FEAST's
+arguments, but results follow FeastKit's conventions. Check code that branches
+on status codes or relies on the eigenvector normalization:
+
+| Situation | Fortran FEAST `info` | FeastKit `info` |
+| --- | --- | --- |
+| Success | 0 | 0 |
+| No eigenvalue in the search region | 1 (warning) | 0, with `M == 0` |
+| No convergence within the loop budget | 2 | 5 |
+| Subspace `M0` too small | 3 | 2 |
+| Problem with `Emin`/`Emax` or `Emid`/`r` | 200 | 3 or 4 |
+| Problem with `M0` | 201 | 2 |
+| Problem with `N` | 202 | 1 |
+
+Fortran FEAST returns `B`-orthonormal eigenvectors (`XᴴBX = I`); FeastKit
+normalizes each eigenvector to unit 2-norm. To recover FEAST's scaling, divide
+column `j` by `sqrt(real(x_j' * B * x_j))`.
+
 ## Performance Tips
 
-1. **Choose appropriate M0**: Set M0 slightly larger than expected number of eigenvalues
+1. **Choose appropriate M0**: Use about 1.5x the number of eigenvalues in the region; `feast_estimate_count` estimates that number, and `subspace_size=:auto` sizes the subspace for you
 2. **Integration points**: More points (fpm[2]) improve accuracy but increase cost
 3. **Sparse matrices**: Use sparse format for large problems with few non-zeros
 4. **Initial guess**: Provide good initial guess when available (fpm[5] = 1)

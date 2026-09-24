@@ -4,7 +4,7 @@ A = Matrix(SymTridiagonal(fill(4.0, 5), fill(-1.0, 4)))
 result = feast(A, (2.0, 6.0); subspace_size=5)
 @assert result.converged result.message
 @assert result.values ≈ [4 - 2cos(k * π / 6) for k in 1:5]
-result</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">FeastResult(5 eigenvalues, converged, residual=8.713757161307462e-16, iterations=0)
+result</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">FeastResult(5 eigenvalues, converged, residual=1.095034857767578e-15, iterations=0)
 values: [2.26795, 3.0, 4.0, 5.0, 5.73205]</code></pre><p>Here the subspace spans the full five-dimensional problem. A smaller saturated subspace would return a nonzero status even if its computed residuals were small.</p><h3 id="Example-2:-Sparse-Matrix-Eigenvalues"><a class="docs-heading-anchor" href="#Example-2:-Sparse-Matrix-Eigenvalues">Example 2: Sparse Matrix Eigenvalues</a><a id="Example-2:-Sparse-Matrix-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Example-2:-Sparse-Matrix-Eigenvalues" title="Permalink"></a></h3><p>Find the ten smallest eigenvalues without converting the matrix to dense form:</p><pre><code class="language-julia hljs">using FeastKit, SparseArrays, LinearAlgebra
 n = 1000
 A = spdiagm(-1 =&gt; -ones(n-1), 0 =&gt; 2ones(n), 1 =&gt; -ones(n-1))
@@ -14,15 +14,15 @@ result = feast(A, (0.9expected[1], 1.1expected[end]); subspace_size=12, tol=1e-1
 @assert result.M == 10
 @assert isapprox(result.values, expected; atol=1e-10)
 result.values</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">10-element Vector{Float64}:
- 9.849886676638562e-6
- 3.9399449686285896e-5
- 8.86483979690957e-5
- 0.00015759624642850786
- 0.0002462423159360288
- 0.00035458573333791945
- 0.00048262543146379604
- 0.0006303601491371427
- 0.0007977884311877311
+ 9.849886676638482e-6
+ 3.9399449686285665e-5
+ 8.864839796909578e-5
+ 0.0001575962464285079
+ 0.00024624231593602884
+ 0.0003545857333379192
+ 0.00048262543146379653
+ 0.0006303601491371425
+ 0.000797788431187731
  0.0009849086284659568</code></pre><h3 id="Example-3:-Generalized-Eigenvalue-Problem"><a class="docs-heading-anchor" href="#Example-3:-Generalized-Eigenvalue-Problem">Example 3: Generalized Eigenvalue Problem</a><a id="Example-3:-Generalized-Eigenvalue-Problem-1"></a><a class="docs-heading-anchor-permalink" href="#Example-3:-Generalized-Eigenvalue-Problem" title="Permalink"></a></h3><p>For a symmetric definite pencil, eigenvectors have unit Euclidean norm. Their mass-weighted Gram matrix is diagonal for distinct eigenvalues, but need not be identity. Normalize explicitly when downstream work needs <code>Q&#39;BQ = I</code>.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
 n = 40
 A = Matrix(SymTridiagonal(fill(2.0, n), fill(-1.0, n-1)))
@@ -38,10 +38,10 @@ G = Q&#39; * B * Q
 Q_B = Q * Diagonal(inv.(sqrt.(diag(G))))
 @assert isapprox(Q_B&#39; * B * Q_B, I; atol=1e-8)
 result.values</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">6-element Vector{Float64}:
- 0.0038916520369339006
+ 0.0038916520369339422
  0.01572066040530791
- 0.03536687082470386
- 0.06270690513902884
+ 0.035366870824703876
+ 0.06270690513902885
  0.09757410983221594
  0.13975655257331918</code></pre><h2 id="Scientific-Computing-Applications"><a class="docs-heading-anchor" href="#Scientific-Computing-Applications">Scientific Computing Applications</a><a id="Scientific-Computing-Applications-1"></a><a class="docs-heading-anchor-permalink" href="#Scientific-Computing-Applications" title="Permalink"></a></h2><h3 id="Example-4:-1D-Wave-Equation-(Vibrating-String)"><a class="docs-heading-anchor" href="#Example-4:-1D-Wave-Equation-(Vibrating-String)">Example 4: 1D Wave Equation (Vibrating String)</a><a id="Example-4:-1D-Wave-Equation-(Vibrating-String)-1"></a><a class="docs-heading-anchor-permalink" href="#Example-4:-1D-Wave-Equation-(Vibrating-String)" title="Permalink"></a></h3><p>For fixed endpoints, <code>-T*u&#39;&#39; = ω²*ρ*u</code>. The stiffness stencil is positive on the diagonal and negative off the diagonal. <code>B</code> must be a matrix, rather than an unsized <code>UniformScaling</code> object such as <code>ρ*I</code>.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, SparseArrays
 L, tension, density = 1.0, 100.0, 2.0
@@ -56,11 +56,11 @@ expected = [(tension/density) * (2 - 2cos(k*π/(n+1))) / h^2 for k in 1:5]
 @assert isapprox(result.values, expected; rtol=1e-8)
 frequencies_hz = sqrt.(result.values) / (2π)
 frequencies_hz</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">5-element Vector{Float64}:
-  3.5353123082032916
-  7.069295130031171
- 10.600619479073622
- 14.127957368663557
- 17.649982311278247</code></pre><p>The continuum frequencies are <code>k*sqrt(tension/density)/(2L)</code>. The finite-difference values approach them as the grid is refined; they are not identical on a finite grid.</p><h3 id="Example-5:-Square-Membrane-Vibrations"><a class="docs-heading-anchor" href="#Example-5:-Square-Membrane-Vibrations">Example 5: Square Membrane Vibrations</a><a id="Example-5:-Square-Membrane-Vibrations-1"></a><a class="docs-heading-anchor-permalink" href="#Example-5:-Square-Membrane-Vibrations" title="Permalink"></a></h3><p>This models a <strong>square</strong> membrane with zero Dirichlet boundaries. Its discrete spectrum contains repeated modes; subspace capacity must include multiplicities.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, SparseArrays
+  3.535312308203307
+  7.0692951300311915
+ 10.600619479073618
+ 14.12795736866356
+ 17.649982311278254</code></pre><p>The continuum frequencies are <code>k*sqrt(tension/density)/(2L)</code>. The finite-difference values approach them as the grid is refined; they are not identical on a finite grid.</p><h3 id="Example-5:-Square-Membrane-Vibrations"><a class="docs-heading-anchor" href="#Example-5:-Square-Membrane-Vibrations">Example 5: Square Membrane Vibrations</a><a id="Example-5:-Square-Membrane-Vibrations-1"></a><a class="docs-heading-anchor-permalink" href="#Example-5:-Square-Membrane-Vibrations" title="Permalink"></a></h3><p>This models a <strong>square</strong> membrane with zero Dirichlet boundaries. Its discrete spectrum contains repeated modes; subspace capacity must include multiplicities.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, SparseArrays
 nside = 8
 h = 1 / (nside+1)
 D = sparse(SymTridiagonal(fill(2.0, nside), fill(-1.0, nside-1)))
@@ -74,10 +74,10 @@ expected = filter(x -&gt; interval[1] &lt;= x &lt;= interval[2], all_values)
 @assert result.converged result.message
 @assert isapprox(result.values, expected; atol=1e-8)
 result.values</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">4-element Vector{Float64}:
- 19.539590865365717
+ 19.539590865365685
  47.6705956474084
- 47.67059564740843
- 75.80160042945116</code></pre><h3 id="Example-6:-Quantum-Harmonic-Oscillator"><a class="docs-heading-anchor" href="#Example-6:-Quantum-Harmonic-Oscillator">Example 6: Quantum Harmonic Oscillator</a><a id="Example-6:-Quantum-Harmonic-Oscillator-1"></a><a class="docs-heading-anchor-permalink" href="#Example-6:-Quantum-Harmonic-Oscillator" title="Permalink"></a></h3><p>Discretize <code>H = -½*d²/dx² + ½*x²</code> at interior points, eliminating the fixed boundary values. This preserves symmetry. The kinetic diagonal is <code>1/h²</code>.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, SparseArrays
+ 47.670595647408405
+ 75.80160042945114</code></pre><h3 id="Example-6:-Quantum-Harmonic-Oscillator"><a class="docs-heading-anchor" href="#Example-6:-Quantum-Harmonic-Oscillator">Example 6: Quantum Harmonic Oscillator</a><a id="Example-6:-Quantum-Harmonic-Oscillator-1"></a><a class="docs-heading-anchor-permalink" href="#Example-6:-Quantum-Harmonic-Oscillator" title="Permalink"></a></h3><p>Discretize <code>H = -½*d²/dx² + ½*x²</code> at interior points, eliminating the fixed boundary values. This preserves symmetry. The kinetic diagonal is <code>1/h²</code>.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, SparseArrays
 L, n = 6.0, 160
 h = 2L / (n+1)
 x = [-L + i*h for i in 1:n]
@@ -89,10 +89,10 @@ result = feast(H, (0.4, 3.6); subspace_size=8, tol=1e-10)
 psi = result.vectors[:, 1] / sqrt(h)
 @assert sum(abs2, psi) * h ≈ 1
 result.values</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">4-element Vector{Float64}:
- 0.4998263352467247
- 1.4991314344961044
- 2.4977410277061356
- 3.495654386571362</code></pre><h2 id="Matrix-Free-Examples"><a class="docs-heading-anchor" href="#Matrix-Free-Examples">Matrix-Free Examples</a><a id="Matrix-Free-Examples-1"></a><a class="docs-heading-anchor-permalink" href="#Matrix-Free-Examples" title="Permalink"></a></h2><h3 id="Example-7:-A-Structured-Shifted-Solver"><a class="docs-heading-anchor" href="#Example-7:-A-Structured-Shifted-Solver">Example 7: A Structured Shifted Solver</a><a id="Example-7:-A-Structured-Shifted-Solver-1"></a><a class="docs-heading-anchor-permalink" href="#Example-7:-A-Structured-Shifted-Solver" title="Permalink"></a></h3><p>The callback below applies diagonal operators without constructing matrices and solves the supplied complex shifted systems exactly.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+ 0.4998263352467233
+ 1.4991314344961035
+ 2.497741027706138
+ 3.4956543865713607</code></pre><h2 id="Matrix-Free-Examples"><a class="docs-heading-anchor" href="#Matrix-Free-Examples">Matrix-Free Examples</a><a id="Matrix-Free-Examples-1"></a><a class="docs-heading-anchor-permalink" href="#Matrix-Free-Examples" title="Permalink"></a></h2><h3 id="Example-7:-A-Structured-Shifted-Solver"><a class="docs-heading-anchor" href="#Example-7:-A-Structured-Shifted-Solver">Example 7: A Structured Shifted Solver</a><a id="Example-7:-A-Structured-Shifted-Solver-1"></a><a class="docs-heading-anchor-permalink" href="#Example-7:-A-Structured-Shifted-Solver" title="Permalink"></a></h3><p>The callback below applies diagonal operators without constructing matrices and solves the supplied complex shifted systems exactly.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
 entries = collect(1.0:12.0)
 A_op = LinearOperator{Float64}((y, x) -&gt; (y .= entries .* x),
                               (12, 12); issymmetric=true)
@@ -101,8 +101,8 @@ result = feast(A_op, (0.5, 2.5); subspace_size=4, solver=shifted_solve!)
 @assert result.converged result.message
 @assert result.values ≈ [1.0, 2.0]
 result.values</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2-element Vector{Float64}:
- 1.0
- 2.0000000000000013</code></pre><p>See <a href="../matrix_free_interface/">Matrix-Free Interface</a> for generalized callbacks, payload storage, preconditioning, and workspace reuse.</p><h3 id="Example-8:-Iterative-Solver-Comparison"><a class="docs-heading-anchor" href="#Example-8:-Iterative-Solver-Comparison">Example 8: Iterative Solver Comparison</a><a id="Example-8:-Iterative-Solver-Comparison-1"></a><a class="docs-heading-anchor-permalink" href="#Example-8:-Iterative-Solver-Comparison" title="Permalink"></a></h3><p>Load Krylov to enable the built-in solvers. Compare both convergence and residuals when benchmarking; a faster unsuccessful solve is not a speedup.</p><pre><code class="language-julia hljs">using FeastKit, Krylov, LinearAlgebra
+ 0.9999999999999997
+ 2.0</code></pre><p>See <a href="../matrix_free_interface/">Matrix-Free Interface</a> for generalized callbacks, payload storage, preconditioning, and workspace reuse.</p><h3 id="Example-8:-Iterative-Solver-Comparison"><a class="docs-heading-anchor" href="#Example-8:-Iterative-Solver-Comparison">Example 8: Iterative Solver Comparison</a><a id="Example-8:-Iterative-Solver-Comparison-1"></a><a class="docs-heading-anchor-permalink" href="#Example-8:-Iterative-Solver-Comparison" title="Permalink"></a></h3><p>Load Krylov to enable the built-in solvers. Compare both convergence and residuals when benchmarking; a faster unsuccessful solve is not a speedup.</p><pre><code class="language-julia hljs">using FeastKit, Krylov, LinearAlgebra
 entries = collect(1.0:8.0)
 A_op = LinearOperator{Float64}((y, x) -&gt; (y .= entries .* x),
                               (8, 8); issymmetric=true)
@@ -113,7 +113,7 @@ results = map((:gmres, :bicgstab)) do solver
     @assert isapprox(result.values, [1.0, 2.0]; atol=1e-8)
     (solver=solver, residual=result.epsout)
 end
-results</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">((solver = :gmres, residual = 7.262276873766945e-13), (solver = :bicgstab, residual = 7.26674359117743e-13))</code></pre><h2 id="Advanced-Features"><a class="docs-heading-anchor" href="#Advanced-Features">Advanced Features</a><a id="Advanced-Features-1"></a><a class="docs-heading-anchor-permalink" href="#Advanced-Features" title="Permalink"></a></h2><h3 id="Example-9:-Contour-Integration-Rules"><a class="docs-heading-anchor" href="#Example-9:-Contour-Integration-Rules">Example 9: Contour Integration Rules</a><a id="Example-9:-Contour-Integration-Rules-1"></a><a class="docs-heading-anchor-permalink" href="#Example-9:-Contour-Integration-Rules" title="Permalink"></a></h3><p>Here all 21 eigenvalues in the tight cluster must fit in the trial subspace. The contour node count is independent of that eigenvalue count.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+results</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">((solver = :gmres, residual = 7.262276911483994e-13), (solver = :bicgstab, residual = 7.266738386961861e-13))</code></pre><h2 id="Advanced-Features"><a class="docs-heading-anchor" href="#Advanced-Features">Advanced Features</a><a id="Advanced-Features-1"></a><a class="docs-heading-anchor-permalink" href="#Advanced-Features" title="Permalink"></a></h2><h3 id="Example-9:-Contour-Integration-Rules"><a class="docs-heading-anchor" href="#Example-9:-Contour-Integration-Rules">Example 9: Contour Integration Rules</a><a id="Example-9:-Contour-Integration-Rules-1"></a><a class="docs-heading-anchor-permalink" href="#Example-9:-Contour-Integration-Rules" title="Permalink"></a></h3><p>Here all 21 eigenvalues in the tight cluster must fit in the trial subspace. The contour node count is independent of that eigenvalue count.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
 entries = vcat(collect(0.98:0.002:1.02), collect(2.0:0.1:5.0))
 A = Matrix(Diagonal(entries))
 results = map((0, 1, 2)) do rule
@@ -125,7 +125,7 @@ results = map((0, 1, 2)) do rule
     @assert isapprox(result.values, entries[1:21]; atol=1e-9)
     (rule=rule, count=result.M, residual=result.epsout)
 end
-results</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">((rule = 0, count = 21, residual = 4.525926291139015e-16), (rule = 1, count = 21, residual = 3.6433850926270707e-16), (rule = 2, count = 21, residual = 8.163774094790966e-12))</code></pre><h3 id="Example-10:-Complex-Eigenvalues-in-a-Rectangle"><a class="docs-heading-anchor" href="#Example-10:-Complex-Eigenvalues-in-a-Rectangle">Example 10: Complex Eigenvalues in a Rectangle</a><a id="Example-10:-Complex-Eigenvalues-in-a-Rectangle-1"></a><a class="docs-heading-anchor-permalink" href="#Example-10:-Complex-Eigenvalues-in-a-Rectangle" title="Permalink"></a></h3><p>A non-Hermitian matrix can be searched directly with a full contour:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+results</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">((rule = 0, count = 21, residual = 4.0134515379350586e-16), (rule = 1, count = 21, residual = 4.795699337761832e-16), (rule = 2, count = 21, residual = 8.163774093898215e-12))</code></pre><h3 id="Example-10:-Complex-Eigenvalues-in-a-Rectangle"><a class="docs-heading-anchor" href="#Example-10:-Complex-Eigenvalues-in-a-Rectangle">Example 10: Complex Eigenvalues in a Rectangle</a><a id="Example-10:-Complex-Eigenvalues-in-a-Rectangle-1"></a><a class="docs-heading-anchor-permalink" href="#Example-10:-Complex-Eigenvalues-in-a-Rectangle" title="Permalink"></a></h3><p>A non-Hermitian matrix can be searched directly with a full contour:</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
 A = Matrix(Diagonal(ComplexF64[0.5+0.1im, 1.0+0.2im, 3.0, -2.0]))
 A[1, 2] = 0.3
 A[2, 3] = 0.2im
@@ -134,8 +134,8 @@ result = feast(A, contour; subspace_size=3, tol=1e-10)
 @assert result.converged result.message
 @assert isapprox(sort(result.values; by=real), [0.5+0.1im, 1.0+0.2im]; atol=1e-9)
 result.values</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2-element Vector{ComplexF64}:
- 0.5000000000000323 + 0.09999999999971222im
-   1.00000000000022 + 0.19999999999969847im</code></pre><h3 id="Example-11:-Polynomial-Eigenvalues"><a class="docs-heading-anchor" href="#Example-11:-Polynomial-Eigenvalues">Example 11: Polynomial Eigenvalues</a><a id="Example-11:-Polynomial-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Example-11:-Polynomial-Eigenvalues" title="Permalink"></a></h3><p>For <code>P(λ) = λ²I - diag(1,4,9)</code>, select the positive roots 1 and 2. Validate against the original polynomial as well as checking the solver status.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+ 0.5000000000000323 + 0.09999999999971221im
+ 1.0000000000002198 + 0.1999999999996985im</code></pre><h3 id="Example-11:-Polynomial-Eigenvalues"><a class="docs-heading-anchor" href="#Example-11:-Polynomial-Eigenvalues">Example 11: Polynomial Eigenvalues</a><a id="Example-11:-Polynomial-Eigenvalues-1"></a><a class="docs-heading-anchor-permalink" href="#Example-11:-Polynomial-Eigenvalues" title="Permalink"></a></h3><p>For <code>P(λ) = λ²I - diag(1,4,9)</code>, select the positive roots 1 and 2. Validate against the original polynomial as well as checking the solver status.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
 K = -Matrix(Diagonal(ComplexF64[1, 4, 9]))
 C = zeros(ComplexF64, 3, 3)
 M = Matrix{ComplexF64}(I, 3, 3)
@@ -148,20 +148,20 @@ result = feast_polynomial([K, C, M], 1.5+0im, 0.75; M0=3, fpm=fpm)
 @assert all(j -&gt; norm((K + result.values[j]^2 * M) * result.vectors[:, j]) &lt; 1e-8,
             eachindex(result.values))
 result.values</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2-element Vector{ComplexF64}:
- 0.9999999999999998 + 6.09204547527094e-17im
-                2.0 + 4.679729262597464e-17im</code></pre><h2 id="Performance-Examples"><a class="docs-heading-anchor" href="#Performance-Examples">Performance Examples</a><a id="Performance-Examples-1"></a><a class="docs-heading-anchor-permalink" href="#Performance-Examples" title="Permalink"></a></h2><h3 id="Example-12:-Backend-Selection"><a class="docs-heading-anchor" href="#Example-12:-Backend-Selection">Example 12: Backend Selection</a><a id="Example-12:-Backend-Selection-1"></a><a class="docs-heading-anchor-permalink" href="#Example-12:-Backend-Selection" title="Permalink"></a></h3><p><code>backend=:auto</code> can use the available supported backend or fall back to serial. Use an explicit backend when execution on it is a requirement.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, SparseArrays
+ 1.0000000000000002 + 3.1556223299271266e-17im
+                2.0 - 2.2776439938121267e-17im</code></pre><h2 id="Performance-Examples"><a class="docs-heading-anchor" href="#Performance-Examples">Performance Examples</a><a id="Performance-Examples-1"></a><a class="docs-heading-anchor-permalink" href="#Performance-Examples" title="Permalink"></a></h2><h3 id="Example-12:-Backend-Selection"><a class="docs-heading-anchor" href="#Example-12:-Backend-Selection">Example 12: Backend Selection</a><a id="Example-12:-Backend-Selection-1"></a><a class="docs-heading-anchor-permalink" href="#Example-12:-Backend-Selection" title="Permalink"></a></h3><p><code>backend=:auto</code> can use the available supported backend or fall back to serial. Use an explicit backend when execution on it is a requirement.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra, SparseArrays
 A = spdiagm(0 =&gt; [1.0, 2.0, 3.0, 4.0])
 result = feast(A, (0.5, 2.5); subspace_size=3, backend=:auto)
 @assert result.converged result.message
 @assert result.values ≈ [1.0, 2.0]
 result.values</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2-element Vector{Float64}:
  1.0000000000000002
- 2.0</code></pre><p>Threaded and distributed backends support real symmetric problems. MPI also supports complex Hermitian and general problems. See <a href="../parallel_computing/">Parallel Computing</a> for worker setup and complete MPI scripts, and <a href="../performance/">Performance</a> for benchmarking and storage costs.</p><h2 id="Checked-Convenience-Wrappers"><a class="docs-heading-anchor" href="#Checked-Convenience-Wrappers">Checked Convenience Wrappers</a><a id="Checked-Convenience-Wrappers-1"></a><a class="docs-heading-anchor-permalink" href="#Checked-Convenience-Wrappers" title="Permalink"></a></h2><p>When you only need an eigenvalue vector or <code>LinearAlgebra.Eigen</code>, enable the optional status check. The default remains <code>check=false</code> for compatibility.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
+ 1.9999999999999991</code></pre><p>Threaded and distributed backends support real symmetric problems. MPI also supports complex Hermitian and general problems. See <a href="../parallel_computing/">Parallel Computing</a> for worker setup and complete MPI scripts, and <a href="../performance/">Performance</a> for benchmarking and storage costs.</p><h2 id="Checked-Convenience-Wrappers"><a class="docs-heading-anchor" href="#Checked-Convenience-Wrappers">Checked Convenience Wrappers</a><a id="Checked-Convenience-Wrappers-1"></a><a class="docs-heading-anchor-permalink" href="#Checked-Convenience-Wrappers" title="Permalink"></a></h2><p>When you only need an eigenvalue vector or <code>LinearAlgebra.Eigen</code>, enable the optional status check. The default remains <code>check=false</code> for compatibility.</p><pre><code class="language-julia hljs">using FeastKit, LinearAlgebra
 A = Matrix(Diagonal([1.0, 2.0, 3.0, 4.0]))
 values = eigvals_feast(A, (0.5, 2.5); subspace_size=3, check=true)
 decomposition = eigen_feast(A, (0.5, 2.5); subspace_size=3, check=true)
 @assert values ≈ [1.0, 2.0]
 @assert decomposition.values ≈ values
 values</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2-element Vector{Float64}:
- 0.9999999999999999
- 1.9999999999999996</code></pre><p><code>check=true</code> rejects every nonzero status, including subspace saturation. Use <code>feast</code> directly to inspect partial results and <code>result.message</code> on failure.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../getting_started/">« Getting Started</a><a class="docs-footer-nextpage" href="../matrix_free_interface/">Matrix-Free Interface »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Thursday 24 September 2026 19:00">Thursday 24 September 2026</span>. Using Julia version 1.13.0.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+ 1.0
+ 1.9999999999999996</code></pre><p><code>check=true</code> rejects every nonzero status, including subspace saturation. Use <code>feast</code> directly to inspect partial results and <code>result.message</code> on failure.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../getting_started/">« Getting Started</a><a class="docs-footer-nextpage" href="../matrix_free_interface/">Matrix-Free Interface »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Thursday 24 September 2026 20:07">Thursday 24 September 2026</span>. Using Julia version 1.13.0.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

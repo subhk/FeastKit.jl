@@ -50,6 +50,8 @@
 - Added `FeastLinearOperator`, an unambiguous alias for `LinearOperator` when
   LinearOperators.jl is also loaded.
 - `ParallelFeastState` accepts the unset contour count of `feastinit().fpm`.
+- `pfeast_rci_benchmark` reports the number of integration points its runs
+  use; it printed 0.
 - Fixed the README examples, which are now executed by the test suite together
   with the example scripts; documented the differences from Fortran FEAST.
 - Removed the unused SharedArrays dependency.

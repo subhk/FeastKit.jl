@@ -273,7 +273,10 @@ function pfeast_rci_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tu
     println("="^45)
     println("Matrix size: $(size(A, 1))")
     # The runs below use the default parameters, so report their contour size.
-    println("Integration points: $(feast_integration_points(feastinit().fpm))")
+    fpm = zeros(Int, 64)
+    feastinit!(fpm)
+    feastdefault!(fpm)
+    println("Integration points: $(feast_integration_points(fpm))")
     println("Threads available: $(Threads.nthreads())")
     println("Workers available: $(nworkers())")
     

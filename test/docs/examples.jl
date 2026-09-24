@@ -149,7 +149,15 @@ end
         code = documentation_block("parallel_computing.md", "### Benchmarking")
         detailed = match(r"(?m)^.*pfeast_rci_benchmark\(.*$",code)
         @test detailed !== nothing
-        Base.include_string(sandbox,detailed.match)
+        output = mktemp() do path, io
+            redirect_stdout(io) do
+                Base.include_string(sandbox,detailed.match)
+            end
+            close(io)
+            read(path, String)
+        end
+        # The benchmarked runs use the default 8-point contour.
+        @test occursin("Integration points: 8\n", output)
     end
     @testset "Contributor snippets and nested fences" begin
         for (file,heading) in (("contributing.md","### Docstrings"),

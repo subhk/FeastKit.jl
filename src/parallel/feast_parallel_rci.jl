@@ -28,6 +28,10 @@ mutable struct ParallelFeastState{T<:Real}
     contour_solutions::Vector{Matrix{Complex{T}}}
 
     function ParallelFeastState{T}(ne::Int, M0::Int, use_parallel::Bool=true, use_threads::Bool=true) where T<:Real
+        # These buffers are resized to the kernel's contour at initialization,
+        # so `ne` only preallocates. `feastinit().fpm[2]` is an unset sentinel
+        # until defaults are applied; accept it rather than fail to allocate.
+        ne = max(ne, 0)
         new(
             -1,                                    # ijob (initialize)
             zero(Complex{T}),                      # Ze
@@ -268,7 +272,8 @@ function pfeast_rci_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tu
     println("Parallel RCI Performance Comparison")
     println("="^45)
     println("Matrix size: $(size(A, 1))")
-    println("Integration points: $(feast_integration_points(zeros(Int, 64)))")
+    # The runs below use the default parameters, so report their contour size.
+    println("Integration points: $(feast_integration_points(feastinit().fpm))")
     println("Threads available: $(Threads.nthreads())")
     println("Workers available: $(nworkers())")
     

@@ -8,9 +8,21 @@ workers() = Distributed.workers()
 # nprocs distinguishes that case from one actual worker plus the main process.
 _distributed_backend_ready() = Distributed.nprocs() > 1
 
-# Check if MPI is available
+# MPI is picked automatically only on explicit opt-in (FEASTKIT_ENABLE_MPI=true),
+# once the FeastKitMPIExt extension is loaded and MPI has been initialized.
+# This is checked at call time: package extensions load after this module's
+# __init__, and MPI.Init() may run later still, so a flag computed at load time
+# could never become true. MPI_AVAILABLE[] remains as a manual override.
 function mpi_available()
-    return isdefined(FeastKit, :MPI_AVAILABLE) && FeastKit.MPI_AVAILABLE[]
+    MPI_AVAILABLE[] && return true
+    get(ENV, "FEASTKIT_ENABLE_MPI", "false") == "true" || return false
+    _mpi_extension_loaded() || return false
+    try
+        return _mpi_initialized()
+    catch err
+        @debug "MPI initialization check failed; MPI features disabled" exception=err
+        return false
+    end
 end
 
 # A caller-provided communicator is an explicit MPI opt-in, even if package

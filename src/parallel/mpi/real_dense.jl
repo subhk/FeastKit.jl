@@ -37,6 +37,7 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
     eps_tolerance = feast_tolerance(fpm, T)
     max_loops = fpm[4]
+    keep = Vector{Bool}(undef, M0)
 
     # Half-contour symmetry requires a real trial basis. Its full projector is
     # the real part of the doubled upper-half contribution.
@@ -52,6 +53,11 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     local_factors === nothing && return FeastResult{T,T}(T[],zeros(T,N,0),0,T[],
         Int(Feast_ERROR_LAPACK),T(Inf),0)
     B_is_identity = (B == I)   # standard problem: skip the per-loop identity matmuls
+    # Every rank measures on the same broadcast basis; root's value is used.
+    res_scale = _mpi_residual_floor(A, B_is_identity ? nothing : B, Q,
+                                    _feast_residual_scale(Emin, Emax), root, comm)
+    res_scale === nothing && return FeastResult{T,T}(T[],zeros(T,N,0),0,T[],
+        Int(Feast_ERROR_LAPACK),T(Inf),0)
 
     # Scratch reused across loops. The reduced Rayleigh-Ritz problem mirrors the
     # serial dense Hermitian path (complex QR rank-compression + Hermitian RR),
@@ -115,6 +121,22 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         MPI.Allreduce!(qpl, MPI.SUM, comm)
         @. qpl = real(qpl)
 
+        # qpl is the filtered image of the previous loop's Ritz vectors; the
+        # root classifies them by filter response and every rank follows.
+        if loop - 1 >= _FEAST_SPURIOUS_MIN_LOOPS
+            kept = rank == root ?
+                _feast_screen_spurious!(keep, qpl, view(Q, :, 1:active_dim), res,
+                                        M_found, eps_tolerance) : nothing
+            kept = MPI.bcast(kept, root, comm)
+            if kept !== nothing
+                MPI.Bcast!(keep, root, comm)
+                M_found = _feast_compact_pairs!(lambda, q, res, keep, M_found)
+                epsout = M_found > 0 ? maximum(view(res, 1:M_found)) : zero(T)
+                converged = true
+                break
+            end
+        end
+
         rank_r = 0
         M = 0
         success = _mpi_collective_try(comm) do
@@ -173,7 +195,7 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             end
 
             feast_residual!(A, B, lambda, q, res, M,
-                            residual_Aq, residual_Bq, residual)
+                            residual_Aq, residual_Bq, residual; scale=res_scale)
             epsout = maximum(view(res, 1:M))
         end
         if !success
@@ -184,8 +206,10 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         # Every rank uses the root's Ritz basis and termination decision.
         rank_r,M,epsout,converged = MPI.bcast((rank_r,M,epsout,epsout<=eps_tolerance),root,comm)
         if M == 0
-            info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+            # No Ritz value in the interval: it holds no eigenvalues.
             M_found = 0
+            epsout = zero(T)
+            converged = true
             break
         end
         MPI.Bcast!(lambda,root,comm)
@@ -268,7 +292,8 @@ end
 # Distributed residual computation
 function mpi_compute_residuals!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
                                lambda::Vector{T}, q::Matrix{T}, res::Vector{T},
-                               M::Int, comm::MPI.Comm) where T<:Real
+                               M::Int, comm::MPI.Comm;
+                               scale = _feast_default_residual_scale(lambda, M)) where T<:Real
 
     rank = MPI.Comm_rank(comm)
     nprocs = MPI.Comm_size(comm)
@@ -294,7 +319,7 @@ function mpi_compute_residuals!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         mul!(Aq_buf, A, qj)
         mul!(Bq_buf, B, qj)
         @. Aq_buf -= lambda[j] * Bq_buf
-        local_res[j] = _feast_scaled_residual(Aq_buf, Bq_buf, lambda[j])
+        local_res[j] = _feast_scaled_residual(Aq_buf, Bq_buf, lambda[j], scale)
     end
 
     # Reduce residuals across all ranks

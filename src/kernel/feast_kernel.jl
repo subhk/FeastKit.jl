@@ -84,6 +84,8 @@ end
         state.M = 0
         state.active = M0
         state.checked_subspace = fpm[5] != 1
+        state.res_scale = _feast_residual_scale(Emin, Emax)
+        state.keep = Vector{Bool}(undef, M0)
         state.initialized = true
 
         # Store state in fpm array
@@ -130,8 +132,12 @@ end
         state.lambda_tmp = Vector{T}(undef, M0)
         state.residual = Vector{T}(undef, N)
 
-        Ze[] = contour.Zne[1]
-        ijob[] = Int(Feast_RCI_FACTORIZE)
+        # Measure the spectral scale of the pencil before the first sweep:
+        # MULT_A then MULT_B on random probes in q.
+        _feast_seeded_subspace!(q)
+        state.phase = FEAST_PHASE_SCALE_A
+        mode[] = M0
+        ijob[] = Int(Feast_RCI_MULT_A)
         return
     end
 
@@ -201,6 +207,27 @@ end
             Q_proj_real[i, j] = real(Q_proj[i, j])
         end
 
+        # The sweep has just filtered the previous loop's Ritz vectors (the
+        # leading state.M columns of Q0 are its in-region pairs), so their
+        # filter response now separates genuine pairs from spurious ones.
+        if loop[] >= _FEAST_SPURIOUS_MIN_LOOPS
+            kept = _feast_screen_spurious!(state.keep, Q_proj_real, state.Q0, res,
+                                           state.M, feast_tolerance(fpm, T))
+            if kept !== nothing
+                # q, lambda and res still hold the previous loop's pairs.
+                M = _feast_compact_pairs!(lambda, q, res, state.keep, state.M)
+                feast_sort!(lambda, q, res, M)
+                epsout[] = M > 0 ? maximum(view(res, 1:M)) : zero(T)
+                fpm[52] = M
+                mode[] = M
+                info[] = M == 0 ? Int(Feast_SUCCESS) : _feast_exit_info(true, M, M0, N)
+                ijob[] = Int(Feast_RCI_DONE)
+                fpm[53] = 0
+                state.initialized = false
+                return
+            end
+        end
+
         # Rank-compress before Rayleigh-Ritz. Without this an M0 larger than the
         # number of eigenvalues in the interval yields a rank-deficient pencil
         # and spurious Ritz pairs.
@@ -225,6 +252,15 @@ end
 
     if ijob[] == Int(Feast_RCI_MULT_A)
         rank = state.rank
+
+        if state.phase == FEAST_PHASE_SCALE_A
+            # work holds A*R for the probes R in q; keep ||A R|| until B*R.
+            state.res_scale = norm(view(work, :, 1:M0))
+            state.phase = FEAST_PHASE_SCALE_B
+            mode[] = M0
+            ijob[] = Int(Feast_RCI_MULT_B)
+            return
+        end
 
         if state.phase == FEAST_PHASE_PROJECT_A
             # work holds A*Qb: form the reduced stiffness block Qb' A Qb.
@@ -255,6 +291,20 @@ end
     end
 
     if ijob[] == Int(Feast_RCI_MULT_B)
+        if state.phase == FEAST_PHASE_SCALE_B
+            # work holds B*R: the residual floor is ||A R|| / ||B R||, or the
+            # interval magnitude when the probes give no usable scale.
+            bnorm = norm(view(work, :, 1:M0))
+            σ = bnorm > zero(T) ? state.res_scale / bnorm : zero(T)
+            state.res_scale = _feast_residual_floor(isfinite(σ) ? σ : zero(T),
+                                                    _feast_residual_scale(Emin, Emax))
+            fill!(q, zero(T))
+            state.phase = FEAST_PHASE_IDLE
+            Ze[] = state.Zne[1]
+            ijob[] = Int(Feast_RCI_FACTORIZE)
+            return
+        end
+
         if state.phase == FEAST_PHASE_PROJECT_B
             rank = state.rank
             Aq_block = view(Aq, 1:rank, 1:rank)
@@ -313,9 +363,30 @@ end
             state.M = M
 
             if M == 0
-                info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                if !state.checked_subspace && loop[] < fpm[4]
+                    # A user seed can miss the region's eigenvectors entirely.
+                    # Probe once with independent vectors before concluding
+                    # that the region is empty.
+                    _feast_seeded_subspace!(state.Q0)
+                    state.active = M0
+                    state.checked_subspace = true
+                    loop[] += 1
+                    fill!(Aq, zero(T))
+                    fill!(Sq, zero(T))
+                    state.phase = FEAST_PHASE_IDLE
+                    state.e = 1
+                    fpm[50] = 1
+                    Ze[] = state.Zne[1]
+                    ijob[] = Int(Feast_RCI_FACTORIZE)
+                    return
+                end
+                # No Ritz value of the filtered subspace lies in the interval:
+                # the interval holds no eigenvalues, which is a complete answer.
+                epsout[] = zero(T)
+                info[] = Int(Feast_SUCCESS)
                 ijob[] = Int(Feast_RCI_DONE)
                 fpm[53] = 0
+                state.phase = FEAST_PHASE_IDLE
                 state.initialized = false
                 return
             end
@@ -336,7 +407,8 @@ end
                 @inbounds for i in 1:N
                     residual[i] = AQ[i, j] - lambda[j] * work[i, j]
                 end
-                res[j] = _feast_scaled_residual(residual, view(work, :, j), lambda[j])
+                res[j] = _feast_scaled_residual(residual, view(work, :, j), lambda[j],
+                                                state.res_scale)
             end
             epsout[] = maximum(res[1:M])
             state.phase = FEAST_PHASE_IDLE
@@ -555,6 +627,8 @@ end
         state.rank = 0
         state.active = M0
         state.phase = FEAST_PHASE_IDLE
+        state.res_scale = _feast_residual_scale(Emin, Emax)
+        state.keep = Vector{Bool}(undef, M0)
         state.initialized = true
 
         fpm[50] = 1
@@ -600,8 +674,12 @@ end
         state.lambda_tmp = Vector{T}(undef, M0)
         state.residual = Vector{Complex{T}}(undef, N)
 
-        Ze[] = state.Zne[1]
-        ijob[] = Int(Feast_RCI_FACTORIZE)
+        # Measure the spectral scale of the pencil before the first sweep:
+        # MULT_A then MULT_B on random probes in q.
+        _feast_seeded_subspace_complex!(q)
+        state.phase = FEAST_PHASE_SCALE_A
+        mode[] = M0
+        ijob[] = Int(Feast_RCI_MULT_A)
         return
     end
 
@@ -653,6 +731,25 @@ end
         fpm[50] = 1
         state.e = 1
 
+        # Both contour halves are explicit, so Q_proj is the filtered image of
+        # Q0 and its column norms give the previous pairs' filter response.
+        if loop[] >= _FEAST_SPURIOUS_MIN_LOOPS
+            kept = _feast_screen_spurious!(state.keep, Q_proj, state.Q0, res,
+                                           state.M, state.eps)
+            if kept !== nothing
+                M = _feast_compact_pairs!(lambda, q, res, state.keep, state.M)
+                feast_sort!(lambda, q, res, M)
+                epsout[] = M > 0 ? maximum(view(res, 1:M)) : zero(T)
+                fpm[52] = M
+                mode[] = M
+                info[] = M == 0 ? Int(Feast_SUCCESS) : _feast_exit_info(true, M, M0, N)
+                ijob[] = Int(Feast_RCI_DONE)
+                fpm[53] = 0
+                state.initialized = false
+                return
+            end
+        end
+
         # Hermitian eigenvectors are genuinely complex, so unlike the real
         # kernel the filtered subspace stays complex here.
         rank = _feast_qr_compress!(state.Qb, state.Q_proj, active;
@@ -675,6 +772,15 @@ end
 
     if ijob[] == Int(Feast_RCI_MULT_A)
         rank = state.rank
+
+        if state.phase == FEAST_PHASE_SCALE_A
+            # workc holds A*R for the probes R in q; keep ||A R|| until B*R.
+            state.res_scale = norm(view(workc, :, 1:M0))
+            state.phase = FEAST_PHASE_SCALE_B
+            mode[] = M0
+            ijob[] = Int(Feast_RCI_MULT_B)
+            return
+        end
 
         if state.phase == FEAST_PHASE_PROJECT_A
             zAq_block = view(zAq, 1:rank, 1:rank)
@@ -702,6 +808,18 @@ end
     end
 
     if ijob[] == Int(Feast_RCI_MULT_B)
+        if state.phase == FEAST_PHASE_SCALE_B
+            bnorm = norm(view(workc, :, 1:M0))
+            σ = bnorm > zero(T) ? state.res_scale / bnorm : zero(T)
+            state.res_scale = _feast_residual_floor(isfinite(σ) ? σ : zero(T),
+                                                    _feast_residual_scale(Emin, Emax))
+            fill!(q, zero(Complex{T}))
+            state.phase = FEAST_PHASE_IDLE
+            Ze[] = state.Zne[1]
+            ijob[] = Int(Feast_RCI_FACTORIZE)
+            return
+        end
+
         if state.phase == FEAST_PHASE_PROJECT_B
             rank = state.rank
             zAq_block = view(zAq, 1:rank, 1:rank)
@@ -756,9 +874,28 @@ end
             state.M = M
 
             if M == 0
-                info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                if !state.checked_subspace && loop[] < state.maxloop
+                    # Verify a user seed with independent probes before
+                    # concluding that the interval is empty.
+                    _feast_seeded_subspace_complex!(state.Q0)
+                    state.active = M0
+                    state.checked_subspace = true
+                    loop[] += 1
+                    fill!(zAq, zero(Complex{T}))
+                    fill!(zSq, zero(Complex{T}))
+                    state.phase = FEAST_PHASE_IDLE
+                    state.e = 1
+                    fpm[50] = 1
+                    Ze[] = state.Zne[1]
+                    ijob[] = Int(Feast_RCI_FACTORIZE)
+                    return
+                end
+                # No Ritz value in the interval: it holds no eigenvalues.
+                epsout[] = zero(T)
+                info[] = Int(Feast_SUCCESS)
                 ijob[] = Int(Feast_RCI_DONE)
                 fpm[53] = 0
+                state.phase = FEAST_PHASE_IDLE
                 state.initialized = false
                 return
             end
@@ -777,7 +914,8 @@ end
                 @inbounds for i in 1:N
                     residual[i] = AQ[i, j] - lambda[j] * workc[i, j]
                 end
-                res[j] = _feast_scaled_residual(residual, view(workc, :, j), lambda[j])
+                res[j] = _feast_scaled_residual(residual, view(workc, :, j), lambda[j],
+                                                state.res_scale)
             end
             epsout[] = maximum(res[1:M])
             state.phase = FEAST_PHASE_IDLE
@@ -932,10 +1070,16 @@ end
         state.active = M0
         state.residual = Vector{Complex{T}}(undef, N)
         state.phase = FEAST_PHASE_IDLE
+        state.res_scale = _feast_residual_scale(state.Zne)
+        state.keep = Vector{Bool}(undef, M0)
         state.initialized = true
 
-        Ze[] = contour.Zne[1]
-        ijob[] = Int(Feast_RCI_FACTORIZE)
+        # Measure the spectral scale of the pencil before the first sweep:
+        # MULT_A then MULT_B on random probes in q.
+        _feast_seeded_subspace_complex!(q)
+        state.phase = FEAST_PHASE_SCALE_A
+        mode[] = M0
+        ijob[] = Int(Feast_RCI_MULT_A)
         return
     end
 
@@ -990,6 +1134,28 @@ end
             # All integration points processed
             fpm[50] = 1  # Reset for next refinement loop
 
+            # q now holds the filtered image of Q0, whose leading fpm[52]
+            # columns are the previous loop's in-region Ritz vectors.
+            if loop[] >= _FEAST_SPURIOUS_MIN_LOOPS
+                Mprev = fpm[52]
+                kept = _feast_screen_spurious!(state.keep, q, state.Q0, res, Mprev,
+                                               feast_tolerance(fpm, T))
+                if kept !== nothing
+                    # q was the accumulator; the Ritz vectors live in Q0.
+                    copyto!(view(q, :, 1:Mprev), view(state.Q0, :, 1:Mprev))
+                    M = _feast_compact_pairs!(lambda, q, res, state.keep, Mprev)
+                    feast_sort_general!(lambda, q, res, M)
+                    epsout[] = M > 0 ? maximum(view(res, 1:M)) : zero(T)
+                    fpm[52] = M
+                    mode[] = M
+                    info[] = M == 0 ? Int(Feast_SUCCESS) : _feast_exit_info(true, M, M0, N)
+                    ijob[] = Int(Feast_RCI_DONE)
+                    fpm[53] = 0
+                    state.initialized = false
+                    return
+                end
+            end
+
             # Rank-compress the filtered subspace. Without this an M0 larger
             # than the number of eigenvalues inside the contour leaves the
             # reduced pencil rank deficient, which produces spurious Ritz pairs
@@ -1015,6 +1181,20 @@ end
         end
     end
 
+    if ijob[] == Int(Feast_RCI_MULT_B) && state.phase == FEAST_PHASE_SCALE_B
+        bnorm = norm(view(workc, :, 1:M0))
+        σ = bnorm > zero(T) ? state.res_scale / bnorm : zero(T)
+        state.res_scale = _feast_residual_floor(isfinite(σ) ? σ : zero(T),
+                                                _feast_residual_scale(state.Zne))
+        # q accumulates the next contour sweep, so it must start from zero.
+        fill!(q, zero(Complex{T}))
+        state.phase = FEAST_PHASE_IDLE
+        fpm[50] = 1
+        Ze[] = state.Zne[1]
+        ijob[] = Int(Feast_RCI_FACTORIZE)
+        return
+    end
+
     if ijob[] == Int(Feast_RCI_MULT_B) && state.phase == FEAST_PHASE_IDLE
         # User has computed workc = B*Q
         # Form zBq = Q^H * (B*Q) = Q^H * workc
@@ -1032,6 +1212,14 @@ end
     end
 
     if ijob[] == Int(Feast_RCI_MULT_A)
+        if state.phase == FEAST_PHASE_SCALE_A
+            # workc holds A*R for the probes R in q; keep ||A R|| until B*R.
+            state.res_scale = norm(view(workc, :, 1:M0))
+            state.phase = FEAST_PHASE_SCALE_B
+            mode[] = M0
+            ijob[] = Int(Feast_RCI_MULT_B)
+            return
+        end
         if state.phase == FEAST_PHASE_PROJECT_A
             # Computing zAq = Q^H * A * Q
             rank = state.rank
@@ -1065,9 +1253,30 @@ end
                 fpm[52] = M
 
                 if M == 0
-                    info[] = Int(Feast_ERROR_NO_CONVERGENCE)
+                    if !state.checked_subspace && loop[] < fpm[4]
+                        # Verify a user seed with independent probes before
+                        # concluding that the contour encloses nothing.
+                        _feast_seeded_subspace_complex!(state.Q0)
+                        state.active = M0
+                        state.checked_subspace = true
+                        loop[] += 1
+                        fill!(Aq, zero(Complex{T}))
+                        fill!(Sq, zero(Complex{T}))
+                        fill!(q, zero(Complex{T}))
+                        copyto!(view(workc, :, 1:M0), state.Q0)
+                        state.phase = FEAST_PHASE_IDLE
+                        fpm[50] = 1
+                        Ze[] = state.Zne[1]
+                        ijob[] = Int(Feast_RCI_FACTORIZE)
+                        return
+                    end
+                    # No Ritz value inside the contour: it encloses no
+                    # eigenvalues, which is a complete answer.
+                    epsout[] = zero(T)
+                    info[] = Int(Feast_SUCCESS)
                     ijob[] = Int(Feast_RCI_DONE)
                     fpm[53] = 0
+                    state.phase = FEAST_PHASE_IDLE
                     state.initialized = false
                     return
                 end
@@ -1143,7 +1352,8 @@ end
             @inbounds for i in 1:N
                 residual[i] = AQ[i, j] - lambda[j] * workc[i, j]
             end
-            res[j] = _feast_scaled_residual(residual, view(workc, :, j), lambda[j])
+            res[j] = _feast_scaled_residual(residual, view(workc, :, j), lambda[j],
+                                            state.res_scale)
         end
 
         max_res = zero(T)

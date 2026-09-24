@@ -34,7 +34,7 @@ Example 2: Elliptical Contours with Different Aspect Ratios
 Demonstrates control over ellipse shape using the ellipse_ratio parameter
 """
 function example_elliptical_contours()
-    println("\\n=== Example 2: Elliptical Contour Shapes ===")
+    println("\n=== Example 2: Elliptical Contour Shapes ===")
     
     Emin, Emax = -2.0, 2.0
     ne = 12
@@ -67,7 +67,7 @@ Example 3: Custom Contour with User-Defined Nodes and Weights
 Shows how to use completely custom integration points
 """
 function example_custom_contour()
-    println("\\n=== Example 3: Custom User-Defined Contour ===")
+    println("\n=== Example 3: Custom User-Defined Contour ===")
     
     # Define custom integration nodes (e.g., rectangular contour)
     Zne = [
@@ -95,7 +95,7 @@ Example 4: Rational Function Evaluation
 Demonstrates evaluation of the Feast rational function using custom contours
 """
 function example_rational_function()
-    println("\\n=== Example 4: Rational Function Evaluation ===")
+    println("\n=== Example 4: Rational Function Evaluation ===")
     
     # Test eigenvalues  
     lambda = [-1.5, -0.5, 0.0, 0.5, 1.5, 2.5]  # Some inside, some outside [-1,1]
@@ -122,7 +122,7 @@ Example 5: Eigenvalue Problem with Custom Contour Integration
 Solve a simple eigenvalue problem using the enhanced contour integration
 """
 function example_eigenvalue_problem()
-    println("\\n=== Example 5: Eigenvalue Problem with Custom Contour ===")
+    println("\n=== Example 5: Eigenvalue Problem with Custom Contour ===")
     
     # Create a simple test matrix
     n = 10
@@ -141,11 +141,11 @@ function example_eigenvalue_problem()
     M0 = 6  # Trial subspace size (larger than the expected eigenvalue count)
     
     # Use different contour types 
-    println("\\nUsing Gauss-Legendre integration (8 points):")
+    println("\nUsing Gauss-Legendre integration (8 points):")
     contour_gauss = feast_contour_expert(Emin, Emax, 8, 0, 100)
     println("Integration nodes generated: $(length(contour_gauss.Zne))")
     
-    println("\\nUsing Zolotarev integration (8 points):")  
+    println("\nUsing Zolotarev integration (8 points):")
     contour_zolo = feast_contour_expert(Emin, Emax, 8, 2, 100)
     println("Integration nodes generated: $(length(contour_zolo.Zne))")
     
@@ -178,7 +178,7 @@ function run_all_examples()
         example_rational_function()
         example_eigenvalue_problem()
         
-        println("\\nAll examples completed successfully!")
+        println("\nAll examples completed successfully!")
         
     catch e
         println("Error running examples: $e")

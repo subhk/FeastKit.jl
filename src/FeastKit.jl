@@ -115,7 +115,7 @@ export feast_with_backend, feast_serial
 export FeastResult, FeastGeneralResult, FeastParameters, FeastWorkspaceReal, FeastWorkspaceComplex
 export FeastSRCIState, FeastHRCIState, FeastGRCIState, FeastPolyRCIState
 # Matrix-free interface exports
-export MatrixFreeOperator, MatrixVecFunction, LinearOperator
+export MatrixFreeOperator, MatrixVecFunction, LinearOperator, FeastLinearOperator
 export feast_matfree_srci!, feast_matfree_grci!
 export feast_contour_expert, feast_contour_custom_weights!, feast_rational_expert,
        feast_rational, feast_rationalx, feast_grational, feast_grationalx,
@@ -145,8 +145,9 @@ function _feast_bicgstab_workspace end
 function _feast_bicgstab! end
 function _feast_bicgstab_solution end
 
-# MPI is likewise optional, provided by FeastKitMPIExt. All MPI runtime
-# decisions are deferred to __init__ so loading FeastKit never starts MPI.
+# MPI is likewise optional, provided by FeastKitMPIExt. Availability is decided
+# at call time by `mpi_available`, so loading FeastKit never starts MPI.
+# MPI_AVAILABLE[] = true forces MPI to be treated as available.
 const MPI_AVAILABLE = Ref(false)
 _mpi_extension_loaded() = Base.get_extension(@__MODULE__, :FeastKitMPIExt) !== nothing
 
@@ -193,33 +194,30 @@ include("interfaces/feast_contour_interface.jl")
 include("interfaces/feast_results.jl")
 include("deprecations.jl")
 
+# Entry points that exist without MPI but only gain methods from FeastKitMPIExt.
+const _MPI_EXTENSION_FUNCTIONS = (:mpi_feast, :mpi_feast_general, :feast_hybrid,
+    :mpi_feast_sygv!, :mpi_feast_scsrgv!, :mpi_feast_heev!, :mpi_feast_hegv!,
+    :mpi_feast_geev!, :mpi_feast_gegv!, :mpi_feast_hcsrev!, :mpi_feast_hcsrgv!,
+    :mpi_feast_gcsrev!, :mpi_feast_gcsrgv!, :mpi_feast_available, :mpi_feast_init,
+    :mpi_feast_finalize, :mpi_feast_benchmark)
+
 function __init__()
-    if !_mpi_extension_loaded()
-        MPI_AVAILABLE[] = false
-        return
+    # Calling an MPI driver before `using MPI` is a MethodError on a function
+    # with no methods; say what to load instead of leaving a bare MethodError.
+    if isdefined(Base.Experimental, :register_error_hint)
+        Base.Experimental.register_error_hint(MethodError) do io, exc, argtypes, kwargs
+            f = exc.f
+            # A keyword call records Core.kwcall and puts the function second.
+            f === Core.kwcall && length(exc.args) >= 2 && (f = exc.args[2])
+            f isa Function || return
+            parentmodule(f) === FeastKit || return
+            nameof(f) in _MPI_EXTENSION_FUNCTIONS || return
+            _mpi_extension_loaded() && return
+            print(io, "\n", nameof(f), " is provided by the MPI extension: run `using MPI` ",
+                  "(and `MPI.Init()`) before calling it.")
+        end
     end
-
-    # Skip MPI initialization on CI environments to avoid hanging
-    if get(ENV, "CI", "false") == "true"
-        @debug "Running on CI, skipping MPI initialization"
-        MPI_AVAILABLE[] = false
-        return
-    end
-
-    # Only attempt MPI usage if explicitly enabled via environment variable.
-    # Some MPI installations can hang during discovery, so the opt-in is strict.
-    if get(ENV, "FEASTKIT_ENABLE_MPI", "false") != "true"
-        @debug "MPI not explicitly enabled (set FEASTKIT_ENABLE_MPI=true to enable), MPI features disabled"
-        MPI_AVAILABLE[] = false
-        return
-    end
-
-    try
-        MPI_AVAILABLE[] = _mpi_initialized()
-    catch e
-        @debug "MPI initialization check failed, MPI features disabled" exception=e
-        MPI_AVAILABLE[] = false
-    end
+    return nothing
 end
 
 end

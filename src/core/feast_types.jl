@@ -118,11 +118,15 @@ end
 # RCI sub-phases. The FEAST protocol issues MULT_A and MULT_B twice per
 # refinement loop -- once to build the reduced Rayleigh-Ritz pencil and once to
 # evaluate residuals -- so the kernels record which of the two is outstanding.
+# One further MULT_A/MULT_B pair before the first contour sweep measures the
+# spectral scale of the pencil on random probes (see `_feast_spectral_scale`).
 const FEAST_PHASE_IDLE = 0
 const FEAST_PHASE_PROJECT_A = 1
 const FEAST_PHASE_PROJECT_B = 2
 const FEAST_PHASE_RESIDUAL_A = 3
 const FEAST_PHASE_RESIDUAL_B = 4
+const FEAST_PHASE_SCALE_A = 5
+const FEAST_PHASE_SCALE_B = 6
 
 """
     FeastSRCIState{T<:Real}
@@ -151,13 +155,15 @@ mutable struct FeastSRCIState{T<:Real}
     q_tmp::Matrix{T}
     lambda_tmp::Vector{T}
     residual::Vector{T}
+    res_scale::T                  # Search-region magnitude that residuals are relative to
+    keep::Vector{Bool}            # Genuine (non-spurious) marks for the in-region pairs
 
     function FeastSRCIState{T}() where T<:Real
         new{T}(false, Complex{T}[], Complex{T}[], 0, 1,
                Matrix{T}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
                Matrix{T}(undef, 0, 0), Matrix{T}(undef, 0, 0),
                FEAST_PHASE_IDLE, 0, 0, 0, false,
-               Int[], Matrix{T}(undef, 0, 0), T[], T[])
+               Int[], Matrix{T}(undef, 0, 0), T[], T[], one(T), Bool[])
     end
 end
 
@@ -187,13 +193,16 @@ mutable struct FeastHRCIState{T<:Real}
     lambda_tmp::Vector{T}
     residual::Vector{Complex{T}}
     checked_subspace::Bool
+    res_scale::T
+    keep::Vector{Bool}
 
     function FeastHRCIState{T}() where T<:Real
         new{T}(false, Complex{T}[], Complex{T}[], 0, 1,
                Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
                Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
                FEAST_PHASE_IDLE, 0, 0, 0, zero(T), 0, Int[],
-               Matrix{Complex{T}}(undef, 0, 0), T[], Complex{T}[], false)
+               Matrix{Complex{T}}(undef, 0, 0), T[], Complex{T}[], false,
+               one(T), Bool[])
     end
 end
 
@@ -216,13 +225,15 @@ mutable struct FeastGRCIState{T<:Real}
     active::Int                 # Columns of Q0 currently in use
     residual::Vector{Complex{T}}
     checked_subspace::Bool
+    res_scale::T
+    keep::Vector{Bool}
 
     function FeastGRCIState{T}() where T<:Real
         new{T}(false, Matrix{Complex{T}}(undef, 0, 0), FEAST_PHASE_IDLE,
                Complex{T}[], Complex{T}[], Int[],
                Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
                Matrix{Complex{T}}(undef, 0, 0), 0, 0,
-               Complex{T}[], false)
+               Complex{T}[], false, one(T), Bool[])
     end
 end
 

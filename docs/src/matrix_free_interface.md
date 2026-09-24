@@ -41,6 +41,10 @@ difference between operator declarations and checks on assembled matrices.
 The high-level solvers use their explicit `solver` keyword; storing `solve!`
 in an operator does not automatically select it.
 
+LinearOperators.jl, often loaded alongside Krylov.jl, exports its own
+`LinearOperator`. With both packages loaded the unqualified name is ambiguous;
+use the alias `FeastLinearOperator` (or `FeastKit.LinearOperator`) instead.
+
 ### MatrixVecFunction
 
 `MatrixVecFunction{T}(callback, (n, n); issymmetric=false, ...)` calls

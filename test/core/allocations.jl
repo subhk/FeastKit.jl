@@ -198,15 +198,23 @@ end
         Bq = similar(res, size(A, 1))
         residual = similar(res, size(A, 1))
 
+        # Without a search region the floor is the largest |λ|, so the helper
+        # stays unit-free; solvers pass their spectral scale explicitly.
         expected = [
             norm(A * q[:, j] - lambda[j] * (B * q[:, j])) /
-            (max(abs(lambda[j]), 1.0) * norm(B * q[:, j]))
+            (max(abs(lambda[j]), maximum(abs, lambda)) * norm(B * q[:, j]))
             for j in 1:length(lambda)
         ]
 
         FeastKit.feast_residual!(A, B, lambda, q, res, length(lambda),
                                  Aq, Bq, residual)
         @test res ≈ expected
+        FeastKit.feast_residual!(A, B, lambda, q, res, length(lambda),
+                                 Aq, Bq, residual; scale=10.0)
+        @test res ≈ [norm(A * q[:, j] - lambda[j] * (B * q[:, j])) /
+                     (10.0 * norm(B * q[:, j])) for j in 1:length(lambda)]
+        FeastKit.feast_residual!(A, B, lambda, q, res, length(lambda),
+                                 Aq, Bq, residual)
 
         _repeat_feast_residual_scratch!(A, B, lambda, q, res, Aq, Bq,
                                         residual, 1)

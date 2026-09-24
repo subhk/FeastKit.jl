@@ -281,7 +281,8 @@ function mpi_compute_complex_residuals!(A::AbstractMatrix{Complex{T}},
                                         q::Matrix{Complex{T}},
                                         res::Vector{T},
                                         M::Int,
-                                        comm::MPI.Comm) where T<:Real
+                                        comm::MPI.Comm;
+                                        scale = _feast_default_residual_scale(lambda, M)) where T<:Real
     rank = MPI.Comm_rank(comm)
     nprocs = MPI.Comm_size(comm)
     eigs_per_rank = div(M, nprocs)
@@ -299,7 +300,7 @@ function mpi_compute_complex_residuals!(A::AbstractMatrix{Complex{T}},
             mul!(residual, A, qj)
             mul!(Bq, B, qj)
             @. residual = residual - lambda[j] * Bq
-            local_res[j] = _feast_scaled_residual(residual, Bq, lambda[j])
+            local_res[j] = _feast_scaled_residual(residual, Bq, lambda[j], scale)
         end
     end
     success || return false

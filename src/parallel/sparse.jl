@@ -145,6 +145,7 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
 
     eps_tol = feast_tolerance(fpm, T)
     max_loops = fpm[4]
+    keep = Vector{Bool}(undef, M0)
 
     Q = Matrix{Complex{T}}(undef, N, M0)
     _feast_seeded_subspace_complex!(Q)
@@ -179,6 +180,9 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
         _pfeast_factorize_contour_distributed(A, B, Zne) :
         _pfeast_factorize_contour_sparse(A, B, Zne, use_threads)
     B_is_identity = (B == I)   # standard problem: skip per-loop identity matmuls
+    res_scale = _feast_residual_floor(
+        _feast_spectral_scale(A, B_is_identity ? nothing : B, Q),
+        _feast_residual_scale(Emin, Emax))
     verbose && println("pfeast_scsrgv!: $(length(Zne)) contour points, threads=$(Threads.nthreads())")
 
     try
@@ -191,6 +195,20 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             B_is_identity ? copyto!(bq, qblk) : mul!(bq, B, qblk)
             _pfeast_accumulate_qproj_sparse!(view(Q_proj, :, 1:active_dim), factors,
                                              bq, Wne, use_threads)
+
+            # The sweep has filtered the previous loop's Ritz vectors (Q); their
+            # filter response separates genuine pairs from spurious ones.
+            if loop - 1 >= _FEAST_SPURIOUS_MIN_LOOPS
+                kept = _feast_screen_spurious!(keep, Q_proj, Q, res, M_found, eps_tol)
+                if kept !== nothing
+                    M = _feast_compact_pairs!(lambda, q, res, keep, M_found)
+                    M > 1 && feast_sort!(lambda, q, res, M)
+                    epsout = M > 0 ? maximum(view(res, 1:M)) : zero(T)
+                    info_screened = M == 0 ? Int(Feast_SUCCESS) : _feast_exit_info(true, M, M0, N)
+                    return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
+                                             info_screened, epsout, loop)
+                end
+            end
 
             try
                 rank = _feast_qr_compress!(q_basis, Q_proj, active_dim;
@@ -241,8 +259,9 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                 M = _feast_reorder_by_interval!(lambda, q, perm, lambda_tmp, q_tmp,
                                                 Emin, Emax, rank)
                 if M == 0
-                    info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-                    break
+                    # No Ritz value in the interval: it holds no eigenvalues.
+                    return FeastResult{T, T}(T[], zeros(T, N, 0), 0, T[],
+                                             Int(Feast_SUCCESS), zero(T), loop)
                 end
 
                 for j in 1:M
@@ -251,7 +270,7 @@ function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                 end
 
                 feast_residual!(A, B, lambda, q, res, M,
-                                residual_Aq, residual_Bq, residual)
+                                residual_Aq, residual_Bq, residual; scale=res_scale)
                 epsout = maximum(view(res, 1:M))
                 M_found = M
 

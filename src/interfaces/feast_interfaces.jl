@@ -56,7 +56,7 @@ function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     issymmetric(A) || throw(ArgumentError("feast expects a symmetric real matrix A; use feast_general for non-symmetric problems"))
     issymmetric(B) || throw(ArgumentError("B must be symmetric positive definite for real generalized problems"))
 
-    feast_validate_interval(A, interval)
+    feast_validate_interval(A, B, interval)
 
     (; params, solver_options, M0, backend_choice, allow_backend_fallback) =
         _feast_prepare_assembled(A; M0=M0, subspace_size=subspace_size, fpm=fpm,
@@ -96,7 +96,7 @@ function feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
     ishermitian(A) || throw(ArgumentError("feast expects a Hermitian matrix A when using real intervals; call feast_general for non-Hermitian problems"))
     ishermitian(B) || throw(ArgumentError("B must be Hermitian positive definite for complex generalized problems"))
 
-    feast_validate_interval(A, interval)
+    feast_validate_interval(A, B, interval)
 
     (; params, solver_options, M0, backend_choice, allow_backend_fallback) =
         _feast_prepare_assembled(A; M0=M0, subspace_size=subspace_size, fpm=fpm,

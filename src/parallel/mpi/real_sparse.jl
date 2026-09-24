@@ -26,6 +26,7 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
     eps_tolerance = feast_tolerance(fpm, T)
     max_loops = fpm[4]
+    keep = Vector{Bool}(undef, M0)
 
     Q_real = Matrix{T}(undef,N,M0)
     _feast_seeded_subspace!(Q_real)
@@ -38,6 +39,11 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     local_factors === nothing && return FeastResult{T,T}(T[],zeros(T,N,0),0,T[],
         Int(Feast_ERROR_LAPACK),T(Inf),0)
     B_is_identity = (B == I)   # standard problem: skip the per-loop identity matmuls
+    # Every rank measures on the same broadcast basis; root's value is used.
+    res_scale = _mpi_residual_floor(A, B_is_identity ? nothing : B, Q,
+                                    _feast_residual_scale(Emin, Emax), root, comm)
+    res_scale === nothing && return FeastResult{T,T}(T[],zeros(T,N,0),0,T[],
+        Int(Feast_ERROR_LAPACK),T(Inf),0)
 
     Q_proj_local = Matrix{Complex{T}}(undef, N, M0)
     BQ_loop = Matrix{Complex{T}}(undef, N, M0)
@@ -103,60 +109,72 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
         status = 0
         if rank == root
             try
-                rank_r = _feast_qr_compress!(q_basis, qpl, active_dim;
-                                             rank_tol=sqrt(eps(T)))
-                if rank_r == 0
-                    status = 2
-                    info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                # qpl is the filtered image of the previous loop's Ritz vectors:
+                # classify them by filter response before a new Rayleigh-Ritz.
+                kept = loop - 1 >= _FEAST_SPURIOUS_MIN_LOOPS ?
+                    _feast_screen_spurious!(keep, qpl, view(Q, :, 1:active_dim), res,
+                                            M_found, eps_tolerance) : nothing
+                if kept !== nothing
+                    M = _feast_compact_pairs!(lambda, q, res, keep, M_found)
+                    epsout = M > 0 ? maximum(view(res, 1:M)) : zero(T)
+                    status = 1
                 else
-                    q_rank = view(q_basis, :, 1:rank_r)
-                    AQ_r = view(AQ, :, 1:rank_r)
-                    BQ_r = view(BQm, :, 1:rank_r)
-                    Sq_r = view(Sq, 1:rank_r, 1:rank_r)
-                    Aq_r = view(Aq, 1:rank_r, 1:rank_r)
-                    mul!(AQ_r, A, q_rank)
-                    mul!(Sq_r, adjoint(q_rank), AQ_r)
-                    if B_is_identity
-                        fill!(Aq_r, zero(Complex{T}))
-                        @inbounds for i in 1:rank_r
-                            Aq_r[i, i] = one(Complex{T})
-                        end
-                    else
-                        mul!(BQ_r, B, q_rank)
-                        mul!(Aq_r, adjoint(q_rank), BQ_r)
-                    end
-                    local lambda_red, v_red
-                    try
-                        Fr = eigen(Hermitian(Sq_r), Hermitian(Aq_r))
-                        lambda_red = Fr.values
-                        v_red = Fr.vectors
-                    catch err
-                        (isa(err, PosDefException) || isa(err, LinearAlgebra.LAPACKException)) || rethrow(err)
-                        Fr = eigen(Sq_r, Aq_r)
-                        lambda_red = real.(Fr.values)
-                        v_red = Fr.vectors
-                    end
-                    for idx in 1:rank_r
-                        mul!(qcol, q_rank, view(v_red, :, idx))
-                        @inbounds for i in 1:N
-                            q[i, idx] = real(qcol[i])
-                        end
-                        lambda[idx] = lambda_red[idx]
-                    end
-                    M = _feast_reorder_by_interval!(lambda, q, perm, lambda_tmp, q_tmp,
-                                                    Emin, Emax, rank_r)
-                    if M == 0
+                    rank_r = _feast_qr_compress!(q_basis, qpl, active_dim;
+                                                 rank_tol=sqrt(eps(T)))
+                    if rank_r == 0
                         status = 2
                         info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                     else
-                        for j in 1:M
-                            nrm = norm(view(q, :, j))
-                            nrm > 0 && (view(q, :, j) ./= nrm)
+                        q_rank = view(q_basis, :, 1:rank_r)
+                        AQ_r = view(AQ, :, 1:rank_r)
+                        BQ_r = view(BQm, :, 1:rank_r)
+                        Sq_r = view(Sq, 1:rank_r, 1:rank_r)
+                        Aq_r = view(Aq, 1:rank_r, 1:rank_r)
+                        mul!(AQ_r, A, q_rank)
+                        mul!(Sq_r, adjoint(q_rank), AQ_r)
+                        if B_is_identity
+                            fill!(Aq_r, zero(Complex{T}))
+                            @inbounds for i in 1:rank_r
+                                Aq_r[i, i] = one(Complex{T})
+                            end
+                        else
+                            mul!(BQ_r, B, q_rank)
+                            mul!(Aq_r, adjoint(q_rank), BQ_r)
                         end
-                        feast_residual!(A, B, lambda, q, res, M,
-                                        residual_Aq, residual_Bq, residual)
-                        epsout = maximum(view(res, 1:M))
-                        status = epsout <= eps_tolerance ? 1 : 0
+                        local lambda_red, v_red
+                        try
+                            Fr = eigen(Hermitian(Sq_r), Hermitian(Aq_r))
+                            lambda_red = Fr.values
+                            v_red = Fr.vectors
+                        catch err
+                            (isa(err, PosDefException) || isa(err, LinearAlgebra.LAPACKException)) || rethrow(err)
+                            Fr = eigen(Sq_r, Aq_r)
+                            lambda_red = real.(Fr.values)
+                            v_red = Fr.vectors
+                        end
+                        for idx in 1:rank_r
+                            mul!(qcol, q_rank, view(v_red, :, idx))
+                            @inbounds for i in 1:N
+                                q[i, idx] = real(qcol[i])
+                            end
+                            lambda[idx] = lambda_red[idx]
+                        end
+                        M = _feast_reorder_by_interval!(lambda, q, perm, lambda_tmp, q_tmp,
+                                                        Emin, Emax, rank_r)
+                        if M == 0
+                            # No Ritz value in the interval: it holds no eigenvalues.
+                            epsout = zero(T)
+                            status = 1
+                        else
+                            for j in 1:M
+                                nrm = norm(view(q, :, j))
+                                nrm > 0 && (view(q, :, j) ./= nrm)
+                            end
+                            feast_residual!(A, B, lambda, q, res, M,
+                                            residual_Aq, residual_Bq, residual; scale=res_scale)
+                            epsout = maximum(view(res, 1:M))
+                            status = epsout <= eps_tolerance ? 1 : 0
+                        end
                     end
                 end
             catch err
@@ -253,7 +271,8 @@ end
 # Sparse residual computation for MPI
 function mpi_compute_sparse_residuals!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                                       lambda::Vector{T}, q::Matrix{T}, res::Vector{T},
-                                      M::Int, comm::MPI.Comm) where T<:Real
+                                      M::Int, comm::MPI.Comm;
+                                      scale = _feast_default_residual_scale(lambda, M)) where T<:Real
 
     rank = MPI.Comm_rank(comm)
     nprocs = MPI.Comm_size(comm)
@@ -274,7 +293,7 @@ function mpi_compute_sparse_residuals!(A::SparseMatrixCSC{T,Int}, B::SparseMatri
         Aq = A * q[:, j]
         Bq = B * q[:, j]
         residual = Aq - lambda[j] * Bq
-        local_res[j] = _feast_scaled_residual(residual, Bq, lambda[j])
+        local_res[j] = _feast_scaled_residual(residual, Bq, lambda[j], scale)
     end
 
     # Reduce across ranks

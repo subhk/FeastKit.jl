@@ -21,6 +21,8 @@ makedocs(
         canonical = "https://subhk.github.io/FeastKit.jl/stable/",
         assets = String[],
         size_threshold = 500 * 1024,  # 500 KB
+        # The API reference page renders every exported docstring (~107 KiB).
+        size_threshold_warn = 200 * 1024,
     ),
     pages = [
         "Home" => "index.md",

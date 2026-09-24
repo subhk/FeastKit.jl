@@ -795,7 +795,8 @@ end
         feast_srci!(ijob, n, Ze, work, workc, Aq, Sq, fpm, epsout, loop,
                     reference[1] - 1.0e-9, reference[3] + 1.0e-9, M0,
                     lambda, q, mode, res, info; state = state)
-        @test ijob[] == Int(Feast_RCI_FACTORIZE)
+        # Initialization first asks for the spectral-scale probes.
+        @test ijob[] == Int(Feast_RCI_MULT_A)
 
         # Continuing with a fresh state used to reset the machine silently and
         # return M = 0. It must now say so.

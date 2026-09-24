@@ -6,7 +6,8 @@ function Base.getproperty(result::_FeastResultLike, name::Symbol)
     name === :values && return getfield(result, :lambda)
     name === :vectors && return getfield(result, :q)
     name === :converged && return getfield(result, :info) == 0
-    name === :message && return _feast_status_message(getfield(result, :info))
+    name === :message && return _feast_status_message(getfield(result, :info),
+                                                      getfield(result, :M))
     return getfield(result, name)
 end
 
@@ -17,6 +18,20 @@ function _feast_require_convergence(result::_FeastResultLike)
     result.converged || error("FEAST solve failed (info=$(result.info)): $(result.message). " *
                               "Use feast(...) to inspect the full result.")
     return nothing
+end
+
+# `check=true` turns a failed solve into an error. Without it the values are
+# still returned, as they always were, but never silently: a non-converged
+# result can contain spurious or inaccurate values.
+function _feast_checked(result::_FeastResultLike, check::Bool)
+    if check
+        _feast_require_convergence(result)
+    elseif !result.converged
+        @warn "FEAST did not converge (info=$(result.info)): $(result.message). " *
+              "Returning unverified values; pass check=true to throw instead, or " *
+              "call feast(...) to inspect the full result."
+    end
+    return result
 end
 
 function _feast_status_message(info::Int)
@@ -31,6 +46,11 @@ function _feast_status_message(info::Int)
     info == 8 && return "Factorization or reduced eigensolve failed; check the matrix pencil and contour"
     info == 9 && return "Invalid FEAST parameters; check fpm or the named options"
     return "Unrecognized FEAST status code $info"
+end
+
+function _feast_status_message(info::Int, M::Int)
+    info == 0 && M == 0 && return "Success; the search region contains no eigenvalues"
+    return _feast_status_message(info)
 end
 
 function Base.show(io::IO, result::_FeastResultLike)
@@ -62,15 +82,16 @@ Return only the eigenvalues from [`feast`](@ref). With `check=true`, throw an
 `ErrorException` if the returned FEAST status is nonzero, including subspace
 saturation. The error includes the status code and recovery guidance.
 
-The default `check=false` preserves the returned eigenvalues even after an
-unsuccessful solve; it does not suppress exceptions raised by `feast`. Use
+The default `check=false` still returns the eigenvalues after an unsuccessful
+solve, but logs a warning with the status, because such values may be
+inaccurate or spurious. It does not suppress exceptions raised by `feast`. Use
 `feast` directly to inspect convergence, residuals, and any partial results.
 Other keywords are forwarded to `feast`.
 """
 function eigvals_feast(A::AbstractMatrix, interval::Tuple; check::Bool=false, kwargs...)
     # Return only eigenvalues
     result = feast(A, interval; kwargs...)
-    check && _feast_require_convergence(result)
+    _feast_checked(result, check)
     return result.lambda
 end
 
@@ -81,15 +102,15 @@ end
 Return a `LinearAlgebra.Eigen` object with `values` and `vectors` from
 [`feast`](@ref). With `check=true`, throw an `ErrorException` for any nonzero
 FEAST status, including subspace saturation, with the status code and recovery
-guidance. The default `check=false` preserves the existing return behavior
-and does not suppress exceptions raised by `feast`. Use `feast` directly to
-inspect convergence, residuals, and any partial results. Other keywords are
-forwarded to `feast`.
+guidance. The default `check=false` still returns the decomposition after an
+unsuccessful solve, but logs a warning with the status. It does not suppress
+exceptions raised by `feast`. Use `feast` directly to inspect convergence,
+residuals, and any partial results. Other keywords are forwarded to `feast`.
 """
 function eigen_feast(A::AbstractMatrix, interval::Tuple; check::Bool=false, kwargs...)
     # Return eigenvalues and eigenvectors as Eigen object
     result = feast(A, interval; kwargs...)
-    check && _feast_require_convergence(result)
+    _feast_checked(result, check)
     return Eigen(result.lambda, result.q)
 end
 
@@ -97,7 +118,7 @@ function eigvals_feast(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple;
                       check::Bool=false, kwargs...)
     # Return only eigenvalues for generalized problem
     result = feast(A, B, interval; kwargs...)
-    check && _feast_require_convergence(result)
+    _feast_checked(result, check)
     return result.lambda
 end
 
@@ -105,7 +126,7 @@ function eigen_feast(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple;
                      check::Bool=false, kwargs...)
     # Return eigenvalues and eigenvectors for generalized problem
     result = feast(A, B, interval; kwargs...)
-    check && _feast_require_convergence(result)
+    _feast_checked(result, check)
     return Eigen(result.lambda, result.q)
 end
 

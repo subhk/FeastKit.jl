@@ -138,9 +138,21 @@ end
 
 
 # Matrix-free interfaces
+"""
+    feast_matvec(A_mul!, B_mul!, N, interval; M0=10, fpm=nothing,
+                 gmres_rtol=nothing, gmres_atol=0, gmres_restart=30, gmres_maxiter=500)
+
+Real symmetric FEAST from two callbacks, `A_mul!(y, x)` (`y = A*x`) and
+`B_mul!(y, x)` (`y = B*x`), with the shifted systems solved by GMRES (load
+Krylov.jl first). By default the GMRES tolerance tightens with the outer
+residual; pass `gmres_rtol` to fix it instead. For preconditioning or a direct
+shifted solve, wrap the callbacks in [`LinearOperator`](@ref) and call
+[`feast`](@ref) with `solver=`.
+"""
 function feast_matvec(A_mul!::Function, B_mul!::Function, N::Int,
                      interval::Tuple{T,T}; M0::Int = 10,
-                     fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing) where T<:Real
+                     fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
+                     gmres_kwargs...) where T<:Real
     # Feast with matrix-free operations
     # A_mul!(y, x) computes y = A*x
     # B_mul!(y, x) computes y = B*x
@@ -153,5 +165,7 @@ function feast_matvec(A_mul!::Function, B_mul!::Function, N::Int,
         feastinit!(fpm)
     end
 
-    return feast_sparse_matvec!(A_mul!, B_mul!, N, Emin, Emax, M0, _ensure_feast_parameters(fpm))
+    # gmres_rtol, gmres_atol, gmres_restart and gmres_maxiter tune the inner solves.
+    return feast_sparse_matvec!(A_mul!, B_mul!, N, Emin, Emax, M0, _ensure_feast_parameters(fpm);
+                                gmres_kwargs...)
 end

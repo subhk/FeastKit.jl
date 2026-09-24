@@ -16,6 +16,19 @@ function documentation_block(file, heading)
     return join(lines[opening+1:closing-1], '\n')
 end
 
+# README fences are plain ```julia blocks located the same way, by the heading
+# (or sentence) that introduces them.
+function readme_block(anchor)
+    text = read(joinpath(@__DIR__, "..", "..", "README.md"), String)
+    section = findfirst(anchor, text)
+    section === nothing && error("Missing README section: $anchor")
+    lines = split(SubString(text, last(section)+1), '\n')
+    opening = findfirst(line -> occursin(r"^```julia\s*$", line), lines)
+    opening === nothing && error("Missing Julia example after: $anchor")
+    closing = findnext(line -> strip(line) == "```", lines, opening+1)
+    return join(lines[opening+1:closing-1], '\n')
+end
+
 function documentation_sandbox()
     sandbox = Module(gensym(:DocumentationExample))
     Core.eval(sandbox, :(using FeastKit, LinearAlgebra, SparseArrays))
@@ -30,6 +43,40 @@ function documentation_sandbox()
 end
 
 @testset "Executable documentation regressions" begin
+    @testset "README examples" begin
+        # Run the README's runnable snippets in order, in one module, the way a
+        # reader pastes them. Distributed, MPI, and cluster snippets need
+        # resources the test run does not have.
+        sandbox = Module(gensym(:ReadmeExample))
+        Core.eval(sandbox, :(using FeastKit))
+        anchors = ["### Basic Usage", "Full contours can be passed directly",
+                   "### Generalized Eigenvalue Problems", "### Sparse Matrices",
+                   "### Complex Eigenvalue Problems", "### Custom FeastKit Parameters",
+                   "### Banded Matrices", "### Matrix-Free Operations",
+                   "### Parallel RCI Interface"]
+        Threads.nthreads() > 1 && push!(anchors, "### Multi-threaded Execution")
+        for anchor in anchors
+            @testset "$anchor" begin
+                code = readme_block(anchor)
+                redirect_stdout(devnull) do
+                    Base.include_string(sandbox, code)
+                end
+                if anchor == "### Parallel RCI Interface"
+                    # This snippet drives the RCI loop itself and has no `result`.
+                    state = getfield(sandbox, :state)
+                    @test state.info == 0
+                    @test state.mode == 19
+                else
+                    result = getfield(sandbox, :result)
+                    @test result.converged
+                    # All but the two complex examples search (0.5, 1.5) of the
+                    # 100x100 tridiagonal matrix, which holds 19 eigenvalues.
+                    anchor in ("Full contours can be passed directly",
+                               "### Complex Eigenvalue Problems") || @test result.M == 19
+                end
+            end
+        end
+    end
     @testset "Problem setup guide" begin
         source = read(joinpath(@__DIR__, "..", "..", "docs", "src", "problem_setup.md"), String)
         pattern = r"(?ms)^```@example (setup_\w+)\r?\n(.*?)^```"

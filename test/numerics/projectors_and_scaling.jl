@@ -40,14 +40,27 @@ using Test, FeastKit, LinearAlgebra, SparseArrays
             @test r.M == length(expected)
             @test r.loop > 0
             @test sort(real.(r.lambda)) ≈ expected atol=1e-9
+            # Residuals are floored at the pencil's spectral scale, which the
+            # kernels measure on their seeded probe block before the first sweep.
+            probes = kind == :real ? zeros(n, m) : zeros(ComplexF64, n, m)
+            kind == :real ? FeastKit._feast_seeded_subspace!(probes) :
+                            FeastKit._feast_seeded_subspace_complex!(probes)
+            σ = norm(A0 * probes) / norm(B0 * probes)
             actual = [norm(A0*r.q[:,j] - r.lambda[j]*B0*r.q[:,j]) /
-                      norm(B0*r.q[:,j]) / max(abs(r.lambda[j]), 1) for j in 1:r.M]
+                      norm(B0*r.q[:,j]) / max(abs(r.lambda[j]), σ) for j in 1:r.M]
             @test maximum(actual) < 2e-12
             @test r.res ≈ actual atol=1e-14
         end
         # A zero eigenvalue still has a nonzero normalization through B*q.
-        @test FeastKit._feast_scaled_residual(zeros(2), [1.0, 0.0], 0.0) == 0
-        @test isinf(FeastKit._feast_scaled_residual(zeros(2), zeros(2), 0.0))
+        @test FeastKit._feast_scaled_residual(zeros(2), [1.0, 0.0], 0.0, 1.0) == 0
+        @test isinf(FeastKit._feast_scaled_residual(zeros(2), zeros(2), 0.0, 1.0))
+        # A change of units rescales the residual, the eigenvalue and the
+        # spectral scale together, and leaves the measured residual unchanged.
+        rvec, bq = [3e-9, -4e-9], [1.0, 2.0]
+        for units in (1e-12, 1e12)
+            @test FeastKit._feast_scaled_residual(units * rvec, bq, units * 0.2, units * 2.5) ≈
+                  FeastKit._feast_scaled_residual(rvec, bq, 0.2, 2.5)
+        end
     end
 
     @testset "Rectangle corners survive registration and precision conversion" begin

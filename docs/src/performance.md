@@ -120,7 +120,7 @@ function benchmark_integration_methods(A, interval)
         println("\n$method_name:")
         
         # Test different numbers of integration points
-        for ne in [8, 12, 16, 24]
+        for ne in [6, 8, 12, 16]
             fpm = feastinit().fpm
             fpm[2] = ne
             fpm[16] = method_id
@@ -155,11 +155,13 @@ Assembled matrices default to `solver=:direct`. Use `solver=:gmres` with
 `solver_opts=(rtol=..., maxiter=..., restart=...)`; low-level drivers use
 `solver_tol`, `solver_maxiter`, and `solver_restart`.
 
-When `rtol` is omitted, iterative drivers loosen early shifted solves and
-tighten them as the outer residual falls (initial target `1e-3`). This applies
-to serial dense/sparse/banded drivers, complex MPI drivers, and built-in
-matrix-free solvers. Explicit `solver_opts.rtol` is kept fixed, and custom
-callbacks control their own accuracy. Each owning iterative driver reuses a
+When `rtol` is omitted, iterative drivers solve each shifted system to a
+relative tolerance of `1e-3`, warm-started from its trial vector: they solve
+for the correction to the best multiple of that vector, whose right-hand side
+shrinks with the eigen-residual, so the fixed tolerance does not limit the
+outer accuracy. This applies to serial dense/sparse/banded drivers, complex MPI
+drivers, and built-in matrix-free solvers. Explicit `solver_opts.rtol` is kept
+fixed, and custom callbacks control their own accuracy. Each owning iterative driver reuses a
 Krylov workspace across nodes and refinement sweeps. Separate solves/ranks
 own separate workspaces; no shared global Krylov buffer is used.
 
@@ -232,7 +234,7 @@ Julia contour tasks can run. Avoid oversubscribing cores with both layers.
 | Execution | Public API and setup |
 |:--|:--|
 | Threads | `backend=:threads`; multiple Julia threads, real symmetric inputs |
-| Julia workers | `backend=:distributed`; active workers, sparse real symmetric inputs |
+| Julia workers | `backend=:distributed`; active workers, dense or sparse real symmetric inputs |
 | MPI | `backend=:mpi, comm=comm`; load and initialize MPI on all ranks |
 | Hybrid MPI/threads | `feast_hybrid(A, B, interval; comm=comm, use_threads_per_rank=true)` |
 
@@ -260,7 +262,7 @@ function optimize_for_distribution(A, interval, eigenvalue_density="uniform")
     if eigenvalue_density == "clustered"
         # Use more integration points and Zolotarev method
         fpm = feastinit().fpm
-        fpm[2] = 24      # More integration points
+        fpm[2] = 16      # More integration points (Zolotarev is tabulated up to 16)
         fpm[16] = 2      # Zolotarev integration
         fpm[3] = 14      # Higher precision
         

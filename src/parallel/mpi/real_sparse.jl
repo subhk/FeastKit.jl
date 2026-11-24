@@ -13,8 +13,13 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     size(A, 2) == N || throw(ArgumentError("Matrix A must be square"))
     size(B) == (N, N) || throw(ArgumentError("Matrix B must match size of A"))
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
+    # Resolve the defaults on every rank before anything reads fpm: building
+    # the contour fills them in on root alone (see mpi_feast_sygv!).
+    feastdefault!(fpm)
+    fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
 
-    contour, _ = _mpi_contour(T,fpm,Emin,Emax,root,comm)
+    contour, custom = _mpi_contour(T,fpm,Emin,Emax,root,comm)
+    offset = _feast_filter_offset(T, fpm, custom)
     ne = length(contour.Zne)
     Zne_global, Wne_global = contour.Zne, contour.Wne
 
@@ -22,15 +27,14 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                                  N, M0, ne, root)
     _mpi_distribute_complex_contour!(mpi_state, Zne_global, Wne_global)
 
-    feastdefault!(fpm)
-    fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
     eps_tolerance = feast_tolerance(fpm, T)
     max_loops = fpm[4]
     keep = Vector{Bool}(undef, M0)
 
-    Q_real = Matrix{T}(undef,N,M0)
-    _feast_seeded_subspace!(Q_real)
-    Q = Complex{T}.(Q_real)
+    # Real trial basis, filtered subspace and reduced pencil, as in
+    # mpi_feast_sygv!; only the shifted solves are complex.
+    Q = Matrix{T}(undef, N, M0)
+    _feast_seeded_subspace!(Q)
     MPI.Bcast!(Q, root, comm)
     active_dim = M0
 
@@ -45,17 +49,17 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     res_scale === nothing && return FeastResult{T,T}(T[],zeros(T,N,0),0,T[],
         Int(Feast_ERROR_LAPACK),T(Inf),0)
 
-    Q_proj_local = Matrix{Complex{T}}(undef, N, M0)
-    BQ_loop = Matrix{Complex{T}}(undef, N, M0)
+    Q_proj_local = Matrix{Complex{T}}(undef, N, M0)   # this rank's resolvent sum
+    Q_filtered = Matrix{T}(undef, N, M0)              # its real part, summed on root
+    rhs = Matrix{Complex{T}}(undef, N, M0)            # B*Q for the shifted solves
     # UMFPACK factors are always ComplexF64 (it promotes Float32 inputs), so the
     # in-place solve buffer must match that eltype, not Complex{T}.
     Y_loop = Matrix{Complex{promote_type(T, Float64)}}(undef, N, M0)
-    q_basis = Matrix{Complex{T}}(undef, N, M0)
-    AQ = Matrix{Complex{T}}(undef, N, M0)
-    BQm = Matrix{Complex{T}}(undef, N, M0)
-    Sq = Matrix{Complex{T}}(undef, M0, M0)
-    Aq = Matrix{Complex{T}}(undef, M0, M0)
-    qcol = Vector{Complex{T}}(undef, N)
+    q_basis = Matrix{T}(undef, N, M0)
+    AQ = Matrix{T}(undef, N, M0)
+    BQm = Matrix{T}(undef, N, M0)
+    Sq = Matrix{T}(undef, M0, M0)   # Qᵀ A Q
+    Aq = Matrix{T}(undef, M0, M0)   # Qᵀ B Q
     lambda = zeros(T, M0)
     q = zeros(T, N, M0)
     res = zeros(T, M0)
@@ -73,19 +77,25 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
     flags = Vector{Int}(undef, 4)   # [rank_r, M, status, info]; status: 0=continue 1=converged 2=stop
     epsbuf = Vector{T}(undef, 1)
 
-    for loop in 1:max_loops
+    empty_dist = -one(T)   # root only
+    # Loops are counted from 0 and fpm[4] refinements follow the first sweep,
+    # as in the serial drivers.
+    for loop in 0:max_loops
         loop_done = loop
         mpi_state.loop = loop
 
         # Distributed contour solves: each rank applies only its local resolvents.
         qblk = view(Q, :, 1:active_dim)
-        bq = view(BQ_loop, :, 1:active_dim)
+        bq = view(BQm, :, 1:active_dim)
+        rhs_blk = view(rhs, :, 1:active_dim)
         qpl = view(Q_proj_local, :, 1:active_dim)
-        fill!(qpl, zero(Complex{T}))
+        qf = view(Q_filtered, :, 1:active_dim)
         Yv = view(Y_loop, :, 1:active_dim)
         success = try
+            # B*Q in real arithmetic, widened once for the complex solves.
             B_is_identity ? copyto!(bq, qblk) : mul!(bq, B, qblk)
-            _mpi_local_projection!(qpl,local_factors,bq,mpi_state.local_Wne,Yv; scale=2)
+            copyto!(rhs_blk, bq)
+            _mpi_local_projection!(qpl,local_factors,rhs_blk,mpi_state.local_Wne,Yv; scale=2)
         catch err
             @debug "MPI local projection preparation failed" exception=err
             false
@@ -99,27 +109,31 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
         # Sum the partial filtered subspaces to ROOT ONLY. The reduced
         # Rayleigh-Ritz (QR compress + dense N×M0 work) then runs once on root
         # instead of being replicated on every rank (which contended for memory
-        # bandwidth and capped scaling). Results are broadcast back. The reduce
-        # is in place: root's qpl becomes the global sum, no fresh buffer.
-        MPI.Reduce!(qpl, MPI.SUM, root, comm)
-        @. qpl = real(qpl)
+        # bandwidth and capped scaling). Results are broadcast back. The
+        # filtered subspace is the real part of the sum, so the ranks send real
+        # parts, half the data. The reduce is in place: root's qf becomes the
+        # global sum, no fresh buffer.
+        @. qf = real(qpl)
+        MPI.Reduce!(qf, MPI.SUM, root, comm)
+        offset == zero(T) || (qf .+= offset .* qblk)
 
         rank_r = active_dim
         M = 0
         status = 0
         if rank == root
             try
-                # qpl is the filtered image of the previous loop's Ritz vectors:
+                # qf is the filtered image of the previous loop's Ritz vectors:
                 # classify them by filter response before a new Rayleigh-Ritz.
-                kept = loop - 1 >= _FEAST_SPURIOUS_MIN_LOOPS ?
-                    _feast_screen_spurious!(keep, qpl, view(Q, :, 1:active_dim), res,
-                                            M_found, eps_tolerance) : nothing
+                kept = loop >= _FEAST_SPURIOUS_MIN_LOOPS ?
+                    _feast_screen_spurious!(keep, qf, qblk, res,
+                                            M_found, eps_tolerance, lambda, Zne_global,
+                                            Wne_global; half=true, offset=offset) : nothing
                 if kept !== nothing
                     M = _feast_compact_pairs!(lambda, q, res, keep, M_found)
                     epsout = M > 0 ? maximum(view(res, 1:M)) : zero(T)
                     status = 1
                 else
-                    rank_r = _feast_qr_compress!(q_basis, qpl, active_dim;
+                    rank_r = _feast_qr_compress!(q_basis, Q_filtered, active_dim;
                                                  rank_tol=sqrt(eps(T)))
                     if rank_r == 0
                         status = 2
@@ -131,41 +145,54 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                         Sq_r = view(Sq, 1:rank_r, 1:rank_r)
                         Aq_r = view(Aq, 1:rank_r, 1:rank_r)
                         mul!(AQ_r, A, q_rank)
-                        mul!(Sq_r, adjoint(q_rank), AQ_r)
+                        mul!(Sq_r, transpose(q_rank), AQ_r)
+                        _feast_symmetric_part!(Sq_r)
                         if B_is_identity
-                            fill!(Aq_r, zero(Complex{T}))
+                            fill!(Aq_r, zero(T))
                             @inbounds for i in 1:rank_r
-                                Aq_r[i, i] = one(Complex{T})
+                                Aq_r[i, i] = one(T)
                             end
                         else
                             mul!(BQ_r, B, q_rank)
-                            mul!(Aq_r, adjoint(q_rank), BQ_r)
+                            mul!(Aq_r, transpose(q_rank), BQ_r)
+                            _feast_symmetric_part!(Aq_r)
                         end
                         local lambda_red, v_red
                         try
-                            Fr = eigen(Hermitian(Sq_r), Hermitian(Aq_r))
+                            Fr = eigen(Symmetric(Sq_r), Symmetric(Aq_r))
                             lambda_red = Fr.values
                             v_red = Fr.vectors
                         catch err
-                            (isa(err, PosDefException) || isa(err, LinearAlgebra.LAPACKException)) || rethrow(err)
+                            (err isa PosDefException || err isa LinearAlgebra.LAPACKException ||
+                             err isa SingularException) || rethrow(err)
                             Fr = eigen(Sq_r, Aq_r)
                             lambda_red = real.(Fr.values)
-                            v_red = Fr.vectors
+                            v_red = real.(Fr.vectors)
                         end
-                        for idx in 1:rank_r
-                            mul!(qcol, q_rank, view(v_red, :, idx))
-                            @inbounds for i in 1:N
-                                q[i, idx] = real(qcol[i])
-                            end
-                            lambda[idx] = lambda_red[idx]
-                        end
+                        # Ritz vectors on the orthonormal basis.
+                        mul!(view(q, :, 1:rank_r), q_rank, v_red)
+                        copyto!(view(lambda, 1:rank_r), lambda_red)
                         M = _feast_reorder_by_interval!(lambda, q, perm, lambda_tmp, q_tmp,
                                                         Emin, Emax, rank_r)
                         if M == 0
-                            # No Ritz value in the interval: it holds no eigenvalues.
+                            # No Ritz value in the interval. It is empty only
+                            # once the subspace has settled outside it (see
+                            # _feast_region_looks_empty); otherwise filter again.
+                            empty, empty_dist = _feast_region_looks_empty(
+                                view(lambda, 1:rank_r), (Emin + Emax) / 2,
+                                (Emax - Emin) / 2, Zne_global, Wne_global, true,
+                                empty_dist; offset=offset)
                             epsout = zero(T)
-                            status = 1
+                            if empty
+                                status = 1
+                            elseif loop == max_loops
+                                status = 2
+                                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                            else
+                                status = 0
+                            end
                         else
+                            empty_dist = -one(T)
                             for j in 1:M
                                 nrm = norm(view(q, :, j))
                                 nrm > 0 && (view(q, :, j) ./= nrm)
@@ -184,9 +211,13 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
             flags[1] = rank_r; flags[2] = M; flags[3] = status; flags[4] = info_code
         end
 
-        # Broadcast the control word, then the result data the other ranks need.
+        # Broadcast the control word and residual before any rank can stop.
         MPI.Bcast!(flags, root, comm)
         rank_r = flags[1]; M = flags[2]; status = flags[3]; info_code = flags[4]
+        epsbuf[1] = epsout
+        MPI.Bcast!(epsbuf, root, comm)
+        epsout = epsbuf[1]
+        mpi_state.epsout = epsout
         if status == 2
             M_found = 0
             break
@@ -194,10 +225,6 @@ function mpi_feast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
         MPI.Bcast!(lambda, root, comm)
         MPI.Bcast!(q, root, comm)
         MPI.Bcast!(res, root, comm)
-        epsbuf[1] = epsout
-        MPI.Bcast!(epsbuf, root, comm)
-        epsout = epsbuf[1]
-        mpi_state.epsout = epsout
         M_found = M
 
         if status == 1

@@ -5,7 +5,7 @@ function feast_banded(A::Matrix{T}, kla::Int, interval::Tuple{T,T};
                      M0::Union{Int,Nothing} = nothing, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                      subspace_size=nothing, tol=nothing, maxiter=nothing,
                      quadrature_points=nothing, solver::Symbol=:direct,
-                     solver_opts::NamedTuple=NamedTuple()) where T<:Real
+                     solver_opts::NamedTuple=NamedTuple()) where T<:AbstractFloat
     # Feast interface for real symmetric banded matrices
 
     Emin, Emax = interval
@@ -33,7 +33,7 @@ function feast_banded(A::Matrix{Complex{T}}, kla::Int, interval::Tuple{T,T};
                      M0::Union{Int,Nothing} = nothing, fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing,
                      subspace_size=nothing, tol=nothing, maxiter=nothing,
                      quadrature_points=nothing, solver::Symbol=:direct,
-                     solver_opts::NamedTuple=NamedTuple()) where T<:Real
+                     solver_opts::NamedTuple=NamedTuple()) where T<:AbstractFloat
     # Feast interface for complex Hermitian banded matrices
 
     Emin, Emax = interval
@@ -53,7 +53,15 @@ function feast_banded(A::Matrix{Complex{T}}, kla::Int, interval::Tuple{T,T};
     end
 end
 
-function feast_banded(A::Matrix, kla::Int, interval::Tuple{Real,Real}; kwargs...)
-    Ap = _feast_promote_eltype(A)
-    return feast_banded(Ap, kla, _feast_promote_interval(Ap, interval); kwargs...)
+function feast_banded(A::Matrix, kla::Int, interval::Tuple{Real,Real};
+                      B::Union{Matrix,Nothing} = nothing, kwargs...)
+    # Promote A and B to one floating-point element type, and the interval to
+    # its real type, before dispatching to the typed methods above.
+    TE = _feast_float_eltype(B === nothing ? eltype(A) : promote_type(eltype(A), eltype(B)))
+    Ap = _feast_promote_eltype(A, TE)
+    Bp = B === nothing ? nothing : _feast_promote_eltype(B, TE)
+    ip = _feast_promote_interval(Ap, interval)
+    Ap === A && Bp === B && typeof(ip) === typeof(interval) &&
+        throw(ArgumentError("feast_banded does not support element type $(eltype(A))"))
+    return feast_banded(Ap, kla, ip; B=Bp, kwargs...)
 end

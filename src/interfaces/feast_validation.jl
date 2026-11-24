@@ -26,7 +26,14 @@ function _gershgorin_bounds(A::SparseMatrixCSC{TV, Ti}) where {TV, Ti}
     return (min_est, max_est)
 end
 
-function _gershgorin_bounds(A::AbstractMatrix)
+# Wrappers of sparse storage and banded structured matrices are bounded through
+# their sparse form, in O(nnz): the generic loop below reads every entry, which
+# for Symmetric(sparse) is O(N²) scalar lookups.
+_gershgorin_bounds(A::AbstractMatrix) =
+    _feast_sparse_like(A) ? _gershgorin_bounds(SparseMatrixCSC(sparse(A))) :
+                            _gershgorin_bounds_dense(A)
+
+function _gershgorin_bounds_dense(A::AbstractMatrix)
     T = real(eltype(A))
     N = size(A, 1)
     min_est = typemax(T)
@@ -45,10 +52,10 @@ function _gershgorin_bounds(A::AbstractMatrix)
     return (min_est, max_est)
 end
 
-function feast_validate_interval(A::AbstractMatrix{T}, interval::Tuple{T,T}) where T<:Real
+function feast_validate_interval(A::AbstractMatrix{T}, interval::Tuple{Real,Real}) where T<:Real
     Emin, Emax = interval
-    if Emin >= Emax
-        throw(ArgumentError("Invalid interval: Emin must be less than Emax"))
+    if !(isfinite(Emin) && isfinite(Emax) && Emin < Emax)
+        throw(ArgumentError("Invalid interval: Emin and Emax must be finite with Emin < Emax"))
     end
 
     min_est, max_est = _gershgorin_bounds(A)
@@ -61,10 +68,10 @@ function feast_validate_interval(A::AbstractMatrix{T}, interval::Tuple{T,T}) whe
     return (min_est, max_est)
 end
 
-function feast_validate_interval(A::AbstractMatrix{Complex{T}}, interval::Tuple{T,T}) where T<:Real
+function feast_validate_interval(A::AbstractMatrix{Complex{T}}, interval::Tuple{Real,Real}) where T<:Real
     Emin, Emax = interval
-    if Emin >= Emax
-        throw(ArgumentError("Invalid interval: Emin must be less than Emax"))
+    if !(isfinite(Emin) && isfinite(Emax) && Emin < Emax)
+        throw(ArgumentError("Invalid interval: Emin and Emax must be finite with Emin < Emax"))
     end
 
     min_est, max_est = _gershgorin_bounds(A)
@@ -94,8 +101,8 @@ case no warning is issued.
 function feast_validate_interval(A::AbstractMatrix, B::AbstractMatrix,
                                  interval::Tuple{Real,Real})
     Emin, Emax = interval
-    if Emin >= Emax
-        throw(ArgumentError("Invalid interval: Emin must be less than Emax"))
+    if !(isfinite(Emin) && isfinite(Emax) && Emin < Emax)
+        throw(ArgumentError("Invalid interval: Emin and Emax must be finite with Emin < Emax"))
     end
 
     a_lo, a_hi = _gershgorin_bounds(A)

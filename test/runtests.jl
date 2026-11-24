@@ -42,6 +42,7 @@ include("support/setup.jl")
         include("numerics/projection_scaling.jl")
         include("numerics/projectors_and_scaling.jl")
         include("numerics/robustness.jl")
+        include("numerics/moment_and_gmres_regressions.jl")
     end
     @testset "Parallel backends" begin
         include("backends/threaded.jl")

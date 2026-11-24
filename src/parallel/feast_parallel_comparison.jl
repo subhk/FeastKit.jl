@@ -23,55 +23,43 @@ function feast_parallel_comparison(A::AbstractMatrix, B::AbstractMatrix, interva
 
     results = Dict{Symbol, Any}()
 
-    # Serial benchmark
-    println("\n1. Serial execution:")
-    serial_time = @elapsed begin
-        results[:serial] = feast(A, B, interval, M0=M0, parallel=:serial)
+    # A backend that cannot run this problem (complex or non-symmetric input
+    # on the threaded and distributed drivers, say) is reported and skipped.
+    function run_backend(label, key, solve, serial_time)
+        println("\n", label, ":")
+        local result
+        elapsed = try
+            @elapsed (result = solve())
+        catch err
+            err isa ArgumentError || rethrow()
+            println("   Skipped: ", sprint(showerror, err))
+            return nothing
+        end
+        results[key] = result
+        println("   Time: $(round(elapsed, digits=3)) seconds")
+        println("   Eigenvalues: $(result.M)")
+        serial_time === nothing || println("   Speedup: $(round(serial_time/elapsed, digits=2))x")
+        return elapsed
     end
-    println("   Time: $(round(serial_time, digits=3)) seconds")
-    println("   Eigenvalues: $(results[:serial].M)")
 
-    # Threading benchmark
+    serial_time = run_backend("1. Serial execution", :serial,
+                              () -> feast(A, B, interval, M0=M0, parallel=:serial), nothing)
     if Threads.nthreads() > 1
-        println("\n2. Threading execution:")
-        thread_time = @elapsed begin
-            results[:threads] = feast(A, B, interval, M0=M0, parallel=:threads)
-        end
-        println("   Time: $(round(thread_time, digits=3)) seconds")
-        println("   Eigenvalues: $(results[:threads].M)")
-        println("   Speedup: $(round(serial_time/thread_time, digits=2))x")
+        run_backend("2. Threading execution", :threads,
+                    () -> feast(A, B, interval, M0=M0, parallel=:threads), serial_time)
     end
-
-    # Distributed benchmark
     if _distributed_backend_ready()
-        println("\n3. Distributed execution:")
-        dist_time = @elapsed begin
-            results[:distributed] = feast(A, B, interval, M0=M0, parallel=:distributed)
-        end
-        println("   Time: $(round(dist_time, digits=3)) seconds")
-        println("   Eigenvalues: $(results[:distributed].M)")
-        println("   Speedup: $(round(serial_time/dist_time, digits=2))x")
+        run_backend("3. Distributed execution", :distributed,
+                    () -> feast(A, B, interval, M0=M0, parallel=:distributed), serial_time)
     end
-
-    # MPI benchmark
     if mpi_available()
-        println("\n4. MPI execution:")
-        mpi_time = @elapsed begin
-            results[:mpi] = feast(A, B, interval, M0=M0, parallel=:mpi)
-        end
-        println("   Time: $(round(mpi_time, digits=3)) seconds")
-        println("   Eigenvalues: $(results[:mpi].M)")
-        println("   Speedup: $(round(serial_time/mpi_time, digits=2))x")
-
+        run_backend("4. MPI execution", :mpi,
+                    () -> feast(A, B, interval, M0=M0, parallel=:mpi), serial_time)
         # Hybrid MPI+threads if both available
         if Threads.nthreads() > 1
-            println("\n5. Hybrid MPI+Threading:")
-            hybrid_time = @elapsed begin
-                results[:hybrid] = feast_hybrid(A, B, interval, M0=M0, use_threads_per_rank=true)
-            end
-            println("   Time: $(round(hybrid_time, digits=3)) seconds")
-            println("   Eigenvalues: $(results[:hybrid].M)")
-            println("   Speedup: $(round(serial_time/hybrid_time, digits=2))x")
+            run_backend("5. Hybrid MPI+Threading", :hybrid,
+                        () -> feast_hybrid(A, B, interval, M0=M0, use_threads_per_rank=true),
+                        serial_time)
         end
     end
 

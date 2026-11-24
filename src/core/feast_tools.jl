@@ -193,20 +193,8 @@ function zolotarev_point(n::Int, k::Int)
         end
     end
 
-    # Fallback for unsupported n values - use trapezoidal-like approximation
-    # with warning (this should rarely happen in practice)
-    @warn "Zolotarev quadrature not available for n=$n, using approximation" maxlog=1
-
-    if k == 0
-        return complex(0.0, 0.0), complex(1.0, 0.0)
-    end
-
-    # Approximate using points on unit circle (trapezoidal-like)
-    theta = π * (2*k - 1) / (2*n)
-    xe = complex(cos(theta), sin(theta))
-    we = complex(0.0, π/n)
-
-    return xe, we
+    throw(ArgumentError("Zolotarev quadrature is tabulated only for " *
+                        "$(_FEAST_ZOLOTAREV_POINTS) contour points; got n=$n"))
 end
 
 # Integer or mixed bounds are natural to type -- feast_contour_expert(-2, 2, 16)
@@ -224,8 +212,13 @@ function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:AbstractFloa
     # `feastinit!(fpm); fpm[2] = 12` left fpm[18] (ellipse aspect ratio, in
     # percent) at -111, which mirrors the contour, reverses its orientation and
     # flips the rational filter to -1 inside.
+    # A zero aspect ratio (what a bare `zeros(Int, 64)` leaves) collapses the
+    # contour onto the real axis, and an unknown fpm[16] used to fall through
+    # to the trapezoidal rule; feastdefault! repairs the first and rejects the
+    # second.
     if fpm[2] == FEAST_UNINITIALIZED || fpm[2] <= 0 ||
-       fpm[16] == FEAST_UNINITIALIZED || fpm[18] == FEAST_UNINITIALIZED
+       fpm[16] == FEAST_UNINITIALIZED || !(fpm[16] in (0, 1, 2)) ||
+       fpm[18] == FEAST_UNINITIALIZED || fpm[18] <= 0
         @debug "feast_contour calling feastdefault!" fpm2=fpm[2] fpm16=fpm[16] fpm18=fpm[18]
         feastdefault!(fpm)
     end
@@ -293,34 +286,45 @@ function feast_contour(Emin::T, Emax::T, fpm::Vector{Int}) where T<:AbstractFloa
     return FeastContour{T}(Zne, Wne)
 end
 
-# True when the nodes and weights already form a conjugate-closed (full) path.
-# A Hermitian half contour lies strictly on one side of the real axis, so every
-# node must pair with a DISTINCT node carrying the conjugate weight. A
-# self-conjugate (real-axis) node therefore reads as "not yet completed", which
-# is the safe direction: the documented public convention is a half contour.
+# True when the nodes and weights already form a conjugate-closed (full) path:
+# every node off the real axis pairs with a DISTINCT node carrying the
+# conjugate weight, and there is at least one such pair. A node on the real
+# axis is its own conjugate and needs a real weight (a closed path with an odd
+# number of nodes crosses the axis at one). A Hermitian half contour lies on
+# one side of the real axis, so it has no pairs and reads as "not yet
+# completed", which is also the safe direction: the documented public
+# convention is a half contour.
 function _feast_hermitian_contour_is_closed(contour::FeastContour{T}) where T
     Zne, Wne = contour.Zne, contour.Wne
     n = length(Zne)
-    (n > 0 && iseven(n)) || return false
+    n > 1 || return false
     all(isfinite, Zne) && all(isfinite, Wne) || return false
-    # No absolute floor: tiny contours and tiny weights still need distinct
-    # conjugate partners. Compare node components separately so a large real
-    # translation cannot mask an imaginary-coordinate mismatch.
-    rtol = T(8) * eps(T)
+    # Tolerances are relative to the contour's own extent and to its largest
+    # weight, so tiny contours and tiny weights still need distinct conjugate
+    # partners and a large real translation cannot mask a mismatch. They must
+    # absorb the rounding of sin/cos in generated nodes (a dozen ulps), which
+    # is far below the separation between distinct nodes.
+    center = sum(Zne) / n
+    ztol = sqrt(eps(T)) * maximum(z -> abs(z - center), Zne)
+    wtol = sqrt(eps(T)) * maximum(abs, Wne)
     matched = falses(n)
+    npairs = 0
     for i in 1:n
         matched[i] && continue
-        iszero(imag(Zne[i])) && return false
+        if abs(imag(Zne[i])) <= ztol
+            abs(imag(Wne[i])) <= wtol || return false
+            matched[i] = true
+            continue
+        end
         zc = conj(Zne[i])
         wc = conj(Wne[i])
         partner = 0
         for j in 1:n
             (j == i || matched[j]) && continue
-            iszero(imag(Zne[j])) && continue
             signbit(imag(Zne[i])) == signbit(imag(Zne[j])) && continue
-            if isapprox(real(Zne[j]), real(zc); rtol=rtol, atol=zero(T)) &&
-               isapprox(imag(Zne[j]), imag(zc); rtol=rtol, atol=zero(T)) &&
-               isapprox(Wne[j], wc; rtol=rtol, atol=zero(T))
+            if abs(real(Zne[j]) - real(zc)) <= ztol &&
+               abs(imag(Zne[j]) - imag(zc)) <= ztol &&
+               abs(Wne[j] - wc) <= wtol
                 partner = j
                 break
             end
@@ -328,8 +332,9 @@ function _feast_hermitian_contour_is_closed(contour::FeastContour{T}) where T
         partner == 0 && return false
         matched[i] = true
         matched[partner] = true
+        npairs += 1
     end
-    return true
+    return npairs > 0
 end
 
 # Public Hermitian contours contain one half of the conjugate-symmetric path.
@@ -349,10 +354,16 @@ function feast_gcontour(Emid::Complex{T}, r::T, fpm::Vector{Int}) where T<:Abstr
     # Same sentinel resolution as feast_contour: fpm[8] alone is not enough,
     # this builder also reads fpm[16], fpm[18] and the rotation fpm[19].
     if fpm[8] == FEAST_UNINITIALIZED || fpm[8] <= 0 ||
-       fpm[16] == FEAST_UNINITIALIZED || fpm[18] == FEAST_UNINITIALIZED ||
+       fpm[16] == FEAST_UNINITIALIZED || !(fpm[16] in (0, 1, 2)) ||
+       fpm[18] == FEAST_UNINITIALIZED || fpm[18] <= 0 ||
        fpm[19] == FEAST_UNINITIALIZED
         feastdefault!(fpm)
     end
+    # Zolotarev rules approximate the step function of a real interval; there
+    # is no full-contour version, and fpm[16] = 2 used to become trapezoidal.
+    fpm[16] == 2 && throw(ArgumentError(
+        "fpm[16]=2 (Zolotarev) applies to symmetric/Hermitian interval contours; " *
+        "use 0 (Gauss) or 1 (trapezoidal) for a full contour"))
 
     # For non-Hermitian problems, use fpm[8] for full-contour point count
     ne = fpm[8]      # Number of integration points (full contour)
@@ -438,6 +449,17 @@ function feast_gcontour(Emid::Complex{T}, r::T, fpm::Vector{Int}) where T<:Abstr
     return FeastContour{T}(Zne, Wne)
 end
 
+# Constant term of the filter a built-in interval contour stands for. Zolotarev
+# rules approximate the step function by w0 + Σ w_e/(z_e - λ) (+ conjugates), and
+# `feast_rational` has always included w0; the solvers add w0 X to the filtered
+# block, which halves the filter's worst response outside the interval
+# relative to its smallest response inside (0.41 -> 0.17 for 4 nodes, 0.023 ->
+# 0.011 for 8). Gauss, trapezoidal and custom contours have no constant term.
+function _feast_filter_offset(::Type{T}, fpm::Vector{Int}, custom::Bool) where T<:Real
+    (custom || fpm[16] != 2) && return zero(T)
+    return T(real(zolotarev_point(fpm[2], 0)[2]))
+end
+
 # Convenience overloads: a real center, and integer or mixed-precision inputs.
 function feast_gcontour(Emid::Real, r::Real, fpm::Vector{Int})
     T = float(promote_type(typeof(Emid), typeof(r)))
@@ -452,24 +474,45 @@ end
 function feast_customcontour(Zne::Vector{Complex{T}},
                            fpm::Vector{Int}) where T<:Real
     ne = length(Zne)
-    fpm[2] = ne  # Set number of integration points
-    # Note: fpm[29] stores the custom contour registry ID (0 = no custom contour)
-    # fpm[15] is for contour schemes (two-sided vs one-sided), not custom contour flag
-    # We leave fpm[29] unchanged since this function returns a contour directly
+    ne >= 3 || throw(ArgumentError("A closed custom contour needs at least 3 nodes, got $ne"))
+    # Record the count both for interval (fpm[2]) and full-contour (fpm[8]) use.
+    # fpm[29] (the custom contour registry ID) is left alone: this function
+    # returns a contour rather than registering one.
+    fpm[2] = ne
+    fpm[8] = ne
 
-    # Trapezoidal weights for the Cauchy integral (1/2πi) ∮ f(z) dz over the
-    # closed polygon through Zne. The arc length element at node i is the
-    # central difference (Z[i+1] - Z[i-1])/2, and the 1/(2πi) prefactor is what
-    # makes the resulting rational filter evaluate to ~1 inside the contour --
-    # dividing by 2*ne instead left the filter scaled by roughly ne/(2πi).
+    # Trapezoidal weights for the Cauchy integral (1/2πi) ∮ f(z) dz, taking the
+    # nodes as samples of a closed curve z(t) at equally spaced parameter values
+    # t_j = 2πj/ne, in counterclockwise order: w_j = z'(t_j) (2π/ne) / (2πi). The
+    # derivative is that of the trigonometric interpolant through the nodes:
+    # exact for circles and ellipses, whose weights then match feast_circle and
+    # feast_ellipse, and spectrally accurate for other smooth curves. Central
+    # differences of neighbouring nodes, used before,
+    # are only second order: on a circle they scale the filter by
+    # sin(2π/ne)/(2π/ne), 0.90 at 8 nodes, and two nodes gave zero weights.
+    # A constant translation has zero derivative. Remove it before the DFT
+    # so rounding in the nonzero-frequency sums is set by the contour's extent.
+    origin = first(Zne)
+    coeffs = Vector{Complex{T}}(undef, ne)
+    for k in 1:(ne - 1)
+        acc = zero(Complex{T})
+        for j in 0:(ne - 1)
+            acc += (Zne[j + 1] - origin) * cis(-T(2π) * k * j / ne)
+        end
+        coeffs[k + 1] = acc / ne
+    end
+    # Wavenumber of DFT index k; the Nyquist mode of an even count has no
+    # well-defined derivative and is dropped.
+    wavenumber(k) = 2k < ne ? k : (2k == ne ? 0 : k - ne)
     Wne = Vector{Complex{T}}(undef, ne)
-    denom = 4 * T(π) * im
-
-    for i in 1:ne
-        i_prev = i == 1 ? ne : i - 1
-        i_next = i == ne ? 1 : i + 1
-
-        Wne[i] = (Zne[i_next] - Zne[i_prev]) / denom
+    for j in 0:(ne - 1)
+        deriv = zero(Complex{T})
+        for k in 1:(ne - 1)
+            κ = wavenumber(k)
+            κ == 0 && continue
+            deriv += (im * κ) * coeffs[k + 1] * cis(T(2π) * κ * j / ne)
+        end
+        Wne[j + 1] = deriv / (im * ne)
     end
 
     return FeastContour{T}(Zne, Wne)
@@ -918,12 +961,38 @@ _feast_residual_floor(spectral::Real, region::Real) =
         (norm(residual) / bnorm) / denom : oftype(bnorm, Inf)
 end
 
-# A contour filter maps eigenvalues inside the region to |ρ(λ)| of roughly 1
-# (about 1/2 on the boundary) and damps everything outside. A Ritz vector whose
-# filtered image has shrunk below this fraction of its own norm is dominated by
-# out-of-region eigenvectors, even when its Rayleigh quotient happens to land
-# inside the region.
+# A contour filter maps an eigenvector with eigenvalue λ to ρ(λ) times itself:
+# |ρ(λ)| is roughly 1 inside the region (about 1/2 on the boundary) for the
+# built-in quadratures, and small outside. A Ritz vector whose filtered image
+# has shrunk below this fraction of what the filter does at its own Ritz value
+# is dominated by out-of-region eigenvectors, even though its Rayleigh quotient
+# happens to land inside the region.
 const _FEAST_SPURIOUS_RESPONSE = 0.25
+
+"""
+    _feast_filter_response(lambda, Zne, Wne, half)
+
+Magnitude `|ρ(λ)|` of the rational filter `ρ(λ) = Σ Wne[e] / (Zne[e] - λ)` that a
+contour sweep applies to an eigenvector with eigenvalue `lambda`. `half=true`
+is for kernels that integrate over the upper half contour only and keep the
+real part of `2 Σ Wne[e] (Zne[e] B - A)⁻¹ B`. `offset` is the filter's constant
+term ([`_feast_filter_offset`](@ref)), which the Zolotarev filters have.
+
+The spurious-pair screen measures responses against this value rather than
+against 1: a flat ellipse with few nodes, or user weights that are rescaled,
+give a filter whose in-region value is far from 1 without making FEAST any
+less valid. A value that cannot be evaluated (a Ritz value on a node) falls
+back to 1.
+"""
+function _feast_filter_response(lambda::Number, Zne::AbstractVector,
+                                Wne::AbstractVector, half::Bool; offset::Real = 0)
+    acc = zero(promote_type(eltype(Wne), eltype(Zne), typeof(lambda)))
+    @inbounds for e in eachindex(Zne, Wne)
+        acc += Wne[e] / (Zne[e] - lambda)
+    end
+    ρ = half ? abs(2 * real(acc) + offset) : abs(acc + offset)
+    return isfinite(ρ) ? ρ : one(ρ)
+end
 
 # Refinement loops that must have completed before a Ritz pair may be declared
 # spurious. By then every in-region eigendirection has been amplified relative
@@ -932,11 +1001,12 @@ const _FEAST_SPURIOUS_RESPONSE = 0.25
 const _FEAST_SPURIOUS_MIN_LOOPS = 2
 
 """
-    _feast_filter_rank(Y, X)
+    _feast_filter_rank(Y, X; scale=1)
 
 Number of eigendirections in `span(X)` that the contour filter keeps: the
 eigenvalues `μ` of the filter restricted to that subspace, `G = X⁺ Y` with
-`Y = ρ(B⁻¹A) X`, that reach `_FEAST_SPURIOUS_RESPONSE` in magnitude. Once the
+`Y = ρ(B⁻¹A) X`, that reach `_FEAST_SPURIOUS_RESPONSE * scale` in magnitude,
+where `scale` is the filter's in-region response. Once the
 subspace holds the region's eigenvectors, `G` approximates the restriction of
 the spectral projector, whose eigenvalues are 1 on in-region directions and 0
 elsewhere — independently of how the Rayleigh-Ritz basis mixes them.
@@ -945,7 +1015,7 @@ elsewhere — independently of how the Rayleigh-Ritz basis mixes them.
 only through two small products. When `XᴴX` is too ill-conditioned for that,
 a pivoted QR of `X` drops its dependent columns instead.
 """
-function _feast_filter_rank(Y::AbstractMatrix, X::AbstractMatrix)
+function _feast_filter_rank(Y::AbstractMatrix, X::AbstractMatrix; scale::Real = 1)
     m = size(X, 2)
     m == 0 && return 0
     RT = real(eltype(X))
@@ -977,19 +1047,42 @@ function _feast_filter_rank(Y::AbstractMatrix, X::AbstractMatrix)
         return m
     end
     all(isfinite, μ) || return m
-    return count(v -> abs(v) >= _FEAST_SPURIOUS_RESPONSE, μ)
+    return count(v -> abs(v) >= _FEAST_SPURIOUS_RESPONSE * scale, μ)
+end
+
+# Keep the residual checks local when a large translation makes the usual
+# near-convergence window cover the whole contour. Both limits remain in
+# spectral-relative units, with an allowance for cancellation in A*x - λ*B*x.
+function _feast_contour_residual_limits(tol::Real, residual_scale, Zne::AbstractVector)
+    near_tol = sqrt(tol)
+    residual_scale === nothing && return tol, near_tol
+    center, radius = _feast_contour_extent(Zne)
+    if zero(radius) < radius < near_tol * abs(center)
+        scale = max(residual_scale, abs(center) + radius)
+        local_limit = max(near_tol * (radius / scale), 8eps(typeof(radius)))
+        return min(tol, local_limit), min(near_tol, local_limit)
+    end
+    return tol, near_tol
 end
 
 """
-    _feast_screen_spurious!(keep, Y, X, res, M, tol; filter_rank=false)
+    _feast_screen_spurious!(keep, Y, X, res, M, tol, lambda, Zne, Wne;
+                            half=false, filter_rank=false)
 
 Classify the previous loop's in-region Ritz pairs using the contour sweep that
-has just filtered their vectors: column `j` of `Y` is `ρ(B⁻¹A) * X[:, j]`.
+has just filtered their vectors: column `j` of `Y` is `ρ(B⁻¹A) * X[:, j]`, and
+`lambda[j]` is the pair's Ritz value. `Zne`, `Wne` are the nodes and weights of
+that sweep, and `half` says whether it covered only the upper half contour
+(see [`_feast_filter_response`](@ref)).
 
-Converged pairs (`res[j] <= tol`) are kept. An unconverged pair whose filter
-response `‖Y[:, j]‖ / ‖X[:, j]‖` is below `_FEAST_SPURIOUS_RESPONSE` is spurious:
-its vector is made of out-of-region eigenvectors mixed so that its Rayleigh
-quotient falls inside the region. Nothing further filtering can do separates
+Converged pairs are kept. For a translated narrow contour, the convergence
+and near-convergence limits also account for the extent of the region.
+An unconverged pair whose filter
+response `‖Y[:, j]‖ / ‖X[:, j]‖` is below `_FEAST_SPURIOUS_RESPONSE` times the
+filter's own value `|ρ(lambda[j])|` is spurious: its vector is made of
+out-of-region eigenvectors mixed so that its Rayleigh quotient falls inside the
+region. Measuring against `|ρ(lambda[j])|` keeps the test independent of how
+the filter is normalized. Nothing further filtering can do separates
 such a mixture when the out-of-region eigenvalues are damped equally, so left
 alone it blocks convergence until the loop budget runs out, and is reported as
 an eigenvalue.
@@ -1009,20 +1102,62 @@ the filtered vector.
 """
 function _feast_screen_spurious!(keep::AbstractVector{Bool}, Y::AbstractMatrix,
                                  X::AbstractMatrix, res::AbstractVector, M::Int,
-                                 tol::Real; filter_rank::Bool = false)
+                                 tol::Real, lambda::AbstractVector,
+                                 Zne::AbstractVector, Wne::AbstractVector;
+                                 half::Bool = false, filter_rank::Bool = false,
+                                 residual_scale = nothing, boundary = nothing,
+                                 offset::Real = 0)
     M > 0 || return nothing
     nconverged = 0
     all_weak = true
+    # Smallest filter value among the converged pairs, which are genuine
+    # in-region eigenvalues: the scale against which the subspace's filter
+    # eigenvalues are counted below.
+    ρmin = oftype(float(real(one(eltype(Zne)))), Inf)
+    # Near a node of a full contour the filter's value at a Ritz value can be
+    # many times its value in the rest of the region, and changes faster than
+    # the Ritz value of a pair that is still converging is known: such a pair
+    # responds like the region, not like the node. So the response a pair is
+    # held to is at most the region's floor. (On the half contour the Ritz
+    # values are real, where the filter has no such peaks.)
+    ρfloor = half ? oftype(ρmin, Inf) :
+        boundary === nothing ?
+            oftype(ρmin, _FEAST_INREGION_RESPONSE *
+                         _feast_filter_response(first(_feast_contour_extent(Zne)), Zne, Wne,
+                                                false; offset=offset)) :
+            oftype(ρmin, _feast_filter_floor(boundary, Zne, Wne, false; offset=offset))
+    tol, near_tol = _feast_contour_residual_limits(tol, residual_scale, Zne)
+    edge = boundary === nothing ? Zne : boundary
     @inbounds for j in 1:M
+        ρ = _feast_filter_response(lambda[j], Zne, Wne, half; offset=offset)
         if res[j] <= tol
             keep[j] = true
             nconverged += 1
+            ρmin = min(ρmin, ρ)
             continue
         end
         keep[j] = false
+        # An approximate eigenpair can have a weak response in a nonnormal
+        # pencil. Protect pairs with small residuals on the contour's scale,
+        # allowing for roundoff on the scale of the eigenproblem.
+        res[j] <= near_tol && return nothing
+        # A spurious pair mixes eigenvectors from outside the region, so its
+        # residual ‖A x - λ B x‖ / ‖B x‖ is at least the distance from λ to the
+        # nearest of them, hence to the region's boundary. A smaller residual
+        # means an eigenvalue nearby inside the region (Bauer-Fike for a
+        # normal pencil); for a non-normal one such a pair can sit on an
+        # in-region invariant subspace that has more eigenvalues than subspace
+        # columns, and its response says nothing. `residual_scale` is the
+        # σ that `res` was divided by (with max(|λ|, σ)); `boundary` samples
+        # the region's boundary (see `_feast_region_boundary`).
+        if residual_scale !== nothing
+            absres = res[j] * max(abs(lambda[j]), residual_scale)
+            absres < _feast_polygon_distance(lambda[j], edge) && return nothing
+        end
         xnorm = norm(view(X, :, j))
         ynorm = norm(view(Y, :, j))
-        (xnorm > zero(xnorm) && ynorm < _FEAST_SPURIOUS_RESPONSE * xnorm) || (all_weak = false)
+        (xnorm > zero(xnorm) && ynorm < _FEAST_SPURIOUS_RESPONSE * min(ρ, ρfloor) * xnorm) ||
+            (all_weak = false)
     end
     nconverged == M && return nothing
     all_weak && return nconverged
@@ -1030,9 +1165,267 @@ function _feast_screen_spurious!(keep::AbstractVector{Bool}, Y::AbstractMatrix,
     # non-normal pencil, an oblique mixture that reuses a converged direction.
     # With nothing converged there is nothing to reuse, and a subspace with any
     # in-region direction could not pass the count, so skip it.
-    nconverged > 0 && filter_rank && _feast_filter_rank(Y, X) <= nconverged &&
-        return nconverged
+    nconverged > 0 && filter_rank &&
+        _feast_filter_rank(Y, X; scale=ρmin) <= nconverged && return nconverged
     return nothing
+end
+
+# A Ritz value whose filter value is below this fraction of the filter's value
+# at the region's center lies where the filter has already removed everything:
+# no in-region eigenvector could have been outweighed by eigenvectors there.
+const _FEAST_EMPTY_FAR_RESPONSE = 1e-3
+# The smallest filter value inside the region, relative to its value at the
+# centre: 1/2, reached on the boundary, for every circle and ellipse rule
+# (Gauss and trapezoidal, 4 to 32 nodes). A genuine in-region eigenpair
+# responds at least this strongly wherever it sits. Polygon corners go lower
+# (about 1/4 at a right angle); see `_feast_filter_floor`, which measures it.
+const _FEAST_INREGION_RESPONSE = 0.5
+
+"""
+    _feast_region_looks_empty(ritz, center, radius, Zne, Wne, half, prev_dist;
+                              real_spectrum=true, nearest_residual=nothing, tol=0)
+
+Decide what a Rayleigh-Ritz step that put no Ritz value inside the region
+means. `ritz` holds all of its Ritz values, `center` and `radius` describe the
+region, and `prev_dist` is the distance returned by the previous call if the
+loop before this one also found nothing (negative otherwise).
+
+An empty Ritz set does not by itself show that the region is empty: when
+eigenvalues crowd the boundary from outside and the subspace is small, the
+first few subspaces are dominated by them and an enclosed eigenvalue appears
+only after further filtering. Two things do settle it:
+
+- the filter is negligible (`_FEAST_EMPTY_FAR_RESPONSE`) everywhere at least as
+  far from the center as the nearest Ritz value, so nothing near the boundary
+  is competing. On the real axis the bound is sampled
+  ([`_feast_filter_tail_bound`](@ref)), not read off at the Ritz value itself:
+  Zolotarev and custom filters ripple outside the region and can vanish at an
+  isolated point. For a complex spectrum the Ritz values themselves must all
+  be in the negligible zone, and the nearest pair must also be a converged
+  eigenpair; or
+- the nearest Ritz value has stopped moving between two consecutive loops, so
+  the subspace has converged onto out-of-region eigenvectors. For a
+  non-Hermitian pencil (`real_spectrum=false`) that also needs the nearest pair
+  to be a converged eigenpair (`nearest_residual(i)` for its index `i` in `ritz`
+  at most `tol`, or the eps/ρ accuracy of a subspace the filter damped by ρ):
+  with more eigenvalues inside than subspace columns the filter is
+  close to the identity on the in-region eigenspace, the subspace can stall on
+  a non-invariant part of it, and oblique Ritz values of such a subspace may
+  lie outside the region and stay put.
+
+Returns `(empty, dist)`; when `empty` is false the caller should filter again
+and pass `dist` back in.
+"""
+function _feast_region_looks_empty(ritz::AbstractVector, center::Number, radius::Real,
+                                   Zne::AbstractVector, Wne::AbstractVector,
+                                   half::Bool, prev_dist::Real;
+                                   real_spectrum::Bool = true,
+                                   nearest_residual = nothing, tol::Real = 0,
+                                   filtered_ratio = nothing, offset::Real = 0,
+                                   boundary = nothing)
+    RT = typeof(float(radius))
+    isempty(ritz) && return true, -one(RT)
+    dist = RT(Inf)
+    inear = 0
+    @inbounds for (i, v) in enumerate(ritz)
+        d = RT(abs(v - center))
+        d < dist && ((dist, inear) = (d, i))
+    end
+    isfinite(dist) || return true, -one(RT)
+    ρcenter = _feast_filter_response(center, Zne, Wne, half; offset=offset)
+    # `filtered_ratio` is ‖ρ(B⁻¹A) X‖ / ‖X‖ for the sweep's input X, passed once
+    # X has itself been filtered: any in-region content then dominates X and
+    # keeps the ratio near the filter's in-region value, so a negligible ratio
+    # means the region holds nothing, wherever the Ritz values are.
+    filtered_ratio !== nothing && filtered_ratio < _FEAST_EMPTY_FAR_RESPONSE * ρcenter &&
+        return true, dist
+    # How strongly the filter keeps what the subspace holds. On the real axis
+    # the sampled tail bound covers everything beyond the nearest Ritz value;
+    # a complex spectrum can sit in any direction, and sampling whole circles
+    # there is too pessimistic (Gauss nodes leave the filter largest near the
+    # axis), so the Ritz values themselves are used: all of them must be in
+    # the negligible zone.
+    reach = real_spectrum ?
+        _feast_filter_tail_bound(center, dist, Zne, Wne, half; real_spectrum=true, offset=offset) :
+        maximum(v -> isfinite(v) ? RT(_feast_filter_response(v, Zne, Wne, half; offset=offset)) : zero(RT), ritz)
+    # Pair i as an eigenpair: a subspace the filter has damped by ρ is only
+    # known to about eps/ρ, since the contour sum that produced it cancelled
+    # terms that much larger. (`nearest_residual` gives any pair's residual.)
+    # Its variables are declared local: a name it shares with this function
+    # would otherwise be the same variable, overwritten by every call.
+    function converged(i)
+        nearest_residual === nothing && return true
+        local ρi = RT(_feast_filter_response(ritz[i], Zne, Wne, half; offset=offset))
+        local accuracy = ρi > zero(RT) ? 10 * eps(RT) * ρcenter / ρi : RT(Inf)
+        return nearest_residual(i) <= max(tol, accuracy)
+    end
+    nearest_converged() = converged(inear)
+    # For a non-Hermitian pencil the Ritz values alone prove nothing: oblique
+    # Ritz values of an in-region subspace can sit far outside the region.
+    # A filter with a constant term (Zolotarev) keeps an offset-weighted copy
+    # of the trial block; when the spectrum spans many orders of magnitude,
+    # the first Ritz values are dragged towards its far end however small that
+    # weight, so they are read only once a second sweep has squared it.
+    first_look = iszero(offset) || prev_dist >= zero(prev_dist)
+    reach < _FEAST_EMPTY_FAR_RESPONSE * ρcenter && first_look &&
+        (real_spectrum || nearest_converged()) && return true, dist
+    settled = prev_dist >= zero(prev_dist) && abs(dist - prev_dist) <= sqrt(eps(RT)) * radius
+    # A settled subspace shows the region empty only if an in-region
+    # eigenvector would have displaced one of its pairs: some converged pair
+    # must be amplified less than the filter's floor in the region (`boundary`,
+    # see `_feast_filter_floor`; without it, a quarter of the central value).
+    # Then an in-region component would have grown against that pair at every
+    # sweep, and could not have fallen to what a converged residual allows. An
+    # unconverged pair proves nothing: its Ritz value is wherever the oblique
+    # projection put it this sweep. On the real axis the filter is below the
+    # floor everywhere outside, but off it an eigenvalue just outside, near a
+    # node, can be amplified far more than the region itself; a subspace with
+    # too few columns then settles on such pairs whatever the region holds.
+    # The same holds for the subspace as a whole: if the last sweep kept less
+    # of it than the floor (`filtered_ratio`), some direction of it is weaker
+    # than any in-region eigenvector, which would have taken its place.
+    if settled && !real_spectrum
+        ρfloor = boundary === nothing ? RT(_FEAST_INREGION_RESPONSE / 2) * ρcenter :
+                 RT(_feast_filter_floor(boundary, Zne, Wne, half; offset=offset))
+        displaced = filtered_ratio !== nothing && filtered_ratio < ρfloor
+        for i in eachindex(ritz)
+            displaced && break
+            isfinite(ritz[i]) || continue
+            RT(_feast_filter_response(ritz[i], Zne, Wne, half; offset=offset)) < ρfloor || continue
+            converged(i) && (displaced = true; break)
+        end
+        displaced || return false, dist
+    end
+    return settled && nearest_converged(), dist
+end
+
+"""
+    _feast_filter_tail_bound(center, dist, Zne, Wne, half; real_spectrum=true)
+
+Largest filter magnitude `|ρ(λ)|` found by sampling points at distance `dist`
+to `10⁴ dist` from `center`: on the real axis on both sides for a real
+spectrum, on circles otherwise. The built-in Gauss and trapezoidal filters
+decay monotonically away from the region, but Zolotarev and user contours
+ripple, so the value at one point says little about the values beyond it.
+"""
+function _feast_filter_tail_bound(center::Number, dist::Real, Zne::AbstractVector,
+                                  Wne::AbstractVector, half::Bool;
+                                  real_spectrum::Bool = true, offset::Real = 0)
+    RT = typeof(float(dist))
+    dist > zero(RT) || return _feast_filter_response(center, Zne, Wne, half; offset=offset)
+    bound = zero(RT)
+    nradii = 32
+    nangles = real_spectrum ? 2 : 16
+    for k in 0:(nradii - 1)
+        d = dist * exp(RT(log(1e4)) * k / (nradii - 1))
+        for m in 0:(nangles - 1)
+            direction = real_spectrum ? (m == 0 ? one(RT) : -one(RT)) : cis(RT(2π) * m / nangles)
+            bound = max(bound, RT(_feast_filter_response(center + d * direction, Zne, Wne, half;
+                                                         offset=offset)))
+        end
+    end
+    return bound
+end
+
+# Scaled residual of one Ritz pair (λ, x), for the empty-region test of the
+# non-Hermitian drivers; `apply_A!(y, x)` and `apply_B!(y, x)` are their matvecs.
+function _feast_pair_residual(apply_A!, apply_B!, x::AbstractVector, λ, scale)
+    Ax = similar(x)
+    Bx = similar(x)
+    apply_A!(Ax, x)
+    apply_B!(Bx, x)
+    return _feast_scaled_residual(Ax .- λ .* Bx, Bx, λ, scale)
+end
+
+# A lower bound for the filter's modulus inside the region, which every
+# in-region eigenvector is amplified by at least. The filter is analytic inside
+# the contour and has no zeros there, so its smallest modulus is on the
+# boundary: sampled on `boundary` (see `_feast_region_boundary`) and along each
+# of its edges, with a 10% margin for what falls between samples. About half
+# the central value for the built-in circles and ellipses, lower at the
+# corners of a polygon.
+function _feast_filter_floor(boundary::AbstractVector, Zne::AbstractVector,
+                             Wne::AbstractVector, half::Bool; offset::Real = 0)
+    RT = float(real(eltype(Zne)))
+    floor = RT(Inf)
+    n = length(boundary)
+    @inbounds for i in 1:n
+        a = boundary[i]
+        b = boundary[i == n ? 1 : i + 1]
+        for t in (0, 1, 2, 3)
+            z = a + (t / 4) * (b - a)
+            floor = min(floor, RT(_feast_filter_response(z, Zne, Wne, half; offset=offset)))
+        end
+    end
+    return RT(0.9) * floor
+end
+
+# Center and radius of a closed contour, for kernels whose region is described
+# by its nodes rather than by an interval.
+function _feast_contour_extent(Zne::AbstractVector{Complex{T}}) where T<:Real
+    isempty(Zne) && return zero(Complex{T}), zero(T)
+    center = sum(Zne) / length(Zne)
+    return center, maximum(z -> abs(z - center), Zne)
+end
+
+# Retain the latest Ritz pairs, including unresolved candidates. If the check
+# lost directions that already converged, return the saved pairs and report
+# incomplete verification.
+function _feast_seed_check_result!(lambda::AbstractVector, q::AbstractMatrix,
+                                   res::AbstractVector, M::Int, converged::Bool, state)
+    M >= state.seed_M && return M, converged
+    return _feast_restore_seed_pairs!(lambda, q, res, state), false
+end
+
+function _feast_restore_seed_pairs!(lambda::AbstractVector, q::AbstractMatrix,
+                                    res::AbstractVector, state)
+    Ms = state.seed_M
+    copyto!(view(lambda, 1:Ms), state.seed_lambda)
+    copyto!(view(q, :, 1:Ms), state.seed_q)
+    copyto!(view(res, 1:Ms), state.seed_res)
+    return Ms
+end
+
+# Keep the converged pairs a seed check is about to verify (see above).
+function _feast_save_seed_pairs!(state, lambda::AbstractVector, q::AbstractMatrix,
+                                 res::AbstractVector, M::Int)
+    state.seed_M = M
+    state.seed_lambda = lambda[1:M]
+    state.seed_q = q[:, 1:M]
+    state.seed_res = res[1:M]
+    return state
+end
+
+# Points along the boundary of a full-contour search region: a custom contour's
+# vertices (or nodes), else 256 points of the built-in ellipse. The polygon
+# through the few quadrature nodes is a poor stand-in: inscribed in the
+# ellipse, it cuts off up to 1 - cos(π/ne) of the radius.
+function _feast_region_boundary(::Type{T}, center::Number, radius::Real,
+                                fpm::Vector{Int}) where T<:Real
+    contour = feast_get_custom_contour(T, fpm)
+    contour !== nothing && return contour.vertices === nothing ? contour.Zne : contour.vertices
+    aspect = (fpm[18] > 0 ? fpm[18] : 100) * T(0.01)
+    rot = cis(T(fpm[19] == FEAST_UNINITIALIZED ? 0 : fpm[19]) * T(π) / 180)
+    m = 256
+    return [Complex{T}(center) + T(radius) * rot * complex(cos(θ), aspect * sin(θ))
+            for θ in (T(2π) .* (0:(m - 1)) ./ m)]
+end
+
+# Distance from z to the closed polygon through `nodes`.
+function _feast_polygon_distance(z::Number, nodes::AbstractVector)
+    n = length(nodes)
+    n == 0 && return oftype(abs(float(z)), Inf)
+    n == 1 && return abs(z - nodes[1])
+    best = oftype(abs(float(z)), Inf)
+    @inbounds for i in 1:n
+        a = nodes[i]
+        b = nodes[i == n ? 1 : i + 1]
+        edge = b - a
+        len2 = abs2(edge)
+        t = len2 > 0 ? clamp(real(conj(edge) * (z - a)) / len2, 0, 1) : zero(real(edge))
+        best = min(best, abs(z - (a + t * edge)))
+    end
+    return best
 end
 
 # Move the pairs marked in `keep[1:M]` to the front of `lambda`, the columns of
@@ -1050,6 +1443,80 @@ function _feast_compact_pairs!(lambda::AbstractVector, vectors::AbstractMatrix,
         end
     end
     return kept
+end
+
+# Defective eigenvalues. The in-region Ritz vectors of an eigenvalue with a
+# Jordan block of size k converge to eigenvectors of the rounding-perturbed
+# pencil, which lie within about eps^(1/k) of each other, so the block becomes
+# numerically dependent although the invariant subspace it spans is well
+# conditioned. Swept as they are, the Ritz vectors are compressed to fewer
+# columns at the next rank compression (`rank_tol = sqrt(eps)`): the general
+# solvers then reported one eigenvalue where the region held k, and the
+# complex-symmetric ones -- whose one-dimensional Rayleigh quotient xᵀAx / xᵀx
+# is 0/0 at such an eigenvector -- stopped converging. When the in-region Ritz
+# vectors are this close to dependent, the next sweep filters an orthonormal
+# basis Z of their span instead; the Ritz vectors are kept, with X = Z * R, for
+# the tests that read them.
+_feast_ritz_dependence_tol(::Type{T}) where T<:Real = eps(T)^(one(T) / 4)
+
+# Whether vectors of unit norm with Gram matrix G (M×M, overwritten) are within
+# `_feast_ritz_dependence_tol` of dependent. The Cholesky factor's diagonal is
+# the |R_jj| of their QR factorization; through the Gram matrix it is accurate
+# to about sqrt(eps), well below the threshold. Allocation-free, since it runs
+# every refinement loop.
+function _feast_gram_dependent!(G::AbstractMatrix{CT}) where CT<:Complex
+    M = size(G, 1)
+    _, info = LinearAlgebra.LAPACK.potrf!('U', G)
+    info > 0 && return true
+    tol = _feast_ritz_dependence_tol(real(CT))
+    @inbounds for j in 1:M
+        real(G[j, j]) < tol && return true
+    end
+    return false
+end
+
+# For the solvers that run their own refinement loop: if the leading `M`
+# columns of `Q_basis` -- the in-region Ritz vectors, of unit norm -- are nearly
+# dependent, copy the `active` Ritz vectors to `Xr`, the triangular factor to
+# `Rin`, and replace the block by an orthonormal basis of its span. Returns the
+# size of the block replaced, or 0 if `Q_basis` was left as it was.
+function _feast_orthonormal_ritz_block!(Q_basis::AbstractMatrix{CT},
+                                        Xr::AbstractMatrix{CT},
+                                        Rin::AbstractMatrix{CT},
+                                        M::Int, active::Int) where CT<:Complex
+    M >= 2 || return 0
+    X = view(Q_basis, :, 1:M)
+    G = view(Rin, 1:M, 1:M)
+    mul!(G, adjoint(X), X)
+    _feast_gram_dependent!(G) || return 0
+    F = qr(X)
+    copyto!(view(Xr, :, 1:active), view(Q_basis, :, 1:active))
+    R = view(Rin, 1:M, 1:M)
+    fill!(R, zero(CT))
+    @inbounds for j in 1:M, i in 1:j
+        R[i, j] = F.R[i, j]
+    end
+    Z = view(Q_basis, :, 1:M)
+    fill!(Z, zero(CT))
+    @inbounds for i in 1:M
+        Z[i, i] = one(CT)
+    end
+    lmul!(F.Q, Z)
+    return M
+end
+
+# After a sweep: the filtered images of the previous loop's Ritz vectors and the
+# vectors themselves. `Q_proj` holds the filtered image of `Q_basis`; with a
+# block of `k` orthonormalized columns (see `_feast_orthonormal_ritz_block!`),
+# the images of the Ritz vectors are Q_proj * R on that block, written to `Ybuf`.
+function _feast_ritz_images(Q_proj::AbstractMatrix, Q_basis::AbstractMatrix,
+                            Xr::AbstractMatrix, Rin::AbstractMatrix, k::Int,
+                            active::Int, Ybuf::AbstractMatrix)
+    k == 0 && return view(Q_proj, :, 1:active), view(Q_basis, :, 1:active)
+    Yr = view(Ybuf, :, 1:active)
+    copyto!(view(Yr, :, (k + 1):active), view(Q_proj, :, (k + 1):active))
+    mul!(view(Yr, :, 1:k), view(Q_proj, :, 1:k), view(Rin, 1:k, 1:k))
+    return Yr, view(Xr, :, 1:active)
 end
 
 # Without a search region to measure against, fall back to the largest Ritz

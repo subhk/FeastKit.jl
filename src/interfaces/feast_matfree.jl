@@ -144,8 +144,9 @@ end
 
 Real symmetric FEAST from two callbacks, `A_mul!(y, x)` (`y = A*x`) and
 `B_mul!(y, x)` (`y = B*x`), with the shifted systems solved by GMRES (load
-Krylov.jl first). By default the GMRES tolerance tightens with the outer
-residual; pass `gmres_rtol` to fix it instead. For preconditioning or a direct
+Krylov.jl first). Each shifted solve is warm-started from its trial vector, so
+GMRES only solves for a correction and its default relative tolerance of `1e-3`
+does not limit the outer accuracy; pass `gmres_rtol` to change it. For preconditioning or a direct
 shifted solve, wrap the callbacks in [`LinearOperator`](@ref) and call
 [`feast`](@ref) with `solver=`.
 """

@@ -78,6 +78,31 @@ end
         @test distributed_standard_alias.info == serial.info
         @test distributed_standard_alias.M == serial.M
         @test sort(distributed_standard_alias.lambda[1:distributed_standard_alias.M]) ≈ sort(serial.lambda[1:serial.M]) atol=1e-8
+
+        @testset "Dense problems run on the workers" begin
+            Ad, Bd = Matrix(A), Matrix(B)
+            before = worker_calls()
+            dense = feast(Ad, Bd, interval; M0=n, fpm=copy(fpm),
+                          backend=:distributed, strict_backend=true)
+            @test all(worker_calls() .> before)
+            @test dense.info == serial.info && dense.M == serial.M
+            @test sort(dense.lambda) ≈ sort(serial.lambda[1:serial.M]) atol=1e-8
+            # With workers present, automatic selection no longer drops dense
+            # problems to serial execution.
+            auto = @test_logs min_level=Base.CoreLogging.Warn feast(Ad, Bd, interval; M0=n,
+                                                                  fpm=copy(fpm), backend=:auto)
+            @test auto.info == serial.info && auto.M == serial.M
+            # A factorization that fails on a worker says so.
+            broken = copy(Ad); broken[1, 1] = NaN
+            err = try
+                pfeast_scsrgv!(sparse(broken), sparse(Bd), interval[1], interval[2], n,
+                               copy(fpm); use_threads=false)
+                nothing
+            catch e
+                e
+            end
+            @test err isa ErrorException && occursin("factorization failed on worker", err.msg)
+        end
     else
         @info "Skipping distributed backend execution test (set FEASTKIT_TEST_DISTRIBUTED=true and add workers)"
     end

@@ -1,3 +1,46 @@
+# Warm start for the shifted solves K Y = B X, K = z B - A, of one contour
+# point: column j of `R` becomes b - α_j K x_j for the least-squares multiple
+# α_j x_j of the trial column (b = B x_j), so the solver only has to find the
+# correction. `BX` and `AX` are B X and A X, formed once per contour sweep.
+# Once x_j is close to an eigenvector this residual is of the size of the
+# eigen-residual, so a solver with a fixed relative tolerance no longer limits
+# how far the outer iteration converges. A column whose correction vanishes
+# (x_j an exact eigenvector, or a zero column) keeps b and α_j = 0, so the
+# solver never sees a zero right-hand side it did not see before.
+function _feast_warm_start_rhs!(R::AbstractMatrix, α::AbstractVector,
+                                BX::AbstractMatrix, AX::AbstractMatrix, z::Number)
+    @views for j in axes(BX, 2)
+        correction = R[:, j]
+        rhs = BX[:, j]
+        ax = AX[:, j]
+        @. correction = z * rhs - ax
+        a = _feast_warm_start_multiple(correction, rhs)
+        if isfinite(a) && !iszero(a)
+            @. correction = rhs - a * correction
+            rnorm = norm(correction)
+            if isfinite(rnorm) && rnorm > 0
+                α[j] = a
+                continue
+            end
+        end
+        α[j] = zero(a)
+        copyto!(correction, rhs)
+    end
+    return R
+end
+
+# Add the warm-start multiples back: Y = α X + (solution of the correction).
+function _feast_warm_start_finish!(Y::AbstractMatrix, α::AbstractVector, X::AbstractMatrix)
+    @inbounds for j in axes(Y, 2)
+        a = α[j]
+        iszero(a) && continue
+        for i in axes(Y, 1)
+            Y[i, j] += a * X[i, j]
+        end
+    end
+    return Y
+end
+
 """
     feast_matfree_srci!(A_op, B_op, interval, M0; kwargs...)
 
@@ -15,6 +58,16 @@ Matrix-free Feast RCI for real symmetric eigenvalue problems.
 - `workspace`: Pre-allocated workspace matrices
 - `maxiter`: Maximum refinement iterations
 - `tol`: Convergence tolerance
+- `warm_start`: Solve for a correction around the best multiple of each trial
+  vector instead of `B*X` (see below). Defaults to `true` for the solvers made
+  by [`create_iterative_solver`](@ref) and `false` for other callbacks, which
+  then receive `B*X` exactly as before.
+
+With `warm_start=true` the callback is handed `X = B*Q - α (z*B - A) Q`
+(complex, column scalars `α` chosen by least squares) and its solution is
+completed with `α Q`. An inexact solver's tolerance then applies to a
+right-hand side that shrinks as the eigenpairs converge, so a fixed inner
+tolerance does not cap the outer accuracy.
 
 # Returns
 - `FeastResult` with eigenvalues and eigenvectors
@@ -27,7 +80,8 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
                             workspace::Union{NamedTuple, Nothing} = nothing,
                             maxiter::Int = 20,
                             tol::T = T(1e-12),
-                            inner_tolerance=nothing, initial_subspace=nothing) where T<:Real
+                            inner_tolerance=nothing, initial_subspace=nothing,
+                            warm_start::Union{Bool,Nothing}=nothing) where T<:Real
 
     Emin, Emax = interval
     N = size(A_op, 1)
@@ -61,6 +115,10 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
     workc = workspace.workc
     _feast_initial_subspace!(work, initial_subspace)
     mass_rhs = similar(work)
+    warm = warm_start === nothing ? linear_solver isa FeastIterativeSolver : warm_start
+    AX = warm ? similar(work) : similar(work, 0, 0)
+    warm_rhs = warm ? similar(workc) : similar(workc, 0, 0)
+    warm_alpha = Vector{Complex{T}}(undef, warm ? M0 : 0)
     Aq = workspace.Aq
     Sq = workspace.Sq
     lambda = workspace.lambda
@@ -100,13 +158,26 @@ function feast_matfree_srci!(A_op::MatrixFreeOperator{T},
             end
             # Solve (Ze[]*B - A) * Y = B*Q and store Y in workc.
             try
-                # The kernel supplies Q; generalized contour projection needs B*Q.
-                for j in axes(work, 2)
-                    mul!(view(mass_rhs,:,j), B_op, view(work,:,j))
+                # The kernel supplies the same Q at every contour point of a
+                # sweep, so B*Q (and A*Q for the warm start) are formed once.
+                if fpm_vec[50] == 1
+                    for j in axes(work, 2)
+                        mul!(view(mass_rhs,:,j), B_op, view(work,:,j))
+                        warm && mul!(view(AX,:,j), A_op, view(work,:,j))
+                    end
                 end
-                linear_solver(workc, Ze[], mass_rhs)
+                if warm
+                    _feast_warm_start_rhs!(warm_rhs, warm_alpha, mass_rhs, AX, Ze[])
+                    linear_solver(workc, Ze[], warm_rhs)
+                    _feast_warm_start_finish!(workc, warm_alpha, work)
+                else
+                    linear_solver(workc, Ze[], mass_rhs)
+                end
             catch err
-                @debug "Matrix-free linear solver callback failed" exception=err
+                err isa InterruptException && rethrow()
+                # Report what failed: an error in a user callback is otherwise
+                # indistinguishable from a singular shifted system.
+                @warn "Matrix-free linear solver callback failed" exception=(err, catch_backtrace())
                 info[] = Int(Feast_ERROR_LAPACK)
                 break
             end
@@ -165,7 +236,8 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
                             workspace::Union{NamedTuple, Nothing} = nothing,
                             maxiter::Int = 20,
                             tol::T = T(1e-12),
-                            inner_tolerance=nothing, initial_subspace=nothing) where T<:Real
+                            inner_tolerance=nothing, initial_subspace=nothing,
+                            warm_start::Union{Bool,Nothing}=nothing) where T<:Real
 
     N = size(A_op, 1)
 
@@ -198,6 +270,12 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
     # `workc` is both the input RHS and output solution for solve requests.
     # Keep a separate RHS buffer so callbacks can overwrite `workc` safely.
     rhs = hasproperty(workspace, :rhs) ? workspace.rhs : similar(workc)
+    warm = warm_start === nothing ? linear_solver isa FeastIterativeSolver : warm_start
+    # The callback overwrites workc, which holds the trial block on entry.
+    trial = warm ? similar(workc) : similar(workc, 0, 0)
+    AX = warm ? similar(workc) : similar(workc, 0, 0)
+    warm_rhs = warm ? similar(workc) : similar(workc, 0, 0)
+    warm_alpha = Vector{Complex{T}}(undef, warm ? M0 : 0)
     zAq = workspace.zAq
     zSq = workspace.zSq
     lambda = workspace.lambda
@@ -237,12 +315,28 @@ function feast_matfree_grci!(A_op::MatrixFreeOperator{Complex{T}},
             # workc contains Q0. Form B*Q0 in separate scratch before the
             # callback overwrites workc with the shifted solution.
             try
-                for j in axes(workc, 2)
-                    mul!(view(rhs,:,j), B_op, view(workc,:,j))
+                # The trial block is the same at every contour point of a sweep.
+                if fpm_vec[50] == 1
+                    for j in axes(workc, 2)
+                        mul!(view(rhs,:,j), B_op, view(workc,:,j))
+                        if warm
+                            mul!(view(AX,:,j), A_op, view(workc,:,j))
+                            copyto!(view(trial,:,j), view(workc,:,j))
+                        end
+                    end
                 end
-                linear_solver(workc, Ze[], rhs)
+                if warm
+                    _feast_warm_start_rhs!(warm_rhs, warm_alpha, rhs, AX, Ze[])
+                    linear_solver(workc, Ze[], warm_rhs)
+                    _feast_warm_start_finish!(workc, warm_alpha, trial)
+                else
+                    linear_solver(workc, Ze[], rhs)
+                end
             catch e
-                @debug "Matrix-free linear solver callback failed" exception=e
+                e isa InterruptException && rethrow()
+                # Report what failed: an error in a user callback is otherwise
+                # indistinguishable from a singular shifted system.
+                @warn "Matrix-free linear solver callback failed" exception=(e, catch_backtrace())
                 info[] = Int(Feast_ERROR_LAPACK)
                 break
             end

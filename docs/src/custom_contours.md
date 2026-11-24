@@ -351,7 +351,7 @@ bounds must be valid for the selected integration rule.
 ```@example custom_adaptive
 using FeastKit
 function adaptive_elliptical_contour(Emin, Emax, eigenvalue_estimates; 
-                                    min_points=8, max_points=20)
+                                    min_points=8, max_points=16)
     """
     Create elliptical contour adapted to eigenvalue distribution.
     """
@@ -395,7 +395,7 @@ end
 λ_estimates = [0.5, 0.52, 0.54, 1.8, 1.82, 1.84]  # Two clusters
 contour = adaptive_elliptical_contour(0.0, 2.5, λ_estimates)
 @assert length(contour.Zne) == 16
-@assert length(adaptive_elliptical_contour(0.0, 2.5, [1.2, 1.25, 1.3]).Zne) == 20
+@assert length(adaptive_elliptical_contour(0.0, 2.5, [1.2, 1.25, 1.3]).Zne) == 16
 @assert length(adaptive_elliptical_contour(0.0, 2.5, [0.2, 2.2]).Zne) == 8
 ```
 
@@ -426,7 +426,7 @@ function multi_level_feast(A::AbstractMatrix{Float64}, eigenvalue_regions; M0_pe
         width = region_max - region_min
         
         if width < 0.01  # Very narrow region
-            n_points = 20
+            n_points = 16
             method = 2  # Zolotarev for high precision
         elseif width > 10  # Very wide region  
             n_points = 12

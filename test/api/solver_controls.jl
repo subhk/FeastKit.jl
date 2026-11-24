@@ -66,10 +66,13 @@ using Test, FeastKit, LinearAlgebra, SparseArrays, Krylov
 end
 
 @testset "Adaptive tolerances and persistent Krylov buffers" begin
+    # The shifted solves are warm-started, so the default inner tolerance stays
+    # at 1e-3 however far the outer residual has fallen; an explicit one is kept.
     @test FeastKit._feast_inner_tol(false,1e-10,1.0,0) == 1e-10
     @test FeastKit._feast_inner_tol(true,1e-10,1.0,0) == 1e-3
-    @test FeastKit._feast_inner_tol(true,1e-10,1e-6,2) ≈ 1e-7
-    @test FeastKit._feast_inner_tol(true,1e-10,1e-14,3) == 1e-10
+    @test FeastKit._feast_inner_tol(true,1e-10,1e-6,2) == 1e-3
+    @test FeastKit._feast_inner_tol(true,1e-10,1e-14,3) == 1e-3
+    @test FeastKit._feast_inner_tol(true,1e-2,1e-14,3) == 1e-2
     n = 120
     A = Matrix(Diagonal(collect(1.0:n)))
     rhs = ones(ComplexF64,n,2)

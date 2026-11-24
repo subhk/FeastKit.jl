@@ -1,6 +1,7 @@
 # Polynomial eigenvalue problems
 function feast_polynomial(coeffs::Vector{<:AbstractMatrix{Complex{T}}},
-                         center::Complex{T}, radius::T; M0::Int = 10,
+                         center::Complex{T}, radius::T;
+                         M0::Int = min(10, size(first(coeffs), 1)),
                          fpm::Union{Vector{Int}, FeastParameters, Nothing} = nothing) where T<:Real
     # Feast for polynomial eigenvalue problems
     # P(λ) = coeffs[1] + λ*coeffs[2] + λ²*coeffs[3] + ...

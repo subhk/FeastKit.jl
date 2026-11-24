@@ -62,7 +62,8 @@ function mpi_compute_complex_hermitian_moments(
                 ldiv!(solutions, F, rhs)
             else
                 local_success = solve_shifted_iterative!(solutions, rhs, A, B, z,
-                                                         tol, maxiter, restart; workspace=workspace)
+                                                         tol, maxiter, restart; workspace=workspace,
+                                                     trial=Q_basis)
                 local_success || break
             end
         catch err
@@ -145,7 +146,8 @@ function mpi_compute_complex_hermitian_moments(
                 copyto!(rhs_copy, rhs)
                 local_success = solve_dense_shifted!(solutions, rhs_copy,
                                                      shifted_mul!, solver_choice,
-                                                     tol, maxiter, restart; workspace=workspace)
+                                                     tol, maxiter, restart; workspace=workspace,
+                                                     trial=Q_basis)
                 local_success || break
             catch err
                 @warn "MPI rank $(MPI.Comm_rank(comm)): dense iterative complex Hermitian solve failed for contour point $e" exception=err
@@ -191,7 +193,8 @@ function mpi_compute_complex_general_projection(
                 ldiv!(solutions, F, rhs)
             else
                 local_success = solve_shifted_iterative!(solutions, rhs, A, B, z,
-                                                         tol, maxiter, restart; workspace=workspace)
+                                                         tol, maxiter, restart; workspace=workspace,
+                                                     trial=Q_basis)
                 local_success || break
             end
         catch err
@@ -261,7 +264,8 @@ function mpi_compute_complex_general_projection(
                 copyto!(rhs_copy, rhs)
                 local_success = solve_dense_shifted!(solutions, rhs_copy,
                                                      shifted_mul!, solver_choice,
-                                                     tol, maxiter, restart; workspace=workspace)
+                                                     tol, maxiter, restart; workspace=workspace,
+                                                     trial=Q_basis)
                 local_success || break
             catch err
                 @warn "MPI rank $(MPI.Comm_rank(comm)): dense iterative complex general solve failed for contour point $e" exception=err

@@ -5,11 +5,12 @@ using SparseArrays
 using LinearAlgebra
 using Random
 
-# UMFPACK promotes single-precision matrices to double precision. Its ldiv!
-# methods require RHS storage to match the factor, so narrow only after solving.
+# UMFPACK promotes half- and single-precision matrices to double precision.
+# Its ldiv! methods require RHS storage to match the factor, so narrow only
+# after solving.
 _feast_factor_solve!(factor, rhs) = ldiv!(factor, rhs)
 function _feast_factor_solve!(factor::SparseArrays.UMFPACK.UmfpackLU{ComplexF64},
-                              rhs::AbstractMatrix{ComplexF32})
+                              rhs::AbstractMatrix{Complex{T}}) where T<:Union{Float16,Float32}
     wide_rhs = Matrix{ComplexF64}(rhs)
     ldiv!(factor, wide_rhs)
     copyto!(rhs, wide_rhs)
@@ -17,9 +18,9 @@ function _feast_factor_solve!(factor::SparseArrays.UMFPACK.UmfpackLU{ComplexF64}
 end
 
 _feast_factor_solve!(dest, factor, rhs) = ldiv!(dest, factor, rhs)
-function _feast_factor_solve!(dest::AbstractMatrix{ComplexF32},
+function _feast_factor_solve!(dest::AbstractMatrix{Complex{T}},
                               factor::SparseArrays.UMFPACK.UmfpackLU{ComplexF64},
-                              rhs::AbstractMatrix{ComplexF32})
+                              rhs::AbstractMatrix{Complex{T}}) where T<:Union{Float16,Float32}
     wide_rhs = Matrix{ComplexF64}(rhs)
     ldiv!(factor, wide_rhs)
     copyto!(dest, wide_rhs)
@@ -182,27 +183,31 @@ function solve_shifted_iterative!(dest::AbstractMatrix{CT},
                                   A::SparseMatrixCSC,
                                   B::SparseMatrixCSC,
                                   z::CT, tol::TR,
-                                  maxiter::Int, gmres_restart::Int; workspace=nothing) where {CT<:Complex, TR<:Real}
+                                  maxiter::Int, gmres_restart::Int; workspace=nothing,
+                                  trial=nothing) where {CT<:Complex, TR<:Real}
     N = size(A, 1)
     buffers = workspace === nothing ? _feast_krylov_workspace(N, real(CT), gmres_restart) : workspace
     op = SparseShiftedOperator(A, B, z, buffers.tmpA, buffers.tmpB)
     apply_shift! = (y, x) -> mul!(y, op, x)
     # Reuse the normalized block solver without materializing a dense matrix.
     return solve_dense_shifted!(dest, rhs, apply_shift!, :gmres,
-                                real(CT)(tol), maxiter, gmres_restart; workspace=buffers)
+                                real(CT)(tol), maxiter, gmres_restart; workspace=buffers,
+                                trial=trial)
 end
 
 function solve_shifted_iterative_identity!(dest::AbstractMatrix{CT},
                                            rhs::AbstractMatrix{CT},
                                            A::SparseMatrixCSC,
                                            z::CT, tol::TR,
-                                           maxiter::Int, gmres_restart::Int; workspace=nothing) where {CT<:Complex, TR<:Real}
+                                           maxiter::Int, gmres_restart::Int; workspace=nothing,
+                                           trial=nothing) where {CT<:Complex, TR<:Real}
     N = size(A, 1)
     buffers = workspace === nothing ? _feast_krylov_workspace(N, real(CT), gmres_restart) : workspace
     op = SparseIdentityShiftedOperator(A, z, buffers.tmpA)
     apply_shift! = (y, x) -> mul!(y, op, x)
     return solve_dense_shifted!(dest, rhs, apply_shift!, :gmres,
-                                real(CT)(tol), maxiter, gmres_restart; workspace=buffers)
+                                real(CT)(tol), maxiter, gmres_restart; workspace=buffers,
+                                trial=trial)
 end
 
 """
@@ -253,6 +258,10 @@ problems.
         _feast_initial_subspace!(workspace.workc, initial_subspace)
     end
     seed_checked = initial_subspace === nothing
+    # Converged pairs of the seed, kept while the completeness check runs
+    # (see `_feast_seed_check_result!`).
+    seed = (seed_M=0, seed_lambda=Complex{T}[], seed_q=Matrix{Complex{T}}(undef, 0, 0),
+            seed_res=T[])
     shifted_solutions = workspace.q
     lambda_vec = Vector{Complex{T}}(undef, M0)
     res_vec = workspace.res
@@ -267,6 +276,11 @@ problems.
     lambda_tmp = similar(lambda_vec)
     perm = Vector{Int}(undef, M0)
     solutions_tmp = similar(shifted_solutions)
+    # A nearly dependent in-region block is swept through an orthonormal basis
+    # (see `_feast_orthonormal_ritz_block!`); these hold its Ritz vectors.
+    ritz_vectors = Matrix{Complex{T}}(undef, N, M0)
+    ritz_R = Matrix{Complex{T}}(undef, M0, M0)
+    orth_k = 0
     residual_vec = Vector{Complex{T}}(undef, N)
     Bq_vec = Vector{Complex{T}}(undef, N)
 
@@ -293,6 +307,7 @@ problems.
     M_found = 0
     active_dim = M0
 
+    empty_dist = -one(T)
     for loop_idx in 0:maxloop
         loop_count = loop_idx
         fill!(Q_proj, zero(Complex{T}))
@@ -329,7 +344,8 @@ problems.
                 copyto!(rhs_iterative_block, rhs_block)
                 success = solve_shifted_iterative!(shifted_block, rhs_iterative_block,
                                                    A, B, z, _feast_inner_tol(solver_tol == 0.0, tol_value, epsout_val, loop_idx),
-                                                   solver_maxiter, solver_restart; workspace=krylov_workspace)
+                                                   solver_maxiter, solver_restart; workspace=krylov_workspace,
+                                                   trial=basis_block)
                 if !success
                     info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                     solve_failed = true
@@ -341,22 +357,29 @@ problems.
         end
         solve_failed && break
 
-        # The sweep has filtered the previous loop's Ritz vectors (Q_basis);
-        # their filter response separates genuine pairs from spurious ones.
+        # The sweep has filtered the previous loop's Ritz vectors (Xr; Q_basis
+        # unless a dependent block was orthonormalized); their filter response
+        # separates genuine pairs from spurious ones.
+        Yr, Xr = _feast_ritz_images(Q_proj, Q_basis, ritz_vectors, ritz_R, orth_k,
+                                    active_dim, solutions_tmp)
+        filtered_ratio = norm(Yr) / norm(Xr)
+        orth_k = 0
         if loop_idx >= _FEAST_SPURIOUS_MIN_LOOPS
             # Complex-symmetric Rayleigh-Ritz is oblique, so also count the
             # in-region directions of the whole subspace.
-            kept = _feast_screen_spurious!(keep, view(Q_proj, :, 1:active_dim),
-                                           view(Q_basis, :, 1:active_dim), res_vec,
-                                           M_found, eps_tol; filter_rank=true)
+            kept = _feast_screen_spurious!(keep, Yr, Xr, res_vec,
+                                           M_found, eps_tol, lambda_vec, Zne, Wne;
+                                           filter_rank=true, residual_scale=res_scale,
+                                           boundary=_feast_region_boundary(T, Emid, r, fpm))
             if kept !== nothing
-                # The solves overwrote shifted_solutions; the pairs live in Q_basis.
-                copyto!(view(shifted_solutions, :, 1:M_found), view(Q_basis, :, 1:M_found))
+                # The solves overwrote shifted_solutions; the pairs live in Xr.
+                copyto!(view(shifted_solutions, :, 1:M_found), view(Xr, :, 1:M_found))
                 M_found = _feast_compact_pairs!(lambda_vec, shifted_solutions, res_vec,
                                                 keep, M_found)
+                M_found, converged = _feast_seed_check_result!(
+                    lambda_vec, shifted_solutions, res_vec, M_found, true, seed)
                 epsout_val = M_found > 0 ? maximum(view(res_vec, 1:M_found)) : zero(T)
-                info_code = M_found == 0 ? Int(Feast_SUCCESS) :
-                            _feast_exit_info(true, M_found, M0, N)
+                info_code = _feast_exit_info(converged, M_found, M0, N)
                 empty_region = M_found == 0
                 break
             end
@@ -405,13 +428,39 @@ problems.
                     seed_checked = true
                     continue
                 end
-                # No Ritz value inside the contour: it encloses no eigenvalues.
+                # No Ritz value inside the contour. It encloses nothing only
+                # once the subspace has settled outside it; until then, filter
+                # again (see _feast_region_looks_empty).
+                center, radius = _feast_contour_extent(Zne)
+                nearest_residual(i) = _feast_pair_residual(
+                    (y, x) -> mul!(y, A, x), (y, x) -> mul!(y, B, x),
+                    view(shifted_solutions, :, i), lambda_vec[i], res_scale)
+                empty, empty_dist = _feast_region_looks_empty(
+                    view(lambda_vec, 1:rank), center, radius, Zne, Wne, false, empty_dist;
+                    real_spectrum=false, nearest_residual=nearest_residual, tol=eps_tol,
+                    boundary=_feast_region_boundary(T, Emid, r, fpm),
+                    filtered_ratio=loop_idx >= 1 ? filtered_ratio : nothing)
                 M_found = 0
                 epsout_val = zero(T)
-                info_code = Int(Feast_SUCCESS)
-                empty_region = true
-                break
+                if seed.seed_M > 0 && (empty || loop_idx == maxloop)
+                    # A seed check that lost every pair reports the pairs it checked.
+                    M_found = _feast_restore_seed_pairs!(lambda_vec, shifted_solutions,
+                                                         res_vec, seed)
+                    epsout_val = maximum(view(res_vec, 1:M_found))
+                    info_code = _feast_exit_info(false, M_found, M0, N)
+                    break
+                end
+                if empty || loop_idx == maxloop
+                    info_code = Int(Feast_SUCCESS)
+                    empty_region = empty && (seed_checked || rank == N)
+                    break
+                end
+                active_dim = rank
+                copyto!(view(Q_basis, :, 1:active_dim),
+                        view(shifted_solutions, :, 1:active_dim))
+                continue
             end
+            empty_dist = -one(T)
 
             for idx in 1:rank
                 vec = view(shifted_solutions, :, idx)
@@ -437,24 +486,36 @@ problems.
 
             epsout_val = max_res
             M_found = M
-            if epsout_val <= eps_tol && !seed_checked && M < M0 && loop_idx < maxloop
+            convergence_tol, _ = _feast_contour_residual_limits(eps_tol, res_scale, Zne)
+            converged = epsout_val <= convergence_tol
+            check_subspace = converged && !seed_checked && M < M0 && rank < N
+            if check_subspace && loop_idx < maxloop
                 # Small residuals certify the pairs found from a caller's seed,
                 # not that the seed missed nothing. Keep them and refill the
                 # rest of the subspace with independent probes once.
+                seed = (seed_M=M, seed_lambda=lambda_vec[1:M],
+                        seed_q=shifted_solutions[:, 1:M], seed_res=res_vec[1:M])
                 _feast_seeded_subspace_complex!(Q_basis)
                 copyto!(view(Q_basis, :, 1:M), view(shifted_solutions, :, 1:M))
                 active_dim = M0
+                orth_k = _feast_orthonormal_ritz_block!(Q_basis, ritz_vectors, ritz_R, M,
+                                                        active_dim)
                 seed_checked = true
                 continue
             end
-            if epsout_val <= eps_tol || loop_idx == maxloop
-                info_code = _feast_exit_info(epsout_val <= eps_tol, M, M0, N)
+            if converged || loop_idx == maxloop
+                M_found, converged = _feast_seed_check_result!(
+                    lambda_vec, shifted_solutions, res_vec, M, converged && !check_subspace, seed)
+                epsout_val = maximum(view(res_vec, 1:M_found))
+                info_code = _feast_exit_info(converged, M_found, M0, N)
                 break
             end
 
             active_dim = rank
             copyto!(view(Q_basis, :, 1:active_dim),
                     view(shifted_solutions, :, 1:active_dim))
+            orth_k = _feast_orthonormal_ritz_block!(Q_basis, ritz_vectors, ritz_R, M,
+                                                    active_dim)
         catch err
             info_code = Int(Feast_ERROR_LAPACK)
             @warn "Reduced eigenvalue problem failed during sparse complex-symmetric FEAST" exception=err
@@ -746,7 +807,8 @@ function feast_gcsrgv!(A::SparseMatrixCSC{Complex{T},Int}, B::SparseMatrixCSC{Co
                 copyto!(rhs_iterative, rhs)
                 success = solve_shifted_iterative!(workc_block, rhs_iterative,
                                                    A, B, current_shift[],
-                                                   _feast_inner_tol(solver_tol == 0.0, tol_value, epsout[], loop[]), solver_maxiter, solver_restart; workspace=krylov_workspace)
+                                                   _feast_inner_tol(solver_tol == 0.0, tol_value, epsout[], loop[]), solver_maxiter, solver_restart; workspace=krylov_workspace,
+                                                   trial=workc_block)
                 if !success
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     break
@@ -969,7 +1031,10 @@ function feast_scsrgv_iterative!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T
                                  Emin::T, Emax::T, M0::Int, fpm::Vector{Int},
                                  max_iter::Int = 3) where T<:Real
     # Feast with iterative refinement for better accuracy
-    
+    # Resolve defaults first: the tolerance below reads fpm[3], which is still
+    # the -111 sentinel on a freshly initialized array.
+    feastdefault!(fpm)
+
     return feast_scsrgv!(A, B, Emin, Emax, M0, fpm;
                          solver=:gmres,
                          solver_tol=10.0^(-fpm[3]),
@@ -1100,10 +1165,11 @@ The existing `gmres_rtol`, `gmres_atol`, `gmres_restart`, and `gmres_maxiter`
 keywords control the inner solver. Inner non-convergence returns
 `Feast_ERROR_NO_CONVERGENCE`.
 """
-# The inner GMRES tolerance tracks the outer residual unless `gmres_rtol` is
-# given explicitly: a fixed 1e-6 capped the outer residual near 1e-7, so the
-# default 1e-12 target could never be met. The stopping test is relative
-# (`gmres_atol = 0`) so that it does not depend on the scale of B.
+# The shifted solves are warm-started (`warm_start=true` below), so GMRES solves
+# only for a correction that shrinks with the eigen-residual: the default fixed
+# relative tolerance of 1e-3 does not cap the outer accuracy the way a fixed
+# 1e-6 on the full right-hand side used to (near 1e-7). The stopping test is
+# relative (`gmres_atol = 0`) so that it does not depend on the scale of B.
 function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
                              N::Int, Emin::T, Emax::T, M0::Int,
                              fpm::Vector{Int};
@@ -1123,6 +1189,13 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
     A_op = LinearOperator{T}(A_matvec!, (N,N); issymmetric=true)
     B_op = LinearOperator{T}(B_matvec!, (N,N); issymmetric=true)
     shifted = MatrixFreeShiftedOperator(N, zero(Complex{T}), A_matvec!, B_matvec!, T)
+    rhs_scale = Ref(one(T))
+    function scaled_shift_mul!(y, x)
+        mul!(y, shifted, x)
+        y ./= rhs_scale[]
+        return y
+    end
+    scaled_shift = LinearOperator{Complex{T}}(scaled_shift_mul!, (N, N))
     rhs = Vector{Complex{T}}(undef, N)
     solve_failed = Ref(false)
     krylov_workspace = _feast_gmres_workspace(N, Complex{T}; memory=gmres_restart)
@@ -1131,19 +1204,28 @@ function feast_sparse_matvec!(A_matvec!::Function, B_matvec!::Function,
         shifted.z = z
         for j in axes(X, 2)
             copyto!(rhs, view(X, :, j))
-            solved = _feast_gmres!(krylov_workspace, shifted, rhs;
-                                   rtol=inner_tol[], atol=T(gmres_atol), itmax=gmres_maxiter)
-            sol = _feast_gmres_solution(krylov_workspace)
+            # Scale both sides of the correction equation so Krylov's absolute
+            # breakdown tests work for small residuals and small pencils.
+            s = norm(rhs)
+            if iszero(s)
+                fill!(view(Y, :, j), zero(Complex{T}))
+                continue
+            end
+            rhs ./= s
+            rhs_scale[] = s
+            solved = _feast_gmres!(krylov_workspace, scaled_shift, rhs;
+                                   rtol=inner_tol[], atol=T(gmres_atol) / s, itmax=gmres_maxiter)
             if !solved
                 solve_failed[] = true
                 error("GMRES did not converge for column $j")
             end
-            copyto!(view(Y, :, j), sol)
+            copyto!(view(Y, :, j), _feast_gmres_solution(krylov_workspace))
         end
     end
     result = feast_matfree_srci!(A_op, B_op, (Emin,Emax), M0;
                                  fpm=fpm, linear_solver=linear_solver,
-                                 inner_tolerance=gmres_rtol === nothing ? inner_tol : nothing)
+                                 inner_tolerance=gmres_rtol === nothing ? inner_tol : nothing,
+                                 warm_start=true)
     # Keep this entry point's existing non-convergence status for inner failures.
     if solve_failed[]
         return FeastResult{T,T}(result.lambda, result.q, result.M, result.res,

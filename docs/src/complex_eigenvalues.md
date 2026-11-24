@@ -319,15 +319,41 @@ A = [2.0+0im 1.0+0im 0.0+0im;
      0.0+0im 0.0+0im 2.0+0im]
 B = Matrix{ComplexF64}(I, 3, 3)
 
-# FEAST may have trouble with defective matrices
 # Use the full matrix dimension; larger requests would be clamped to 3.
 result = feast_general(A, B, 2.0+0.0im, 0.1, M0=3)
-result.converged, result.message
+@assert result.converged && result.M == 3
+@assert all(λ -> abs(λ - 2) < 1e-4, result.values)
+result.values
 ```
 
 A defective matrix has fewer independent eigenvectors than its algebraic
-multiplicity. Increasing the subspace cannot create the missing eigenvectors;
-inspect the status and residuals before using the result.
+multiplicity. FEAST returns a defective eigenvalue with its algebraic
+multiplicity, here three copies of 2. As with any floating-point eigensolver,
+the copies of an eigenvalue with a Jordan block of size k agree only to about
+`eps^(1/k)` (here about `1e-5`), and their eigenvectors are nearly parallel:
+together they span one eigenvector, not three. Give `M0` headroom over the
+multiplicity, as for any cluster: unless the subspace is the whole space, as
+here, `M0` equal to it leaves the count uncertified, with `info = 2`.
+
+### Strongly Non-Normal Matrices
+
+The number of eigenvalues inside a contour is a property of the matrix only if
+small perturbations cannot move eigenvalues across the contour. Every
+perturbation `E` with `‖E‖ < min σmin(zB - A)` over the contour leaves the
+count unchanged; when that minimum is near rounding level, `eps * ‖A‖`,
+rounding the matrix entries alone can change it. Triangular matrices with
+large off-diagonal entries are an example. No eigensolver can count their
+eigenvalues reliably, and FeastKit may report fewer, or more, than an exact
+computation of the stored matrix would have. For a small dense problem the
+minimum can be estimated by sampling the contour:
+
+```julia
+gap = minimum(svdvals((center + radius * cis(θ)) * B - A)[end]
+              for θ in range(0, 2π; length=512)) / opnorm(A)
+```
+
+A `gap` many orders of magnitude above `eps()` means the count is well
+determined.
 
 ### Sparse Matrices
 

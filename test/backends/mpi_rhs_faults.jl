@@ -34,10 +34,12 @@ end
 # Concrete complex/sparse public entry points do not accept custom matrix
 # wrappers. In this dedicated process, intercept only multiplication by the
 # selected B instance; all other calls retain the ordinary five-argument mul!.
+# The real drivers form B*Q in real arithmetic, the complex ones in complex.
 const mpi_rhs_fault_target = Ref{Any}(nothing)
-for BT in (Matrix{Float64}, SparseMatrixCSC{Float64,Int},
-           Matrix{ComplexF64}, SparseMatrixCSC{ComplexF64,Int})
-    @eval function LinearAlgebra.mul!(Y::StridedMatrix{ComplexF64},B::$BT,X::StridedMatrix{ComplexF64})
+for (BT, ET) in ((Matrix{Float64}, Float64), (SparseMatrixCSC{Float64,Int}, Float64),
+                 (Matrix{Float64}, ComplexF64), (SparseMatrixCSC{Float64,Int}, ComplexF64),
+                 (Matrix{ComplexF64}, ComplexF64), (SparseMatrixCSC{ComplexF64,Int}, ComplexF64))
+    @eval function LinearAlgebra.mul!(Y::StridedMatrix{$ET},B::$BT,X::StridedMatrix{$ET})
         B === mpi_rhs_fault_target[] && error("injected concrete-matrix RHS failure")
         return mul!(Y,B,X,true,false)
     end

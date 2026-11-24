@@ -117,7 +117,8 @@ function _feast_shifted_solve!(dest::Matrix{Complex{T}},
                                rhs::Matrix{Complex{T}},
                                A::Matrix, B::Union{Matrix,Nothing},
                                z::Complex{T}, ncols::Int, tol::T,
-                               maxiter::Int, restart::Int; workspace=nothing) where T<:Real
+                               maxiter::Int, restart::Int; workspace=nothing,
+                               trial=nothing) where T<:Real
     N = size(A, 1)
     buffers = workspace === nothing ? _feast_krylov_workspace(N, T, restart) : workspace
     tmpA, tmpB = buffers.tmpA, buffers.tmpB
@@ -133,7 +134,8 @@ function _feast_shifted_solve!(dest::Matrix{Complex{T}},
         return y
     end
     return solve_dense_shifted!(view(dest, :, 1:ncols), view(rhs, :, 1:ncols),
-                                apply_shift!, :gmres, tol, maxiter, restart; workspace=buffers)
+                                apply_shift!, :gmres, tol, maxiter, restart; workspace=buffers,
+                                trial=trial === nothing ? nothing : view(trial, :, 1:ncols))
 end
 
 function _feast_shifted_solve!(dest::Matrix{Complex{T}},
@@ -141,60 +143,48 @@ function _feast_shifted_solve!(dest::Matrix{Complex{T}},
                                A::SparseMatrixCSC,
                                B::Union{SparseMatrixCSC,Nothing},
                                z::Complex{T}, ncols::Int, tol::T,
-                               maxiter::Int, restart::Int; workspace=nothing) where T<:Real
+                               maxiter::Int, restart::Int; workspace=nothing,
+                               trial=nothing) where T<:Real
+    trial_block = trial === nothing ? nothing : view(trial, :, 1:ncols)
     if B === nothing
         return solve_shifted_iterative_identity!(view(dest, :, 1:ncols),
                                                  view(rhs, :, 1:ncols),
-                                                 A, z, tol, maxiter, restart; workspace=workspace)
+                                                 A, z, tol, maxiter, restart; workspace=workspace,
+                                                 trial=trial_block)
     end
     return solve_shifted_iterative!(view(dest, :, 1:ncols), view(rhs, :, 1:ncols),
-                                    A, B, z, tol, maxiter, restart; workspace=workspace)
+                                    A, B, z, tol, maxiter, restart; workspace=workspace,
+                                    trial=trial_block)
 end
 
 
 # Inner tolerance for the iterative (IFEAST) shifted solves.
 #
-# FEAST's defining property is that it tolerates inexact solves: the contour
-# filter is applied to a trial subspace that the outer loop refines anyway, so
-# an inner solve only has to be accurate relative to how far the outer
-# iteration still has to go. Driving GMRES to 1e-12 on the first sweep, while
-# the outer residual is still O(1), buys nothing and costs Krylov iterations.
+# FEAST tolerates inexact solves: the contour filter is applied to a trial
+# subspace that the outer loop refines anyway. Every iterative path warm-starts
+# its shifted solves from the trial vectors (`solve_dense_shifted!` with
+# `trial=`, `_feast_warm_start_rhs!` for matrix-free operators), so the
+# relative tolerance applies to a residual that shrinks with the
+# eigen-residuals: a fixed 1e-3 puts no floor under the outer accuracy.
 #
-# The inner tolerance therefore tracks the outer residual, floored at what the
-# user actually asked for. An explicitly supplied `solver_tol` is honoured
-# exactly and never adapted.
+# This used to start at 1e-3 and tighten with the outer residual. Without the
+# warm start that only moved the floor -- the default 1e-12 target was never
+# reached -- and with it the tightening counts the shrinkage twice, asking
+# GMRES for reductions near machine precision relative to an already tiny
+# right-hand side. An explicitly supplied `solver_tol` is honoured exactly.
 @inline function _feast_inner_tol(adaptive::Bool, final_tol::T, epsout::T,
                                   loop::Int) where T<:Real
     adaptive || return final_tol
-    loop <= 0 && return max(final_tol, T(1e-3))
-    epsout > zero(T) || return max(final_tol, T(1e-3))
-    return clamp(epsout * T(0.1), final_tol, T(1e-3))
+    return max(final_tol, T(1e-3))
 end
 
-# Refactorize the shifted system into `slot`, reusing the previous
-# factorization's symbolic analysis where that is possible.
-#
-# Every contour point shares one sparsity pattern -- `z*B - A` is a structural
-# union that does not depend on `z` -- so UMFPACK's symbolic analysis only has
-# to run once. `lu!` reuses it and is ~30% cheaper than a fresh `lu` on a 2D
-# Laplacian. It does, however, overwrite the numeric factorization it is given,
-# so it can only be used when the caller is not holding on to the previous
-# factorization: that is the `fpm[10] = 0` policy, one slot refactorized at
-# every contour point. With `fpm[10] = 1` all `ne` factorizations must stay
-# live at once and each needs its own symbolic analysis.
-function _feast_refactorize(previous, shifted::SparseMatrixCSC, reuse_symbolic::Bool)
-    if reuse_symbolic && previous !== nothing
-        try
-            return lu!(previous, shifted)
-        catch err
-            # A pattern change (the structurally-missing-diagonal fallback in
-            # _feast_shifted_complex) makes the stored symbolic analysis
-            # invalid; start over rather than fail the solve.
-            @debug "Symbolic reuse rejected, refactorizing from scratch" exception=err
-        end
-    end
-    return lu(shifted)
-end
+# Factorize a shifted system: for a solver's cache slot, or for one contour
+# point of an eigenvalue-count estimate. Every call factorizes afresh. An
+# earlier version reused the previous factorization's symbolic analysis with
+# `lu!`; the solvers never reached that branch (their single fpm[10] = 0 slot
+# is freed after each solve), only the count estimates did, and there it was
+# slower than a fresh `lu` (about 40% on a 10⁴-point 2D Laplacian).
+_feast_refactorize(::Any, shifted::SparseMatrixCSC, ::Bool) = lu(shifted)
 
 # Dense storage owns the freshly built shifted matrix, so it can be factorized
 # in place instead of copied first.
@@ -369,7 +359,8 @@ function _feast_symmetric_real(A::AbstractMatrix{T},
                                                 A, B, Ze[], M0,
                                                 _feast_inner_tol(adaptive_tol, tol_value,
                                                                  epsout[], loop[]),
-                                                solver_maxiter, solver_restart; workspace=krylov_workspace)
+                                                solver_maxiter, solver_restart; workspace=krylov_workspace,
+                                                trial=workspace.work)
                 if !success
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     break
@@ -561,7 +552,8 @@ function _feast_hermitian_complex(A::AbstractMatrix{Complex{T}},
                                                 _feast_inner_tol(adaptive_tol, tol_value,
                                                                  epsout[], loop[]),
                                                 solver_maxiter,
-                                                solver_restart; workspace=krylov_workspace)
+                                                solver_restart; workspace=krylov_workspace,
+                                                trial=workspace.workc)
                 if !success
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     break

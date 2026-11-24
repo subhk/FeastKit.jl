@@ -651,15 +651,19 @@ good = feast_srcipev!(coeffs, 2, 2.5 + 0.0im, 1.0, 3, copy(fpm))
 sort(real.(good.lambda[1:good.M]))
 ```
 
-The moment method also has no refinement filter of the kind linear FEAST
-iterates, so eigenvalues *outside* the disc but close to it leak into the
-moments at the size of the quadrature error — for the trapezoidal rule about
-`(r/d)^ne`, with `d` their distance from the centre and `ne = fpm[8]`. When they
-are not well separated from the disc, the reduced problem gains spurious
-eigenvalues that never converge (`info = 5`). Use the trapezoidal rule
-(`fpm[16] = 1`) with enough points (24–32 or more), keep the disc away from
-nearby eigenvalues, or use `feast_polynomial`/`feast_gepev!`, which linearize
-the problem and refine iteratively.
+The first sweep's moments are only as accurate as the quadrature: eigenvalues
+*outside* the disc but close to it leak in at about `(r/d)^ne` for the
+trapezoidal rule, with `d` their distance from the centre and `ne = fpm[8]`.
+Each refinement loop then corrects every Ritz pair `(λ, x)` through its
+residual: it solves `P(z) Y = P(λ) x` at the contour points and recomputes the
+moments of `P(z)⁻¹ (P(z) - P(λ)) x / (z - λ)`, whose quadrature error shrinks
+with the residual. Components along eigenvectors outside the disc are damped
+by the filter as in linear FEAST, so the residuals fall loop by loop rather
+than stopping at the quadrature error. Convergence is slow when eigenvalues
+crowd the contour; the trapezoidal rule (`fpm[16] = 1`), more points, a disc
+away from nearby eigenvalues, or a larger `M0` all help, and
+`feast_polynomial`/`feast_gepev!` are an alternative that refines in the
+linearized space.
 
 Centred on the origin the same disc holds every root together with its
 negative, and the method has nothing to work with:
@@ -687,8 +691,9 @@ directions, use a smaller contour or a companion-linearization driver such as
 with all `N` eigenpairs is complete and can still return success.
 
 Accuracy is governed by how well the quadrature resolves the contour integral
-rather than by refinement loops. If the residual is too large, add contour
-points (`fpm[8]`) before raising the loop count (`fpm[4]`).
+and by the refinement loops together: more contour points (`fpm[8]`) make each
+loop more effective, more loops (`fpm[4]`) let a slowly converging problem
+finish.
 
 ### Parameters
 

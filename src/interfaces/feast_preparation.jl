@@ -21,6 +21,8 @@ end
 
 function _feast_prepare_assembled(A; parallel, backend, strict_backend, comm,
                                   general::Bool=false, initial_subspace=nothing, kwargs...)
+    # Integer and rational matrices are promoted to floating point later.
+    _feast_check_supported_eltype(_feast_float_eltype(eltype(A)))
     options = _feast_prepare_options(size(A, 1); general=general, initial_subspace=initial_subspace, kwargs...)
     requested = _normalize_backend(parallel, backend)
     allow_backend_fallback = _allow_backend_fallback(parallel, backend, strict_backend)
@@ -30,7 +32,7 @@ function _feast_prepare_assembled(A; parallel, backend, strict_backend, comm,
                                            A, allow_backend_fallback; general=general)
     if options.params[42] == 1
         options.solver_options.solver === :direct || throw(ArgumentError("mixed_precision requires solver=:direct"))
-        materialized = _materialize_matrix(A)
+        materialized = _materialize_matrix(A; dense=true)
         materialized isa Matrix && eltype(materialized) in (Float64,ComplexF64) ||
             throw(ArgumentError("mixed_precision requires dense Float64 or ComplexF64 matrices"))
         backend_choice = _feast_backend_or_serial(backend_choice,
@@ -48,36 +50,70 @@ end
 
 # Use the same scalar promotion and contour validation for standard and
 # generalized problems; B=nothing preserves the specialized standard driver.
-function _feast_prepare_general_matrices(A, B, center, radius)
-    A = _materialize_matrix(A)
-    B = B === nothing ? nothing : _materialize_matrix(B)
+function _feast_prepare_general_matrices(A, B, center, radius; dense::Bool=false)
+    A = _materialize_matrix(A; dense=dense)
+    B = B === nothing ? nothing : _materialize_matrix(B; dense=dense)
     real_type = float(promote_type(_real_component_type(eltype(A)),
                                   B === nothing ? _real_component_type(eltype(A)) :
                                                   _real_component_type(eltype(B)),
                                   _real_component_type(typeof(center)), typeof(radius)))
+    _feast_check_supported_eltype(real_type)
     complex_type = Complex{real_type}
     A_exec = _materialize_matrix_eltype(A, complex_type)
     B_exec = B === nothing ? nothing : _materialize_matrix_eltype(B, complex_type)
+    B_exec === nothing || ((A_exec, B_exec) = _feast_match_storage(A_exec, B_exec))
     center_exec, radius_exec = complex_type(center), real_type(radius)
     isfinite(center_exec) && isfinite(radius_exec) && radius_exec > zero(real_type) ||
         throw(ArgumentError("Contour center must be finite and radius must be finite and positive"))
     return (; A_exec, B_exec, center_exec, radius_exec)
 end
 
-function _materialize_matrix(A::AbstractMatrix)
-    # Kernels dispatch on Matrix and SparseMatrixCSC. Lazy wrappers such as
-    # Symmetric/Hermitian are converted while preserving sparse storage.
-    if A isa Matrix || A isa SparseMatrixCSC
+function _materialize_matrix(A::AbstractMatrix; dense::Bool=false)
+    # Kernels dispatch on Matrix and SparseMatrixCSC. `dense=true` is for the
+    # paths that only exist for dense storage (mixed precision): banded
+    # structured matrices are densified for them, while sparse storage stays
+    # sparse so that those paths reject it.
+    # The sparse kernels are written for `Int` column pointers and row indices.
+    if A isa Matrix || A isa SparseMatrixCSC{<:Any,Int}
         return A
-    elseif A isa Symmetric
-        parent(A) isa SparseMatrixCSC && return SparseMatrixCSC(A)
-        return Matrix(A)
-    elseif A isa Hermitian
-        parent(A) isa SparseMatrixCSC && return SparseMatrixCSC(A)
-        return Matrix(A)
+    elseif _feast_sparse_storage(A) || (!dense && _feast_banded_structured(A))
+        # Banded structured matrices and wrappers of sparse storage keep their
+        # O(N) storage: densifying a SymTridiagonal costs N² memory and a dense
+        # LU at every contour point.
+        return SparseMatrixCSC{eltype(A),Int}(sparse(A))
     else
         return Matrix(A)
     end
+end
+
+# Storage that is better kept sparse than densified.
+_feast_sparse_like(A::AbstractMatrix) = _feast_sparse_storage(A) || _feast_banded_structured(A)
+_feast_sparse_storage(::SparseMatrixCSC) = true
+_feast_sparse_storage(A::Union{Symmetric,Hermitian,Adjoint,Transpose}) = _feast_sparse_storage(parent(A))
+_feast_sparse_storage(A::AbstractMatrix) = issparse(A)
+_feast_banded_structured(::Union{Diagonal,Bidiagonal,Tridiagonal,SymTridiagonal}) = true
+_feast_banded_structured(A::Union{Symmetric,Hermitian,Adjoint,Transpose}) = _feast_banded_structured(parent(A))
+_feast_banded_structured(::AbstractMatrix) = false
+
+# The solvers take a pencil in one storage family. A structured or dense B
+# next to a sparse A (`feast(A, Diagonal(b), ...)`), or the reverse, follows
+# A's storage instead of being rejected.
+function _materialize_pencil(A::AbstractMatrix, B::AbstractMatrix; dense::Bool=false)
+    dense && return _feast_match_storage(_materialize_matrix(A; dense=true),
+                                         _materialize_matrix(B; dense=true))
+    A_exec = _materialize_matrix(A)
+    B_exec = A_exec isa SparseMatrixCSC ?
+        (B isa SparseMatrixCSC || B isa Symmetric || B isa Hermitian ?
+             _materialize_matrix(B) : SparseMatrixCSC{eltype(B),Int}(sparse(B))) :
+        _materialize_matrix(B)
+    return _feast_match_storage(A_exec, B_exec)
+end
+
+function _feast_match_storage(A::AbstractMatrix, B::AbstractMatrix)
+    A isa SparseMatrixCSC && !(B isa SparseMatrixCSC) &&
+        return A, SparseMatrixCSC{eltype(B),Int}(sparse(B))
+    A isa Matrix && !(B isa Matrix) && return A, Matrix(B)
+    return A, B
 end
 
 @inline _real_component_type(::Type{Complex{T}}) where T<:Real = T
@@ -100,8 +136,8 @@ function _ensure_complex_matrix(A::AbstractMatrix)
     return eltype(materialized) <: Complex ? materialized : Complex.(materialized)
 end
 
-function _materialize_matrix_eltype(A::AbstractMatrix, ::Type{T}) where T
-    materialized = _materialize_matrix(A)
+function _materialize_matrix_eltype(A::AbstractMatrix, ::Type{T}; dense::Bool=false) where T
+    materialized = _materialize_matrix(A; dense=dense)
     return eltype(materialized) === T ? materialized : T.(materialized)
 end
 
@@ -109,5 +145,13 @@ end
 # its element type here as well -- forwarding only the interval would recurse
 # straight back into this method.
 @inline _feast_promote_eltype(A::AbstractMatrix) =
-    eltype(A) <: Integer ? _materialize_matrix_eltype(A, Float64) :
-    eltype(A) <: Complex{<:Integer} ? _materialize_matrix_eltype(A, ComplexF64) : A
+    _feast_promote_eltype(A, _feast_float_eltype(eltype(A)))
+@inline _feast_promote_eltype(A::AbstractMatrix, ::Type{T}) where T =
+    eltype(A) === T ? A : _materialize_matrix_eltype(A, T)
+
+# The floating-point element type a matrix is solved in: integers, rationals
+# and other exact reals have no solver of their own.
+@inline _feast_float_eltype(::Type{T}) where T<:AbstractFloat = T
+@inline _feast_float_eltype(::Type{T}) where T<:Real = float(T)
+@inline _feast_float_eltype(::Type{Complex{T}}) where T<:Real = Complex{_feast_float_eltype(T)}
+@inline _feast_float_eltype(::Type{T}) where T = T

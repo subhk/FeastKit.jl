@@ -4,6 +4,11 @@
 # Sentinel value to indicate uninitialized parameters (matches Fortran FEAST)
 const FEAST_UNINITIALIZED = -111
 
+# Node counts with a Zolotarev table. The n=20 table that used to ship was not
+# a Zolotarev rule (filter value 1.14 at the center, 0.12 just outside), and
+# other counts fell back to a rule that was not a filter at all.
+const _FEAST_ZOLOTAREV_POINTS = (1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16)
+
 function feastinit!(fpm::Vector{Int})
     length(fpm) >= 64 || throw(ArgumentError("fpm array must have at least 64 elements"))
 
@@ -27,7 +32,12 @@ function feastinit_driver(fpm::Vector{Int}, N::Integer)
     feastinit!(fpm)
     if N > 0
         # Optionally suggest number of contour points based on problem size
-        suggested = clamp(Int(ceil(sqrt(Float64(N)))), 8, 64)
+        suggested = clamp(Int(ceil(sqrt(Float64(N)))), 8, 56)
+        # Gauss-Legendre (the default) accepts any count up to 20 and a fixed
+        # set above it; round up to the next one that feastdefault! accepts.
+        if suggested > 20
+            suggested = first(n for n in (24, 32, 40, 48, 56) if n >= suggested)
+        end
         fpm[2] = suggested
     end
     return fpm
@@ -108,11 +118,17 @@ function feastdefault!(fpm::Vector{Int})
         if fpm[14] == 2
             fpm[2] = 3  # Stochastic estimate
         end
-    elseif (fpm[16] == 0 || fpm[16] == 2) && fpm[2] > 20
-        # Gauss or Zolotarev have restrictions (allow specific larger values)
+    elseif fpm[29] > 0
+        # A registered custom contour supplies its own nodes; fpm[2] is only
+        # their count, so the quadrature tables do not restrict it.
+    elseif fpm[16] == 2 && !(fpm[2] in _FEAST_ZOLOTAREV_POINTS)
+        throw(ArgumentError("Invalid fpm[2]=$(fpm[2]): Zolotarev quadrature (fpm[16]=2) " *
+                            "is tabulated only for $(_FEAST_ZOLOTAREV_POINTS) points"))
+    elseif fpm[16] == 0 && fpm[2] > 20
+        # Gauss-Legendre is restricted above 20 nodes.
         allowed_large = [24, 32, 40, 48, 56]
         if !(fpm[2] in allowed_large)
-            throw(ArgumentError("Invalid fpm[2]=$(fpm[2]): max 20 for Gauss/Zolotarev, or use $allowed_large"))
+            throw(ArgumentError("Invalid fpm[2]=$(fpm[2]): max 20 for Gauss, or use $allowed_large"))
         end
     end
 
@@ -166,6 +182,8 @@ function feastdefault!(fpm::Vector{Int})
         if fpm[14] == 2
             fpm[8] = 6  # Stochastic estimate
         end
+    elseif fpm[29] > 0
+        # The custom contour supplies the nodes for full-contour solves too.
     elseif fpm[8] < 2
         throw(ArgumentError("Invalid fpm[8]=$(fpm[8]): must be at least 2"))
     elseif fpm[16] == 0 && fpm[8] > 40
@@ -405,7 +423,9 @@ function feast_tolerance(fpm::Vector{Int}, ::Type{T}) where T<:AbstractFloat
     # The default FEAST exponent targets Float64 accuracy. For Float32,
     # requiring 1e-12 convergence reports false non-convergence after the
     # eigenpairs have reached the precision the storage type can represent.
-    T === Float32 && return max(tol, sqrt(eps(T)))
+    # A tolerance the working precision can represent is the caller's choice
+    # and is kept; Float16 is treated like Float32.
+    T in (Float16, Float32) && tol < eps(T) && return sqrt(eps(T))
     return tol
 end
 

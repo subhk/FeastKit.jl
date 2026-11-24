@@ -14,7 +14,7 @@ Depth = 2
 | Backend | Supported high-level problems | Required setup |
 |:--|:--|:--|
 | `:threads` | Real symmetric dense/sparse interval problems | Multiple Julia threads |
-| `:distributed` | Real symmetric sparse interval problems | Julia workers with FeastKit available |
+| `:distributed` | Real symmetric dense/sparse interval problems | Julia workers with FeastKit available |
 | `:mpi` | Real symmetric intervals and complex Hermitian/general dense/sparse problems | MPI.jl, initialized communicator, multiple ranks |
 | `feast_hybrid` | Real symmetric MPI problems with threaded contour solves | MPI plus threads on each rank |
 
@@ -163,8 +163,9 @@ pids = addprocs([("node1", 2), ("node2", 2)];
 FeastKit loads itself on the selected workers and builds shifted factorizations
 there. Factors are reused while right-hand sides and projected results move
 between processes. Remote workers must have compatible Julia and package
-environments. The high-level distributed path currently requires sparse real
-symmetric inputs. The following command reports the current task distribution:
+environments. The high-level distributed path takes real symmetric inputs in
+dense or sparse storage. The following command reports the current task
+distribution:
 
 ```@example parallel_distribution
 using FeastKit
@@ -269,9 +270,10 @@ collectively; iterative projection failures return
 `Feast_ERROR_NO_CONVERGENCE`. Product, projection, eigensolve, and residual
 failures are synchronized so ranks do not diverge across collectives.
 
-The default inner MPI GMRES tolerance is one percent of the precision-aware
-outer tolerance, subject to a machine-epsilon floor. Use high-level
-`solver_opts=(rtol=...,)` or low-level `solver_tol` to override it. Real and
+The default inner MPI GMRES tolerance is `1e-3`, applied to a solve
+warm-started from the trial vectors as in the serial drivers (see the
+[Performance Guide](performance.md)). Use high-level `solver_opts=(rtol=...,)`
+or low-level `solver_tol` to override it. Real and
 complex `mpi_feast` calls accept a `FeastParameters` wrapper or its raw `.fpm`.
 
 `fpm[10]=1` caches each rank's assigned factors and permits threaded reuse.

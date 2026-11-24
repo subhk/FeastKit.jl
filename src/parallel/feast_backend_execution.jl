@@ -3,19 +3,32 @@
 function feast_with_backend(A, B, interval, backend, M0, fpm, comm, use_threads;
                             strict_backend::Bool = false)
     # The low-level helper retains its serial fallback when MPI is unavailable.
-    backend === :mpi && !_mpi_backend_ready(comm) &&
+    if backend === :mpi && !_mpi_backend_ready(comm)
+        strict_backend && throw(ArgumentError(
+            "backend=:mpi was requested but MPI is not available; " *
+            "load MPI.jl and call MPI.Init() first"))
         return feast_serial(A, B, interval, M0, fpm)
+    end
+    # `use_threads=false` rules out the threaded backend: an explicit request
+    # for it is a contradiction, and an automatic one moves to the workers.
+    if backend === :threads && !use_threads
+        strict_backend && throw(ArgumentError("backend=:threads conflicts with use_threads=false"))
+        backend = _distributed_backend_ready() ? :distributed : :serial
+    end
     backend = _feast_compatible_backend(backend, A, B, !strict_backend)
     if backend === :mpi
         comm_options = comm === nothing ? (;) : (; comm=comm)
         return mpi_feast(A, B, interval; M0=M0, fpm=fpm, comm_options...)
     elseif backend in (:threads, :distributed)
+        # The parallel drivers thread over contour points with use_threads=true
+        # and distribute them over the workers otherwise.
+        threaded = backend === :threads
         if A isa SparseMatrixCSC
             return pfeast_scsrgv!(copy(A), copy(B), interval[1], interval[2], M0, fpm;
-                                  use_threads=(backend === :threads))
+                                  use_threads=threaded)
         end
         return pfeast_sygv!(copy(A), copy(B), interval[1], interval[2], M0, fpm;
-                            use_threads=true)
+                            use_threads=threaded)
     end
     return feast_serial(A, B, interval, M0, fpm)
 end

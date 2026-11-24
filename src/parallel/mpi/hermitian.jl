@@ -18,7 +18,8 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
     tol = _mpi_solver_tolerance(fpm,T,solver_tol)
     krylov_workspace = solver_choice === :gmres ? _feast_krylov_workspace(N, T, solver_restart) : nothing
 
-    contour, _ = _mpi_contour(T,fpm,Emin,Emax,root,comm)
+    contour, custom = _mpi_contour(T,fpm,Emin,Emax,root,comm)
+    offset = _feast_filter_offset(T, fpm, custom)
     contour = _feast_complete_hermitian_contour(contour)
     ne = length(contour.Zne)
     Zne_global, Wne_global = contour.Zne, contour.Wne
@@ -70,6 +71,7 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
     M_found = 0
     loop_count = 0
 
+    empty_dist = -one(T)
     for loop_idx in 0:fpm[4]
         loop_count = loop_idx
         # Each rank solves its local contour points; only the partial filtered
@@ -104,6 +106,7 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
         # Direct send/recv Allreduce into the persistent buffer — no fresh
         # receive array per refinement loop.
         MPI.Allreduce!(local_Q_proj, Q_proj, MPI.SUM, comm)
+        offset == zero(T) || (Q_proj .+= offset .* Q_basis)
 
         # Q_proj is the filtered image of the previous loop's Ritz vectors
         # (Q_basis); the root classifies them by filter response and every
@@ -111,7 +114,8 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
         if loop_idx >= _FEAST_SPURIOUS_MIN_LOOPS
             kept = rank == root ?
                 _feast_screen_spurious!(keep, Q_proj, Q_basis, res_vec, M_found,
-                                        feast_tolerance(fpm, T)) : nothing
+                                        feast_tolerance(fpm, T), lambda_vec, Zne_global,
+                                        Wne_global; offset=offset) : nothing
             kept = MPI.bcast(kept, root, comm)
             if kept !== nothing
                 MPI.Bcast!(keep, root, comm)
@@ -172,12 +176,26 @@ function _mpi_feast_complex_hermitian!(A::AbstractMatrix{Complex{T}},
         end
         M = MPI.bcast(M,root,comm)
         if M == 0
-            # No Ritz value inside the region: it holds no eigenvalues.
-            info_code = Int(Feast_SUCCESS)
+            # No Ritz value inside the region. It is empty only once the
+            # subspace has settled outside it (see _feast_region_looks_empty);
+            # the root decides and every rank follows.
+            verdict = rank == root ?
+                _feast_region_looks_empty(view(lambda_vec, 1:M0), (Emin + Emax) / 2, (Emax - Emin) / 2,
+                                          Zne_global, Wne_global, false, empty_dist;
+                                          offset=offset) :
+                nothing
+            empty, empty_dist = MPI.bcast(verdict, root, comm)
             epsout_val = zero(T)
             M_found = 0
-            break
+            if empty || loop_idx == fpm[4]
+                info_code = empty ? Int(Feast_SUCCESS) : Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
+            MPI.Bcast!(solutions, root, comm)
+            copyto!(Q_basis, solutions)
+            continue
         end
+        empty_dist = -one(T)
         MPI.Bcast!(lambda_vec,root,comm)
         MPI.Bcast!(solutions,root,comm)
         if !mpi_compute_complex_residuals!(A,B,lambda_vec,solutions,res_vec,M,comm;

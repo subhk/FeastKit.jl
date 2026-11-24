@@ -17,9 +17,16 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
 
     # Input validation (on all ranks)
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
+    # Resolve the defaults on every rank before anything reads fpm. Building
+    # the contour fills them in on root alone, so a rank that later read an
+    # unset entry (a Zolotarev node count left at its default) threw while
+    # root waited in the next collective.
+    feastdefault!(fpm)
+    fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
 
     # Generate integration contour (on root, then broadcast)
-    contour, _ = _mpi_contour(T,fpm,Emin,Emax,root,comm)
+    contour, custom = _mpi_contour(T,fpm,Emin,Emax,root,comm)
+    offset = _feast_filter_offset(T, fpm, custom)
     ne = length(contour.Zne)
     Zne_global, Wne_global = contour.Zne, contour.Wne
 
@@ -33,17 +40,16 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         mpi_state.local_Wne[i] = Wne_global[global_idx]
     end
 
-    feastdefault!(fpm)
-    fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
     eps_tolerance = feast_tolerance(fpm, T)
     max_loops = fpm[4]
     keep = Vector{Bool}(undef, M0)
 
     # Half-contour symmetry requires a real trial basis. Its full projector is
-    # the real part of the doubled upper-half contribution.
-    Q_real = Matrix{T}(undef,N,M0)
-    _feast_seeded_subspace!(Q_real)
-    Q = Complex{T}.(Q_real)
+    # the real part of the doubled upper-half contribution. The basis, the
+    # filtered subspace and the reduced pencil stay real, as in the serial
+    # kernel; only the shifted solves are complex.
+    Q = Matrix{T}(undef, N, M0)
+    _feast_seeded_subspace!(Q)
     MPI.Bcast!(Q, root, comm)
     active_dim = M0
 
@@ -60,19 +66,19 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         Int(Feast_ERROR_LAPACK),T(Inf),0)
 
     # Scratch reused across loops. The reduced Rayleigh-Ritz problem mirrors the
-    # serial dense Hermitian path (complex QR rank-compression + Hermitian RR),
+    # serial kernel (pivoted-QR rank compression + symmetric-definite RR),
     # which the old moment-based MPI path lacked — that is why it returned wrong
     # eigenpairs for M0 larger than the number of eigenvalues in the interval.
-    Q_proj_local = Matrix{Complex{T}}(undef, N, M0)
-    BQ_loop = Matrix{Complex{T}}(undef, N, M0)
+    Q_proj_local = Matrix{Complex{T}}(undef, N, M0)   # this rank's resolvent sum
+    Q_filtered = Matrix{T}(undef, N, M0)              # its real part, summed over ranks
+    rhs = Matrix{Complex{T}}(undef, N, M0)            # B*Q for the shifted solves
     Y_loop = A isa AbstractSparseMatrix ?
         Matrix{Complex{promote_type(T,Float64)}}(undef,N,M0) : Matrix{Complex{T}}(undef,N,M0)
-    q_basis = Matrix{Complex{T}}(undef, N, M0)
-    AQ = Matrix{Complex{T}}(undef, N, M0)
-    BQm = Matrix{Complex{T}}(undef, N, M0)
-    Sq = Matrix{Complex{T}}(undef, M0, M0)
-    Aq = Matrix{Complex{T}}(undef, M0, M0)
-    qcol = Vector{Complex{T}}(undef, N)
+    q_basis = Matrix{T}(undef, N, M0)
+    AQ = Matrix{T}(undef, N, M0)
+    BQm = Matrix{T}(undef, N, M0)
+    Sq = Matrix{T}(undef, M0, M0)   # Qᵀ A Q
+    Aq = Matrix{T}(undef, M0, M0)   # Qᵀ B Q
     lambda = zeros(T, M0)
     q = zeros(T, N, M0)
     res = zeros(T, M0)
@@ -89,7 +95,10 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     M_found = 0
     converged = false
 
-    for loop in 1:max_loops
+    empty_dist = -one(T)
+    # Loops are counted from 0 and fpm[4] refinements follow the first sweep,
+    # as in the serial drivers.
+    for loop in 0:max_loops
         loop_done = loop
         mpi_state.loop = loop
 
@@ -99,13 +108,16 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         # reduced Rayleigh-Ritz is left replicated on every rank (an Allreduce,
         # not root-only) — that scales better here than idling ranks on root.
         qblk = view(Q, :, 1:active_dim)
-        bq = view(BQ_loop, :, 1:active_dim)
+        bq = view(BQm, :, 1:active_dim)
+        rhs_blk = view(rhs, :, 1:active_dim)
         qpl = view(Q_proj_local, :, 1:active_dim)
-        fill!(qpl, zero(Complex{T}))
+        qf = view(Q_filtered, :, 1:active_dim)
         Yv = view(Y_loop, :, 1:active_dim)
         success = try
+            # B*Q in real arithmetic, widened once for the complex solves.
             B_is_identity ? copyto!(bq, qblk) : mul!(bq, B, qblk)
-            _mpi_local_projection!(qpl,local_factors,bq,mpi_state.local_Wne,Yv;
+            copyto!(rhs_blk, bq)
+            _mpi_local_projection!(qpl,local_factors,rhs_blk,mpi_state.local_Wne,Yv;
                                    scale=2,use_threads=use_threads)
         catch err
             @debug "MPI local projection preparation failed" exception=err
@@ -116,17 +128,20 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             M_found = 0
             break
         end
-        # In-place Allreduce: every rank's partial sum is replaced by the global
-        # sum, no per-loop slice copy or fresh receive buffer.
-        MPI.Allreduce!(qpl, MPI.SUM, comm)
-        @. qpl = real(qpl)
+        # The filtered subspace is the real part of the summed contributions,
+        # so the ranks sum real parts: half the data of the complex sum. The
+        # in-place Allreduce leaves the global sum on every rank.
+        @. qf = real(qpl)
+        MPI.Allreduce!(qf, MPI.SUM, comm)
+        offset == zero(T) || (qf .+= offset .* qblk)
 
-        # qpl is the filtered image of the previous loop's Ritz vectors; the
+        # qf is the filtered image of the previous loop's Ritz vectors; the
         # root classifies them by filter response and every rank follows.
-        if loop - 1 >= _FEAST_SPURIOUS_MIN_LOOPS
+        if loop >= _FEAST_SPURIOUS_MIN_LOOPS
             kept = rank == root ?
-                _feast_screen_spurious!(keep, qpl, view(Q, :, 1:active_dim), res,
-                                        M_found, eps_tolerance) : nothing
+                _feast_screen_spurious!(keep, qf, qblk, res,
+                                        M_found, eps_tolerance, lambda, Zne_global,
+                                        Wne_global; half=true, offset=offset) : nothing
             kept = MPI.bcast(kept, root, comm)
             if kept !== nothing
                 MPI.Bcast!(keep, root, comm)
@@ -140,7 +155,7 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         rank_r = 0
         M = 0
         success = _mpi_collective_try(comm) do
-            rank_r = _feast_qr_compress!(q_basis, qpl, active_dim;
+            rank_r = _feast_qr_compress!(q_basis, Q_filtered, active_dim;
                                          rank_tol=sqrt(eps(T)))
             if rank_r == 0
                 return
@@ -153,35 +168,36 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
             Aq_r = view(Aq, 1:rank_r, 1:rank_r)
 
             mul!(AQ_r, A, q_rank)
-            mul!(Sq_r, adjoint(q_rank), AQ_r)
+            mul!(Sq_r, transpose(q_rank), AQ_r)
+            _feast_symmetric_part!(Sq_r)
             if B_is_identity
-                # Qo orthonormal ⇒ Qᴴ B Q = I; skip the dense identity matmul.
-                fill!(Aq_r, zero(Complex{T}))
+                # Orthonormal basis ⇒ Qᵀ B Q = I; skip the dense identity matmul.
+                fill!(Aq_r, zero(T))
                 @inbounds for i in 1:rank_r
-                    Aq_r[i, i] = one(Complex{T})
+                    Aq_r[i, i] = one(T)
                 end
             else
                 mul!(BQ_r, B, q_rank)
-                mul!(Aq_r, adjoint(q_rank), BQ_r)
+                mul!(Aq_r, transpose(q_rank), BQ_r)
+                _feast_symmetric_part!(Aq_r)
             end
 
             local lambda_red, v_red
             try
-                Fr = eigen(Hermitian(Sq_r), Hermitian(Aq_r))
+                Fr = eigen(Symmetric(Sq_r), Symmetric(Aq_r))
                 lambda_red = Fr.values
                 v_red = Fr.vectors
             catch err
-                (isa(err, PosDefException) || isa(err, LinearAlgebra.LAPACKException)) || rethrow(err)
+                (err isa PosDefException || err isa LinearAlgebra.LAPACKException ||
+                 err isa SingularException) || rethrow(err)
                 Fr = eigen(Sq_r, Aq_r)
                 lambda_red = real.(Fr.values)
-                v_red = Fr.vectors
+                v_red = real.(Fr.vectors)
             end
 
-            for idx in 1:rank_r
-                mul!(qcol, q_rank, view(v_red, :, idx))
-                _feast_real_column!(view(q, :, idx), qcol)
-                lambda[idx] = lambda_red[idx]
-            end
+            # Ritz vectors on the orthonormal basis.
+            mul!(view(q, :, 1:rank_r), q_rank, v_red)
+            copyto!(view(lambda, 1:rank_r), lambda_red)
 
             M = _feast_reorder_by_interval!(lambda, q, perm, lambda_tmp, q_tmp,
                                             Emin, Emax, rank_r)
@@ -206,12 +222,27 @@ function mpi_feast_sygv!(A::AbstractMatrix{T}, B::AbstractMatrix{T},
         # Every rank uses the root's Ritz basis and termination decision.
         rank_r,M,epsout,converged = MPI.bcast((rank_r,M,epsout,epsout<=eps_tolerance),root,comm)
         if M == 0
-            # No Ritz value in the interval: it holds no eigenvalues.
+            # No Ritz value in the interval. It is empty only once the subspace
+            # has settled outside it (see _feast_region_looks_empty); the root
+            # decides and every rank follows.
+            verdict = rank != root ? nothing :
+                rank_r == 0 ? (true, -one(T)) :
+                _feast_region_looks_empty(view(lambda, 1:rank_r), (Emin + Emax) / 2,
+                                          (Emax - Emin) / 2, Zne_global, Wne_global,
+                                          true, empty_dist; offset=offset)
+            empty, empty_dist = MPI.bcast(verdict, root, comm)
             M_found = 0
             epsout = zero(T)
-            converged = true
-            break
+            if empty || loop == max_loops
+                converged = empty
+                break
+            end
+            MPI.Bcast!(q, root, comm)
+            active_dim = rank_r
+            copyto!(view(Q, :, 1:active_dim), view(q, :, 1:active_dim))
+            continue
         end
+        empty_dist = -one(T)
         MPI.Bcast!(lambda,root,comm)
         MPI.Bcast!(q,root,comm)
         MPI.Bcast!(res,root,comm)

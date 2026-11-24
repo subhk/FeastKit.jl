@@ -11,14 +11,10 @@ function _pfeast_factorize_contour_sparse(A::SparseMatrixCSC{T,Int},
     factors = Vector{typeof(f1)}(undef, ne)
     factors[1] = f1
     if use_threads && Threads.nthreads() > 1 && ne > 2
-        blas_threads = BLAS.get_num_threads()
-        BLAS.set_num_threads(1)
-        try
+        _with_single_blas_thread() do
             Threads.@threads for e in 2:ne
                 factors[e] = lu(Zne[e] * B - A)
             end
-        finally
-            BLAS.set_num_threads(blas_threads)
         end
     else
         for e in 2:ne
@@ -36,6 +32,21 @@ struct _PFeastDistributedFactors
     futures::Vector{Future}
 end
 
+# Factorize one worker's share of the contour points, in its own storage.
+_pfeast_factorize_chunk(A::SparseMatrixCSC, B::SparseMatrixCSC, nodes) =
+    _pfeast_factorize_contour_sparse(A, B, nodes, false)
+_pfeast_factorize_chunk(A::Matrix, B::Matrix, nodes) =
+    _pfeast_factorize_contour(A, B, nodes, false)
+
+# On the owning worker, `fetch` of a failed remotecall returns the stored
+# RemoteException instead of throwing it.
+function _pfeast_remote_failure(factors::Future)
+    result = fetch(factors)
+    result isa Exception || return nothing
+    cause = result isa RemoteException ? result.captured.ex : result
+    return sprint(showerror, cause)
+end
+
 function _pfeast_factorize_contour_distributed(A, B, nodes)
     pids = workers()[1:min(length(workers()), length(nodes))]
     # Functions and sparse factor types cannot be deserialized until the
@@ -45,8 +56,15 @@ function _pfeast_factorize_contour_distributed(A, B, nodes)
     futures = Future[]
     try
         for (pid, chunk) in zip(pids, chunks)
-            push!(futures, remotecall(_pfeast_factorize_contour_sparse, pid,
-                                      A, B, nodes[chunk], false))
+            push!(futures, remotecall(_pfeast_factorize_chunk, pid,
+                                      A, B, nodes[chunk]))
+        end
+        # Report a failed factorization here, with its cause, rather than as
+        # a MethodError when the stored exception reaches the first solve.
+        for (pid, future) in zip(pids, futures)
+            failure = remotecall_fetch(_pfeast_remote_failure, pid, future)
+            failure === nothing ||
+                error("Shifted factorization failed on worker $pid: $failure")
         end
     catch
         foreach(finalize, futures)
@@ -59,9 +77,16 @@ function _pfeast_project_sparse_chunk(factors::Future, rhs::AbstractMatrix,
                                       weights::AbstractVector)
     partial = zeros(eltype(rhs), size(rhs))
     # This fetch occurs on the worker that owns the factorizations.
-    _pfeast_accumulate_qproj_sparse!(partial, fetch(factors), rhs, weights, false)
+    owned = fetch(factors)
+    owned isa Exception && throw(owned)
+    _pfeast_accumulate_qproj_sparse!(partial, owned, rhs, weights, false)
     return partial
 end
+
+# Dense drivers reach the same worker-side accumulation.
+_pfeast_accumulate_qproj!(Q_proj::AbstractMatrix, factors::_PFeastDistributedFactors,
+                          BQ::AbstractMatrix, Wne::AbstractVector, use_threads::Bool) =
+    _pfeast_accumulate_qproj_sparse!(Q_proj, factors, BQ, Wne, use_threads)
 
 function _pfeast_accumulate_qproj_sparse!(Q_proj::AbstractMatrix,
                                           factors::_PFeastDistributedFactors,
@@ -98,9 +123,7 @@ function _pfeast_accumulate_qproj_sparse!(Q_proj::AbstractMatrix{Complex{T}},
     ne = length(factors)
     if use_threads && Threads.nthreads() > 1 && ne > 1
         contribs = Vector{Matrix{Complex{T}}}(undef, ne)
-        blas_threads = BLAS.get_num_threads()
-        BLAS.set_num_threads(1)
-        try
+        _with_single_blas_thread() do
             Threads.@threads for e in 1:ne
                 # Scale the solve result in place; assignment converts to
                 # Complex{T} only when UMFPACK promoted the eltype (Float32).
@@ -108,8 +131,6 @@ function _pfeast_accumulate_qproj_sparse!(Q_proj::AbstractMatrix{Complex{T}},
                 @. Yt *= 2 * Wne[e]
                 contribs[e] = Yt
             end
-        finally
-            BLAS.set_num_threads(blas_threads)
         end
         for c in contribs
             Q_proj .+= c
@@ -124,180 +145,22 @@ function _pfeast_accumulate_qproj_sparse!(Q_proj::AbstractMatrix{Complex{T}},
     return Q_proj
 end
 
+# The sparse halves of the storage dispatch in _pfeast_real_symmetric! (the
+# shared driver behind pfeast_sygv! and pfeast_scsrgv!, in dense.jl).
+_pfeast_factorize_contour(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
+                          Zne::Vector{Complex{T}}, use_threads::Bool) where T<:Real =
+    _pfeast_factorize_contour_sparse(A, B, Zne, use_threads)
+
+_pfeast_accumulate_qproj!(Q_proj::AbstractMatrix, factors::AbstractVector,
+                          BQ::AbstractMatrix, Wne::AbstractVector, use_threads::Bool) =
+    _pfeast_accumulate_qproj_sparse!(Q_proj, factors, BQ, Wne, use_threads)
+
 function pfeast_scsrgv!(A::SparseMatrixCSC{T,Int}, B::SparseMatrixCSC{T,Int},
                         Emin::T, Emax::T, M0::Int, fpm::Vector{Int};
                         use_threads::Bool = true, verbose::Bool = false) where T<:Real
-    # Parallel sparse real-symmetric generalized FEAST. Mirrors the corrected
-    # dense path: cached sparse factorizations + threaded contour solves, then a
-    # rank-compressed Hermitian Rayleigh-Ritz reduced problem (pivoted QR keeps
-    # an oversized trial subspace from making the projected pencil rank deficient
-    # — the bug that made the old moment-based path return wrong eigenpairs).
-    N = size(A, 1)
-    size(A, 2) == N || throw(ArgumentError("Matrix A must be square"))
-    size(B) == (N, N) || throw(ArgumentError("Matrix B must match size of A"))
-    check_feast_srci_input(N, M0, Emin, Emax, fpm)
-    feastdefault!(fpm)
-    fpm[42] == 1 && throw(ArgumentError("mixed_precision requires the serial dense solver"))
-
-    contour = feast_contour(Emin, Emax, fpm)
-    Zne = contour.Zne
-    Wne = contour.Wne
-
-    eps_tol = feast_tolerance(fpm, T)
-    max_loops = fpm[4]
-    keep = Vector{Bool}(undef, M0)
-
-    Q = Matrix{Complex{T}}(undef, N, M0)
-    _feast_seeded_subspace_complex!(Q)
-    active_dim = M0
-
-    Q_proj = zeros(Complex{T}, N, M0)
-    q_basis = Matrix{Complex{T}}(undef, N, M0)
-    AQ = Matrix{Complex{T}}(undef, N, M0)
-    BQ = Matrix{Complex{T}}(undef, N, M0)
-    Sq = Matrix{Complex{T}}(undef, M0, M0)
-    Aq = Matrix{Complex{T}}(undef, M0, M0)
-    BQ_loop = Matrix{Complex{T}}(undef, N, M0)
-    qcol = Vector{Complex{T}}(undef, N)
-    lambda = zeros(T, M0)
-    q = zeros(T, N, M0)
-    res = zeros(T, M0)
-    lambda_tmp = similar(lambda)
-    perm = Vector{Int}(undef, M0)
-    q_tmp = similar(q)
-    residual_Aq = Vector{T}(undef, N)
-    residual_Bq = Vector{T}(undef, N)
-    residual = Vector{T}(undef, N)
-
-    epsout = T(Inf)
-    info_code = Int(Feast_SUCCESS)
-    loop_done = 0
-    M_found = 0
-
-    # With workers and threading disabled, keep each contour chunk's factors
-    # on its worker and reuse them across refinement loops.
-    factors = !use_threads && _distributed_backend_ready() ?
-        _pfeast_factorize_contour_distributed(A, B, Zne) :
-        _pfeast_factorize_contour_sparse(A, B, Zne, use_threads)
-    B_is_identity = (B == I)   # standard problem: skip per-loop identity matmuls
-    res_scale = _feast_residual_floor(
-        _feast_spectral_scale(A, B_is_identity ? nothing : B, Q),
-        _feast_residual_scale(Emin, Emax))
-    verbose && println("pfeast_scsrgv!: $(length(Zne)) contour points, threads=$(Threads.nthreads())")
-
-    try
-        for loop in 1:max_loops
-            loop_done = loop
-            fill!(Q_proj, zero(Complex{T}))
-
-            qblk = view(Q, :, 1:active_dim)
-            bq = view(BQ_loop, :, 1:active_dim)
-            B_is_identity ? copyto!(bq, qblk) : mul!(bq, B, qblk)
-            _pfeast_accumulate_qproj_sparse!(view(Q_proj, :, 1:active_dim), factors,
-                                             bq, Wne, use_threads)
-
-            # The sweep has filtered the previous loop's Ritz vectors (Q); their
-            # filter response separates genuine pairs from spurious ones.
-            if loop - 1 >= _FEAST_SPURIOUS_MIN_LOOPS
-                kept = _feast_screen_spurious!(keep, Q_proj, Q, res, M_found, eps_tol)
-                if kept !== nothing
-                    M = _feast_compact_pairs!(lambda, q, res, keep, M_found)
-                    M > 1 && feast_sort!(lambda, q, res, M)
-                    epsout = M > 0 ? maximum(view(res, 1:M)) : zero(T)
-                    info_screened = M == 0 ? Int(Feast_SUCCESS) : _feast_exit_info(true, M, M0, N)
-                    return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
-                                             info_screened, epsout, loop)
-                end
-            end
-
-            try
-                rank = _feast_qr_compress!(q_basis, Q_proj, active_dim;
-                                           rank_tol=sqrt(eps(T)))
-                if rank == 0
-                    info_code = Int(Feast_ERROR_NO_CONVERGENCE)
-                    break
-                end
-
-                q_rank = view(q_basis, :, 1:rank)
-                AQ_r = view(AQ, :, 1:rank)
-                BQ_r = view(BQ, :, 1:rank)
-                Sq_r = view(Sq, 1:rank, 1:rank)
-                Aq_r = view(Aq, 1:rank, 1:rank)
-
-                mul!(AQ_r, A, q_rank)
-                mul!(Sq_r, adjoint(q_rank), AQ_r)
-                if B_is_identity
-                    fill!(Aq_r, zero(Complex{T}))
-                    @inbounds for i in 1:rank
-                        Aq_r[i, i] = one(Complex{T})
-                    end
-                else
-                    mul!(BQ_r, B, q_rank)
-                    mul!(Aq_r, adjoint(q_rank), BQ_r)
-                end
-
-                local lambda_red, v_red
-                try
-                    Fr = eigen(Hermitian(Sq_r), Hermitian(Aq_r))
-                    lambda_red = Fr.values
-                    v_red = Fr.vectors
-                catch err
-                    (isa(err, PosDefException) || isa(err, LinearAlgebra.LAPACKException)) || rethrow(err)
-                    Fr = eigen(Sq_r, Aq_r)
-                    lambda_red = real.(Fr.values)
-                    v_red = Fr.vectors
-                end
-
-                for idx in 1:rank
-                    mul!(qcol, q_rank, view(v_red, :, idx))
-                    @inbounds for i in 1:N
-                        q[i, idx] = real(qcol[i])
-                    end
-                    lambda[idx] = lambda_red[idx]
-                end
-
-                M = _feast_reorder_by_interval!(lambda, q, perm, lambda_tmp, q_tmp,
-                                                Emin, Emax, rank)
-                if M == 0
-                    # No Ritz value in the interval: it holds no eigenvalues.
-                    return FeastResult{T, T}(T[], zeros(T, N, 0), 0, T[],
-                                             Int(Feast_SUCCESS), zero(T), loop)
-                end
-
-                for j in 1:M
-                    nrm = norm(view(q, :, j))
-                    nrm > 0 && (view(q, :, j) ./= nrm)
-                end
-
-                feast_residual!(A, B, lambda, q, res, M,
-                                residual_Aq, residual_Bq, residual; scale=res_scale)
-                epsout = maximum(view(res, 1:M))
-                M_found = M
-
-                if epsout <= eps_tol
-                    feast_sort!(lambda, q, res, M)
-                    return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
-                                             _feast_exit_info(true, M, M0, N), epsout, loop)
-                end
-
-                active_dim = rank
-                copyto!(view(Q, :, 1:active_dim), view(q, :, 1:active_dim))
-            catch err
-                info_code = Int(Feast_ERROR_LAPACK)
-                @warn "pfeast_scsrgv! reduced eigenproblem failed" exception=err
-                break
-            end
-        end
-
-        if info_code == Int(Feast_SUCCESS)
-            info_code = _feast_exit_info(false, M_found, M0, N)
-        end
-        M = M_found
-        M > 1 && feast_sort!(lambda, q, res, M)
-        return FeastResult{T, T}(lambda[1:M], q[:, 1:M], M, res[1:M],
-                                 info_code, epsout, loop_done)
-    finally
-        # Release remote LU storage on success, non-convergence, and exceptions.
-        factors isa _PFeastDistributedFactors && foreach(finalize, factors.futures)
-    end
+    # Parallel sparse real-symmetric generalized FEAST: cached sparse
+    # factorizations with threaded or distributed contour solves, and the same
+    # real Rayleigh-Ritz as pfeast_sygv! (see _pfeast_real_symmetric!).
+    return _pfeast_real_symmetric!(A, B, Emin, Emax, M0, fpm, use_threads, verbose,
+                                   "pfeast_scsrgv!")
 end

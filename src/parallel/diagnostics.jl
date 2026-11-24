@@ -61,9 +61,9 @@ function pfeast_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple,
         println("\nParallel execution (threads):")
         parallel_time = @elapsed begin
             if isa(A, SparseMatrixCSC)
-                result_parallel = pfeast_scsrgv!(copy(A), copy(B), interval[1], interval[2], M0, zeros(Int, 64), use_threads=true)
+                result_parallel = pfeast_scsrgv!(copy(A), copy(B), interval[1], interval[2], M0, feastinit().fpm, use_threads=true)
             else
-                result_parallel = pfeast_sygv!(copy(A), copy(B), interval[1], interval[2], M0, zeros(Int, 64), use_threads=true)
+                result_parallel = pfeast_sygv!(copy(A), copy(B), interval[1], interval[2], M0, feastinit().fpm, use_threads=true)
             end
         end
         println("Time: $(round(parallel_time, digits=3)) seconds")
@@ -76,9 +76,9 @@ function pfeast_benchmark(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple,
         println("\nParallel execution (distributed):")
         distributed_time = @elapsed begin
             if isa(A, SparseMatrixCSC)
-                result_distributed = pfeast_scsrgv!(copy(A), copy(B), interval[1], interval[2], M0, zeros(Int, 64), use_threads=false)
+                result_distributed = pfeast_scsrgv!(copy(A), copy(B), interval[1], interval[2], M0, feastinit().fpm, use_threads=false)
             else
-                result_distributed = pfeast_sygv!(copy(A), copy(B), interval[1], interval[2], M0, zeros(Int, 64), use_threads=false)
+                result_distributed = pfeast_sygv!(copy(A), copy(B), interval[1], interval[2], M0, feastinit().fpm, use_threads=false)
             end
         end
         println("Time: $(round(distributed_time, digits=3)) seconds")

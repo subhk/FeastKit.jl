@@ -69,6 +69,7 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
     M_found = 0
     loop_count = 0
 
+    empty_dist = -one(T)
     for loop_idx in 0:fpm[4]
         loop_count = loop_idx
         local_success = false
@@ -109,7 +110,10 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
         if loop_idx >= _FEAST_SPURIOUS_MIN_LOOPS
             kept = rank == root ?
                 _feast_screen_spurious!(keep, Q_proj, Q_basis, res_vec, M_found,
-                                        feast_tolerance(fpm, T); filter_rank=true) : nothing
+                                        feast_tolerance(fpm, T), lambda_vec, Zne_global,
+                                        Wne_global; filter_rank=true,
+                                        residual_scale=res_scale,
+                                        boundary=_feast_region_boundary(T, Emid, r, fpm)) : nothing
             kept = MPI.bcast(kept, root, comm)
             if kept !== nothing
                 MPI.Bcast!(keep, root, comm)
@@ -163,12 +167,44 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
         end
         M = MPI.bcast(M,root,comm)
         if M == 0
-            # No Ritz value inside the region: it holds no eigenvalues.
-            info_code = Int(Feast_SUCCESS)
-            epsout_val = zero(T)
+            # No Ritz value inside the region. It is empty only once the
+            # subspace has settled outside it (see _feast_region_looks_empty);
+            # the root decides and every rank follows.
+            verdict = nothing
+            if rank == root
+                try
+                    verdict = _feast_region_looks_empty(
+                        view(lambda_vec, 1:M0), _feast_contour_extent(Zne_global)...,
+                        Zne_global, Wne_global, false, empty_dist;
+                        real_spectrum=false,
+                        boundary=_feast_region_boundary(T, Emid, r, fpm),
+                        nearest_residual=i -> _feast_pair_residual(
+                            (y, x) -> mul!(y, A, x),
+                            (y, x) -> B_is_identity ? copyto!(y, x) : mul!(y, B, x),
+                            view(solutions, :, i), lambda_vec[i], res_scale),
+                        tol=feast_tolerance(fpm, T),
+                        filtered_ratio=loop_idx >= 1 ? norm(Q_proj) / norm(Q_basis) : nothing)
+                catch err
+                    @debug "MPI empty-region check failed" exception=err
+                end
+            end
+            verdict = MPI.bcast(verdict, root, comm)
             M_found = 0
-            break
+            if verdict === nothing
+                info_code = Int(Feast_ERROR_LAPACK)
+                break
+            end
+            empty, empty_dist = verdict
+            epsout_val = zero(T)
+            if empty || loop_idx == fpm[4]
+                info_code = empty ? Int(Feast_SUCCESS) : Int(Feast_ERROR_NO_CONVERGENCE)
+                break
+            end
+            MPI.Bcast!(solutions, root, comm)
+            copyto!(Q_basis, solutions)
+            continue
         end
+        empty_dist = -one(T)
         MPI.Bcast!(lambda_vec,root,comm)
         MPI.Bcast!(solutions,root,comm)
         if !mpi_compute_complex_residuals!(A,B,lambda_vec,solutions,res_vec,M,comm;
@@ -179,7 +215,10 @@ function _mpi_feast_complex_general!(A::AbstractMatrix{Complex{T}},
         end
         epsout_val = maximum(view(res_vec,1:M))
         M_found = M
-        converged,exhausted = MPI.bcast((epsout_val<=feast_tolerance(fpm,T),loop_idx==fpm[4]),root,comm)
+        convergence_tol, _ = _feast_contour_residual_limits(
+            feast_tolerance(fpm, T), res_scale, Zne_global)
+        converged, exhausted = MPI.bcast(
+            (epsout_val <= convergence_tol, loop_idx == fpm[4]), root, comm)
         if converged || exhausted
             info_code = _feast_exit_info(converged,M,M0,N)
             break

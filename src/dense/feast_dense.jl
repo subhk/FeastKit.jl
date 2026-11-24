@@ -22,7 +22,20 @@ function _feast_krylov_workspace(N::Int, ::Type{T}, restart::Int) where T<:Real
               rhs_scale=Ref(one(T)), residual=zeros(Complex{T}, N),
               rhs_column=Vector{Complex{T}}(undef, N),
               refined_solution=Vector{Complex{T}}(undef, N),
+              guess=Vector{Complex{T}}(undef, N),
+              shifted_guess=Vector{Complex{T}}(undef, N),
               tmpA=Vector{Complex{T}}(undef, N), tmpB=Vector{Complex{T}}(undef, N))
+end
+
+# Compute (Kx)ᴴ b / ‖Kx‖² without squaring the scale of the pencil.
+function _feast_warm_start_multiple(shifted_trial::AbstractVector, rhs::AbstractVector)
+    shifted_norm = norm(shifted_trial)
+    numerator = zero(eltype(shifted_trial))
+    isfinite(shifted_norm) && shifted_norm > 0 || return numerator
+    @inbounds for i in eachindex(shifted_trial, rhs)
+        numerator += conj(shifted_trial[i] / shifted_norm) * rhs[i]
+    end
+    return numerator / shifted_norm
 end
 
 """
@@ -43,7 +56,7 @@ function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
                               apply_shift!::F,
                               solver::Symbol, tol::T,
                               maxiter::Int, restart::Int;
-                              workspace=nothing) where {T<:Real,F}
+                              workspace=nothing, trial=nothing) where {T<:Real,F}
     solver == :direct && error("Direct solve should be handled before calling solve_dense_shifted!")
 
     if !FEAST_KRYLOV_AVAILABLE[]
@@ -67,6 +80,7 @@ function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
     gmres_workspace = buffers.gmres
     rhs_column = buffers.rhs_column
     refined_solution = buffers.refined_solution
+    guess, shifted_guess = buffers.guess, buffers.shifted_guess
     @views for j in 1:size(rhs, 2)
         b = view(rhs, :, j)
         b_norm = norm(b)
@@ -75,13 +89,53 @@ function solve_dense_shifted!(dest::AbstractMatrix{Complex{T}},
             fill!(view(dest, :, j), zero(Complex{T}))
             continue
         end
-        # Scale K and b together: (K/||b||)x = b/||b|| has the same solution,
-        # without the absolute stopping/breakdown thresholds on tiny pencils.
-        rhs_scale[] = b_norm
-        @. rhs_column = b / b_norm
+        # Warm start from the best multiple α x of the trial vector x the
+        # right-hand side was formed from (b = B x). Once x is close to an
+        # eigenvector with eigenvalue λ, K x ≈ (z - λ) b, so the initial
+        # residual b - α K x is of the size of the eigen-residual A x - λ B x.
+        # GMRES's relative tolerance then applies to a residual that shrinks
+        # as the outer FEAST iteration converges, so a fixed inner tolerance
+        # no longer puts a floor under the outer one. The least-squares α
+        # never makes the initial residual larger than b (α = 0 is the cold
+        # start).
+        warm = false
+        target_norm = b_norm
+        if trial !== nothing
+            copyto!(guess, view(trial, :, j))
+            apply_shift!(shifted_guess, guess)
+            α = _feast_warm_start_multiple(shifted_guess, b)
+            if isfinite(α) && !iszero(α)
+                @. residual = b - α * shifted_guess
+                r0_norm = norm(residual)
+                if isfinite(r0_norm) && r0_norm < b_norm
+                    guess .*= α
+                    warm = true
+                    target_norm = r0_norm
+                end
+            end
+        end
+        if warm && iszero(target_norm)
+            # The trial vector is an exact eigenvector: its multiple solves the
+            # system, and there is no correction to normalize.
+            copyto!(view(dest, :, j), guess)
+            continue
+        end
+        # Scale K and the target together: (K/||r||)x = r/||r|| has the same
+        # solution, without the absolute stopping/breakdown thresholds on tiny
+        # pencils.
+        rhs_scale[] = target_norm
+        if warm
+            @. rhs_column = residual / target_norm
+        else
+            @. rhs_column = b / b_norm
+        end
         solved = _feast_gmres!(gmres_workspace, op, rhs_column;
                                 restart=true, rtol=tol, atol=zero(T), itmax=maxiter)
         x_sol = _feast_gmres_solution(gmres_workspace)
+        if warm
+            @. refined_solution = guess + x_sol
+            x_sol = refined_solution
+        end
         apply_shift!(residual, x_sol)
         @. residual = (residual - b) / b_norm
         res_norm = norm(residual)
@@ -356,7 +410,8 @@ function feast_gegv!(A::Matrix{Complex{T}}, B::Union{Matrix{Complex{T}},Nothing}
                 copyto!(rhs_copy, rhs)
                 success = solve_dense_shifted!(workspace.workc[:, 1:M0], rhs_copy,
                                                shifted_mul!, solver_choice, _feast_inner_tol(solver_tol == 0.0, tol_value, epsout[], loop[]),
-                                               solver_maxiter, solver_restart; workspace=krylov_workspace)
+                                               solver_maxiter, solver_restart; workspace=krylov_workspace,
+                                               trial=workspace.workc[:, 1:M0])
                 if !success
                     # Fall back to direct solve if iterative solver failed
                     if B_is_identity
@@ -900,6 +955,11 @@ Hermitian/general dense paths.
     lambda_tmp = similar(lambda_vec)
     perm = Vector{Int}(undef, M0)
     solutions_tmp = similar(shifted_solutions)
+    # A nearly dependent in-region block is swept through an orthonormal basis
+    # (see `_feast_orthonormal_ritz_block!`); these hold its Ritz vectors.
+    ritz_vectors = similar(Q_basis)
+    ritz_R = Matrix{Complex{T}}(undef, M0, M0)
+    orth_k = 0
     res_vec = zeros(T, M0)
     residual_vec = Vector{Complex{T}}(undef, N)
     Bq_vec = Vector{Complex{T}}(undef, N)
@@ -945,6 +1005,7 @@ Hermitian/general dense paths.
     M_found = 0
     active_dim = M0
 
+    empty_dist = -one(T)
     for loop_idx in 0:maxloop
         loop_count = loop_idx
         fill!(Q_proj, zero(Complex{T}))
@@ -993,7 +1054,8 @@ Hermitian/general dense paths.
                 success = solve_dense_shifted!(shifted_block, rhs_copy_block,
                                                shifted_mul!, solver_choice,
                                                _feast_inner_tol(solver_tol == 0.0, tol_value, epsout_val, loop_idx), solver_maxiter,
-                                               solver_restart; workspace=krylov_workspace)
+                                               solver_restart; workspace=krylov_workspace,
+                                               trial=basis_block)
                 if !success
                     info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                     solve_failed = true
@@ -1005,17 +1067,23 @@ Hermitian/general dense paths.
         end
         solve_failed && break
 
-        # The sweep has filtered the previous loop's Ritz vectors (Q_basis);
-        # their filter response separates genuine pairs from spurious ones.
+        # The sweep has filtered the previous loop's Ritz vectors (Xr; Q_basis
+        # unless a dependent block was orthonormalized); their filter response
+        # separates genuine pairs from spurious ones.
+        Yr, Xr = _feast_ritz_images(Q_proj, Q_basis, ritz_vectors, ritz_R, orth_k,
+                                    active_dim, solutions_tmp)
+        filtered_ratio = norm(Yr) / norm(Xr)
+        orth_k = 0
         if loop_idx >= _FEAST_SPURIOUS_MIN_LOOPS
             # Complex-symmetric Rayleigh-Ritz is oblique, so also count the
             # in-region directions of the whole subspace.
-            kept = _feast_screen_spurious!(keep, view(Q_proj, :, 1:active_dim),
-                                           view(Q_basis, :, 1:active_dim), res_vec,
-                                           M_found, eps_tol; filter_rank=true)
+            kept = _feast_screen_spurious!(keep, Yr, Xr, res_vec,
+                                           M_found, eps_tol, lambda_vec, Zne, Wne;
+                                           filter_rank=true, residual_scale=res_scale,
+                                           boundary=_feast_region_boundary(T, Emid, r, fpm))
             if kept !== nothing
-                # The solves overwrote shifted_solutions; the pairs live in Q_basis.
-                copyto!(view(shifted_solutions, :, 1:M_found), view(Q_basis, :, 1:M_found))
+                # The solves overwrote shifted_solutions; the pairs live in Xr.
+                copyto!(view(shifted_solutions, :, 1:M_found), view(Xr, :, 1:M_found))
                 M_found = _feast_compact_pairs!(lambda_vec, shifted_solutions, res_vec,
                                                 keep, M_found)
                 epsout_val = M_found > 0 ? maximum(view(res_vec, 1:M_found)) : zero(T)
@@ -1062,13 +1130,32 @@ Hermitian/general dense paths.
                                             lambda_tmp, solutions_tmp,
                                             Emid, r, fpm, rank)
             if M == 0
-                # No Ritz value inside the contour: it encloses no eigenvalues.
+                # No Ritz value inside the contour. It encloses nothing only
+                # once the subspace has settled outside it; until then, filter
+                # again (see _feast_region_looks_empty).
+                center, radius = _feast_contour_extent(Zne)
+                nearest_residual(i) = _feast_pair_residual(
+                    (y, x) -> mul!(y, A, x),
+                    (y, x) -> B_is_identity ? copyto!(y, x) : mul!(y, B_matrix, x),
+                    view(shifted_solutions, :, i), lambda_vec[i], res_scale)
+                empty, empty_dist = _feast_region_looks_empty(
+                    view(lambda_vec, 1:rank), center, radius, Zne, Wne, false, empty_dist;
+                    real_spectrum=false, nearest_residual=nearest_residual, tol=eps_tol,
+                    boundary=_feast_region_boundary(T, Emid, r, fpm),
+                    filtered_ratio=loop_idx >= 1 ? filtered_ratio : nothing)
                 M_found = 0
                 epsout_val = zero(T)
-                info_code = Int(Feast_SUCCESS)
-                empty_region = true
-                break
+                if empty || loop_idx == maxloop
+                    info_code = Int(Feast_SUCCESS)
+                    empty_region = empty
+                    break
+                end
+                active_dim = rank
+                copyto!(view(Q_basis, :, 1:active_dim),
+                        view(shifted_solutions, :, 1:active_dim))
+                continue
             end
+            empty_dist = -one(T)
 
             for idx in 1:rank
                 vec = view(shifted_solutions, :, idx)
@@ -1098,14 +1185,18 @@ Hermitian/general dense paths.
 
             epsout_val = max_res
             M_found = M
-            if epsout_val <= eps_tol || loop_idx == maxloop
-                info_code = _feast_exit_info(epsout_val <= eps_tol, M, M0, N)
+            convergence_tol, _ = _feast_contour_residual_limits(eps_tol, res_scale, Zne)
+            converged = epsout_val <= convergence_tol
+            if converged || loop_idx == maxloop
+                info_code = _feast_exit_info(converged, M, M0, N)
                 break
             end
 
             active_dim = rank
             copyto!(view(Q_basis, :, 1:active_dim),
                     view(shifted_solutions, :, 1:active_dim))
+            orth_k = _feast_orthonormal_ritz_block!(Q_basis, ritz_vectors, ritz_R, M,
+                                                    active_dim)
         catch err
             info_code = Int(Feast_ERROR_LAPACK)
             @warn "Reduced eigenvalue problem failed during dense complex-symmetric FEAST" exception=err

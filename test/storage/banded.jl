@@ -82,8 +82,8 @@ end
                                            2.8 - 0.1im, 3.5 + 0.2im, 4.5,
                                            5.2 - 0.1im, 6.0]))
     B_g_full = Matrix(Diagonal(fill(ComplexF64(1), n)))
-    A_g_band = full_to_banded(A_g_full, ka)
-    B_g_band = full_to_banded(B_g_full, ka)
+    A_g_band = full_to_general_banded(A_g_full, ka)
+    B_g_band = full_to_general_banded(B_g_full, ka)
 
     Emid = complex(2.5, 0.0)
     r = 4.0

@@ -229,7 +229,7 @@ Production backend support is intentionally explicit:
 | --- | --- |
 | `:serial` | Real symmetric, complex Hermitian, and general problems through the serial solvers |
 | `:threads` | Dense and sparse real symmetric standard/generalized problems |
-| `:distributed` | Sparse real symmetric standard/generalized problems with Julia workers |
+| `:distributed` | Dense and sparse real symmetric standard/generalized problems with Julia workers |
 | `:mpi` | Real symmetric standard/generalized plus dense/sparse complex Hermitian/general problems with an initialized MPI communicator |
 | `:auto` | Best available backend; unsupported selections fall back to serial |
 

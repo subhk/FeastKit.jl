@@ -67,7 +67,7 @@ is allowed only when they agree; `:auto` cannot be combined with `M0`.
 `mixed_precision=true` corresponds to `fpm[42]=1`; `fpm[42]` now defaults to
 `0`, and unsupported drivers reject `1` instead of silently ignoring it.
 See [Performance Guide](performance.md) for sizing costs, warm-start checks,
-adaptive inner tolerances, and mixed-precision fallback behavior.
+default inner tolerances, and mixed-precision fallback behavior.
 
 Serial assembled drivers support both solvers. Complex MPI drivers also support
 GMRES; real MPI, threaded, and distributed drivers support direct solves only.
@@ -514,6 +514,7 @@ result = feast_parallel(A, B, interval; M0=M0, fpm=fpm)
 ```
 
 ```@docs
+FeastKit.pfeast_compute_all_contour_points!
 FeastKit.pfeast_show_distribution
 FeastKit.feast_parallel_comparison
 FeastKit.MPIFeastState
@@ -844,10 +845,11 @@ The `fpm` parameter array controls FeastKit behavior:
 | `fpm[18]` | Ellipse ratio | 100 | Aspect ratio × 100 |
 | `fpm[42]` | Mixed precision | 0 | 1=serial dense Float64 residual inverse iteration with Float32 correction solves |
 
-The precision-aware `feast_tolerance(fpm, Float32)` floors the target at
-`sqrt(eps(Float32))`; `fpm[7]` is a legacy slot, not its active stopping
-control. Interval solvers require at least 3 half-contour points. For
-Gauss/Zolotarev, counts above 20 must be one of 24, 32, 40, 48, or 56. General
+The precision-aware `feast_tolerance(fpm, Float32)` replaces a target below
+`eps(Float32)` (including the default) by `sqrt(eps(Float32))`; `fpm[7]` is a legacy slot, not its active stopping
+control. Interval solvers accept any positive number of half-contour points. For
+Gauss, counts above 20 must be one of 24, 32, 40, 48, or 56; Zolotarev is
+tabulated for 1-8, 10, 12, and 16 points. General
 full contours require at least 2 points; Gauss counts above 40 must be one of
 48, 64, 80, 96, or 112. See [Problem Setup](problem_setup.md) for the distinction
 between outer parameters and inner-solver tolerances.

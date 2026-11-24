@@ -6,9 +6,11 @@
 struct FeastParameters
     fpm::Vector{Int}
 
+    # Start from the "not set" sentinel so every entry takes its default. A
+    # zero-filled array is read literally where zero is a legal value: fpm[3] = 0
+    # is a convergence tolerance of 10^0.
     function FeastParameters()
-        fpm = zeros(Int, 64)
-        new(fpm)
+        new(fill(-111, 64))
     end
 
     function FeastParameters(fpm::Vector{Int})
@@ -157,13 +159,21 @@ mutable struct FeastSRCIState{T<:Real}
     residual::Vector{T}
     res_scale::T                  # Search-region magnitude that residuals are relative to
     keep::Vector{Bool}            # Genuine (non-spurious) marks for the in-region pairs
+    empty_dist::T                 # Nearest Ritz distance at the last M == 0 loop; < 0 if none
+    # Converged pairs of a caller's seed, kept while the completeness check runs
+    seed_M::Int
+    seed_lambda::Vector{T}
+    seed_q::Matrix{T}
+    seed_res::Vector{T}
+    offset::T                     # constant term of the filter (Zolotarev), see _feast_filter_offset
 
     function FeastSRCIState{T}() where T<:Real
         new{T}(false, Complex{T}[], Complex{T}[], 0, 1,
                Matrix{T}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
                Matrix{T}(undef, 0, 0), Matrix{T}(undef, 0, 0),
                FEAST_PHASE_IDLE, 0, 0, 0, false,
-               Int[], Matrix{T}(undef, 0, 0), T[], T[], one(T), Bool[])
+               Int[], Matrix{T}(undef, 0, 0), T[], T[], one(T), Bool[], -one(T),
+               0, T[], Matrix{T}(undef, 0, 0), T[], zero(T))
     end
 end
 
@@ -195,6 +205,12 @@ mutable struct FeastHRCIState{T<:Real}
     checked_subspace::Bool
     res_scale::T
     keep::Vector{Bool}
+    empty_dist::T
+    seed_M::Int
+    seed_lambda::Vector{T}
+    seed_q::Matrix{Complex{T}}
+    seed_res::Vector{T}
+    offset::T
 
     function FeastHRCIState{T}() where T<:Real
         new{T}(false, Complex{T}[], Complex{T}[], 0, 1,
@@ -202,7 +218,7 @@ mutable struct FeastHRCIState{T<:Real}
                Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
                FEAST_PHASE_IDLE, 0, 0, 0, zero(T), 0, Int[],
                Matrix{Complex{T}}(undef, 0, 0), T[], Complex{T}[], false,
-               one(T), Bool[])
+               one(T), Bool[], -one(T), 0, T[], Matrix{Complex{T}}(undef, 0, 0), T[], zero(T))
     end
 end
 
@@ -227,13 +243,31 @@ mutable struct FeastGRCIState{T<:Real}
     checked_subspace::Bool
     res_scale::T
     keep::Vector{Bool}
+    empty_dist::T
+    seed_M::Int
+    seed_lambda::Vector{Complex{T}}
+    seed_q::Matrix{Complex{T}}
+    seed_res::Vector{T}
+    saturated::Bool             # every direction of the last empty subspace kept by the filter
+    filtered_ratio::T           # ‖filtered block‖ / ‖trial block‖ of the last sweep
+    # A nearly dependent block of in-region Ritz vectors (a defective eigenvalue)
+    # is swept through an orthonormal basis Z of its span: the leading `orth_in`
+    # columns of Q0 then hold Z, `Xr` holds the Ritz vectors and `Rin` the
+    # triangular factor with X = Z * Rin on that block. `orth_pending` is the
+    # size of such a block found by the last projection, not yet applied.
+    Xr::Matrix{Complex{T}}
+    Rin::Matrix{Complex{T}}
+    orth_in::Int
+    orth_pending::Int
 
     function FeastGRCIState{T}() where T<:Real
         new{T}(false, Matrix{Complex{T}}(undef, 0, 0), FEAST_PHASE_IDLE,
                Complex{T}[], Complex{T}[], Int[],
                Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0),
                Matrix{Complex{T}}(undef, 0, 0), 0, 0,
-               Complex{T}[], false, one(T), Bool[])
+               Complex{T}[], false, one(T), Bool[], -one(T),
+               0, Complex{T}[], Matrix{Complex{T}}(undef, 0, 0), T[], false, zero(T),
+               Matrix{Complex{T}}(undef, 0, 0), Matrix{Complex{T}}(undef, 0, 0), 0, 0)
     end
 end
 
@@ -265,11 +299,24 @@ mutable struct FeastPolyRCIState{T<:Real}
     probe_next::Int             # next evaluation point to request; 0 once measured
     probe_count::Int            # evaluation points in the outstanding request
     probe_scale::T              # radius of the evaluation circle
+    # Refinement (every sweep after the first) corrects the current Ritz pairs
+    # through their residuals; see `_feast_poly_grci!`.
+    refine::Bool                # the sweep in progress is a refinement sweep
+    ritz::Vector{Complex{T}}    # Ritz values of the columns being corrected
+    ncols::Int                  # Ritz pairs carried by the sweep / residual request
+    inside::Int                 # how many of them lie inside the contour
+    # The first sweep's moments Σ_e w_e μ_e^i P(z_e)⁻¹ X for i = 0:d-1, projected on
+    # the probe, and the sums of their terms' sizes: they all cancel only when
+    # the contour encloses no eigenvalue.
+    moments::Matrix{Complex{T}}
+    moment_mass::Vector{T}
+    projected::Vector{Complex{T}}   # scratch: one contour point's solves projected on the probe
 
     function FeastPolyRCIState{T}() where T<:Real
         empty = Matrix{Complex{T}}(undef, 0, 0)
         new{T}(false, copy(empty), copy(empty), copy(empty), 0, Complex{T}[],
-               T[], Complex{T}[], copy(empty), 0, 0, one(T))
+               T[], Complex{T}[], copy(empty), 0, 0, one(T),
+               false, Complex{T}[], 0, 0, copy(empty), T[], Complex{T}[])
     end
 end
 

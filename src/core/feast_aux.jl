@@ -463,6 +463,8 @@ end
 
 function _feast_inside_custom_contour(z::Complex{T}, contour::FeastContour{T}) where T<:Real
     vertices = contour.vertices === nothing ? contour.Zne : contour.vertices
+    length(vertices) >= 3 || throw(ArgumentError(
+        "A custom contour for a non-Hermitian problem must have at least 3 points to enclose a region"))
     return _feast_inside_polygon(z, vertices)
 end
 
@@ -522,10 +524,21 @@ function with_custom_contour(solver::Function,
     return with_custom_contour(solver, fpm, contour)
 end
 
+# The reduced eigenproblems go through LAPACK, which covers Float32 and Float64
+# (and Float16, by promotion) and their complex forms. Other element types used
+# to get as far as the first reduced solve and stop there with info = 8.
+function _feast_check_supported_eltype(::Type{T}) where T
+    real(T) <: Union{Float16, Float32, Float64} && return nothing
+    throw(ArgumentError("FeastKit solves Float16, Float32 and Float64 problems and their " *
+                        "complex forms; got element type $T. Convert the matrices first, " *
+                        "e.g. with Float64.(A)."))
+end
+
 function check_feast_srci_input(N::Int, M0::Int, Emin::T, Emax::T, 
                                fpm::Vector{Int}) where T<:Real
     # Check validity of RCI Feast inputs for symmetric/Hermitian problems
-    
+    _feast_check_supported_eltype(T)
+
     if N <= 0
         throw(ArgumentError("Matrix size N must be positive"))
     end
@@ -534,7 +547,7 @@ function check_feast_srci_input(N::Int, M0::Int, Emin::T, Emax::T,
         throw(ArgumentError("Number of eigenvalues M0 must be between 1 and N"))
     end
     
-    if Emin >= Emax
+    if !(isfinite(Emin) && isfinite(Emax) && Emin < Emax)
         throw(ArgumentError("Search interval [Emin, Emax] must be valid"))
     end
     
@@ -542,14 +555,9 @@ function check_feast_srci_input(N::Int, M0::Int, Emin::T, Emax::T,
         throw(ArgumentError("fpm array must have at least 64 elements"))
     end
     
-    # If user provided a positive number of integration points, validate it.
-    # Allow 0 to defer to default handling elsewhere.
-    if length(fpm) >= 2
-        if fpm[2] > 0 && fpm[2] < 3
-            throw(ArgumentError("Number of integration points must be at least 3"))
-        end
-    end
-    
+    # fpm[2] counts half-contour points; FEAST accepts any positive count, and
+    # feastdefault! checks it against the integration rule.
+
     return true
 end
 
@@ -557,6 +565,7 @@ function check_feast_grci_input(N::Int, M0::Int, Emid::Complex{T}, r::T,
                                fpm::Vector{Int}) where T<:Real
     # Check validity of RCI Feast inputs for general problems
     # Matches Fortran dcheck_feast_grci_input (validates r, M0, N only)
+    _feast_check_supported_eltype(T)
 
     if N <= 0
         throw(ArgumentError("Matrix size N must be positive"))
@@ -566,7 +575,7 @@ function check_feast_grci_input(N::Int, M0::Int, Emid::Complex{T}, r::T,
         throw(ArgumentError("Number of eigenvalues M0 must be between 1 and N"))
     end
 
-    if r <= 0
+    if !(isfinite(Emid) && isfinite(r) && r > 0)
         throw(ArgumentError("Contour radius must be positive"))
     end
 
@@ -582,60 +591,12 @@ end
 
 function feast_inside_contourx(lambda::Complex{T}, Zne::Vector{Complex{T}},
                               Wne::Vector{Complex{T}}) where T<:Real
-    # Check if eigenvalue is inside custom contour using triangulation
-    # Matches Fortran zfeast_inside_contourx algorithm
-    # The contour points define a polygon; we check if the eigenvalue
-    # is inside any triangle formed by the first point and pairs of other points.
-
-    ne = length(Zne)
-
-    # Check for NaN
-    if isnan(real(lambda)) || isnan(imag(lambda))
-        return false
-    end
-
-    # First vertex of all triangles
-    x1 = real(Zne[1])
-    y1 = imag(Zne[1])
-
-    for i in 2:ne
-        x2 = real(Zne[i])
-        y2 = imag(Zne[i])
-        d1i = abs(Zne[i] - Zne[1])
-        d1i < eps(T) && continue  # Skip coincident nodes
-        z1i = (Zne[i] - Zne[1]) / d1i
-
-        for j in (i+1):ne
-            x3 = real(Zne[j])
-            y3 = imag(Zne[j])
-            d1j = abs(Zne[j] - Zne[1])
-            d1j < eps(T) && continue  # Skip coincident nodes
-            z1j = (Zne[j] - Zne[1]) / d1j
-
-            # Skip collinear points (scale tolerance to precision)
-            collinear_tol = max(T(1e-8), 100 * eps(T))
-            dot_product = real(z1i) * real(z1j) + imag(z1i) * imag(z1j)
-            if abs(one(T) - abs(dot_product)) > collinear_tol
-                # Barycentric coordinates for the point in triangle (Zne[1], Zne[i], Zne[j])
-                xp = real(lambda)
-                yp = imag(lambda)
-
-                denom = (y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3)
-                lambda1 = ((y2 - y3) * (xp - x3) + (x3 - x2) * (yp - y3)) / denom
-                lambda2 = ((y3 - y1) * (xp - x3) + (x1 - x3) * (yp - y3)) / denom
-                lambda3 = one(T) - lambda1 - lambda2
-
-                # Point is inside triangle if all barycentric coords >= 0 (with tolerance)
-                # Scale tolerance to precision: ~1e-14 for Float64, ~1e-5 for Float32
-                bary_tol = 100 * eps(T)
-                if lambda1 > -bary_tol && lambda2 > -bary_tol && lambda3 > -bary_tol
-                    return true
-                end
-            end
-        end
-    end
-
-    return false
+    # Is the eigenvalue inside the polygon through the contour nodes? Fortran's
+    # zfeast_inside_contourx fans triangles out from the first node, which
+    # covers the convex hull and so accepts points in the notches of a concave
+    # contour; the even-odd test below does not. `Wne` is unused.
+    isempty(Zne) && throw(ArgumentError("The contour has no nodes"))
+    return _feast_inside_polygon(lambda, Zne)
 end
 
 # Internal: Compute signed area (barycentric-style coefficient) for triangle check
@@ -761,8 +722,10 @@ function validate_contour(Zne::Vector{Complex{T}}, Wne::Vector{Complex{T}}) wher
         throw(ArgumentError("Number of nodes and weights must match"))
     end
     
-    if ne < 3
-        throw(ArgumentError("Contour must have at least 3 points"))
+    # A Hermitian half contour may have a single node; a full contour that
+    # selects a region of the plane needs three (`_feast_inside_custom_contour`).
+    if ne < 1
+        throw(ArgumentError("Contour must have at least one point"))
     end
     
     # Check for repeated nodes
@@ -799,13 +762,14 @@ function feast_trace_eigenvalues(lambda::Vector{T}, q::Matrix{VT},
 end
 
 function feast_memory_estimate(N::Int, M0::Int, precision::Type{T}) where T<:Real
-    # Estimate memory requirements for FeastKit
-    
-    # Main workspace arrays
-    work_size = N * M0 * sizeof(T)
-    workc_size = N * M0 * sizeof(Complex{T})
-    reduced_size = 2 * M0 * M0 * sizeof(T)  # Aq and Sq
-    eigen_size = (N * M0 + 2 * M0) * sizeof(T)  # eigenvectors and eigenvalues
+    # Estimate memory requirements for FeastKit. The products are formed in
+    # Int128: N * M0 * 16 overflows Int64 (and printed a negative size) near
+    # N*M0 = 5e17.
+    n, m = Int128(N), Int128(M0)
+    work_size = n * m * sizeof(T)
+    workc_size = n * m * sizeof(Complex{T})
+    reduced_size = 2 * m * m * sizeof(T)  # Aq and Sq
+    eigen_size = (n * m + 2 * m) * sizeof(T)  # eigenvectors and eigenvalues
     
     total_size = work_size + workc_size + reduced_size + eigen_size
     

@@ -66,8 +66,7 @@ function feast(A::AbstractMatrix{T}, B::AbstractMatrix{T},
 
     # Materialization happens after validation so user-facing errors still refer
     # to the original matrix shape and symmetry expectations.
-    A_exec = _materialize_matrix(A)
-    B_exec = _materialize_matrix(B)
+    A_exec, B_exec = _materialize_pencil(A, B; dense=params[42] == 1)
 
     return _execute_feast(A_exec, B_exec, interval, backend_choice, M0, params,
                           comm, use_threads, allow_backend_fallback; solver_options=solver_options)
@@ -84,7 +83,7 @@ function feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
                parallel::Union{Bool, Symbol, Nothing} = nothing,
                strict_backend::Bool = false,
                use_threads::Bool = true,
-               comm = nothing) where T<:Real
+               comm = nothing) where T<:AbstractFloat
     if subspace_size === :auto
         return _feast_auto_solve(A, B, interval, (; fpm, tol, maxiter, quadrature_points, solver, solver_opts, initial_subspace, mixed_precision, backend, parallel, strict_backend, use_threads, comm);
                                  M0=M0, max_subspace_size=max_subspace_size, general=false)
@@ -104,8 +103,7 @@ function feast(A::AbstractMatrix{Complex{T}}, B::AbstractMatrix{Complex{T}},
                                 solver=solver, solver_opts=solver_opts, parallel=parallel,
                                 backend=backend, strict_backend=strict_backend, comm=comm, mixed_precision=mixed_precision, initial_subspace=initial_subspace)
 
-    A_exec = _materialize_matrix(A)
-    B_exec = _materialize_matrix(B)
+    A_exec, B_exec = _materialize_pencil(A, B; dense=params[42] == 1)
 
     return _execute_feast(A_exec, B_exec, interval, backend_choice, M0, params,
                           comm, use_threads, allow_backend_fallback; solver_options=solver_options)
@@ -145,7 +143,7 @@ function feast(A::AbstractMatrix{T}, interval::Tuple{T,T};
                                 tol=tol, maxiter=maxiter, quadrature_points=quadrature_points,
                                 solver=solver, solver_opts=solver_opts, parallel=parallel,
                                 backend=backend, strict_backend=strict_backend, comm=comm, mixed_precision=mixed_precision, initial_subspace=initial_subspace)
-    A_exec = _materialize_matrix(A)
+    A_exec = _materialize_matrix(A; dense=params[42] == 1)
 
     if backend_choice == :serial
         if A_exec isa Matrix
@@ -169,7 +167,7 @@ function feast(A::AbstractMatrix{Complex{T}}, interval::Tuple{T,T};
                backend::Union{Symbol, Nothing} = nothing,
                parallel::Union{Bool, Symbol, Nothing} = nothing,
                strict_backend::Bool = false,
-               use_threads::Bool = true, comm = nothing) where T<:Real
+               use_threads::Bool = true, comm = nothing) where T<:AbstractFloat
     if subspace_size === :auto
         return _feast_auto_solve(A, nothing, interval, (; fpm, tol, maxiter, quadrature_points, solver, solver_opts, initial_subspace, mixed_precision, backend, parallel, strict_backend, use_threads, comm);
                                  M0=M0, max_subspace_size=max_subspace_size, general=false)
@@ -186,7 +184,7 @@ function feast(A::AbstractMatrix{Complex{T}}, interval::Tuple{T,T};
                                 tol=tol, maxiter=maxiter, quadrature_points=quadrature_points,
                                 solver=solver, solver_opts=solver_opts, parallel=parallel,
                                 backend=backend, strict_backend=strict_backend, comm=comm, mixed_precision=mixed_precision, initial_subspace=initial_subspace)
-    A_exec = _materialize_matrix(A)
+    A_exec = _materialize_matrix(A; dense=params[42] == 1)
 
     if backend_choice == :serial
         if A_exec isa Matrix
@@ -241,7 +239,7 @@ function feast_general(A::AbstractMatrix, B::AbstractMatrix,
                                 solver=solver, solver_opts=solver_opts, parallel=parallel,
                                 backend=backend, strict_backend=strict_backend, comm=comm, mixed_precision=mixed_precision, initial_subspace=initial_subspace, general=true)
 
-    (; A_exec, B_exec, center_exec, radius_exec) = _feast_prepare_general_matrices(A, B, center, radius)
+    (; A_exec, B_exec, center_exec, radius_exec) = _feast_prepare_general_matrices(A, B, center, radius; dense=params[42] == 1)
 
     return _execute_feast_general(A_exec, B_exec, center_exec, radius_exec,
                                   backend_choice, M0, params, comm, use_threads,
@@ -284,7 +282,7 @@ function feast_general(A::AbstractMatrix, center::Complex{T}, radius::T;
                                 solver=solver, solver_opts=solver_opts, parallel=parallel,
                                 backend=backend, strict_backend=strict_backend, comm=comm, mixed_precision=mixed_precision, initial_subspace=initial_subspace, general=true)
 
-    (; A_exec, center_exec, radius_exec) = _feast_prepare_general_matrices(A, nothing, center, radius)
+    (; A_exec, center_exec, radius_exec) = _feast_prepare_general_matrices(A, nothing, center, radius; dense=params[42] == 1)
 
     if backend_choice == :serial
         if A_exec isa Matrix
@@ -311,8 +309,16 @@ end
 
 function feast(A::AbstractMatrix, interval::Tuple{Real,Real}; kwargs...)
     Ap = _feast_promote_eltype(A)
+    Ap === A && typeof(interval) === typeof(_feast_promote_interval(Ap, interval)) &&
+        throw(ArgumentError("feast does not support element type $(eltype(A))"))
     return feast(Ap, _feast_promote_interval(Ap, interval); kwargs...)
 end
+
+# A real center is a point on the real axis.
+feast_general(A::AbstractMatrix, center::Real, radius::Real; kwargs...) =
+    feast_general(A, complex(float(center)), radius; kwargs...)
+feast_general(A::AbstractMatrix, B::AbstractMatrix, center::Real, radius::Real; kwargs...) =
+    feast_general(A, B, complex(float(center)), radius; kwargs...)
 
 function feast(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple{Real,Real}; kwargs...)
     Ap = _feast_promote_eltype(A)

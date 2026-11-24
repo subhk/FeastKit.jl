@@ -1,4 +1,14 @@
 # Convenience functions for common linear solvers
+
+# The callable returned by `create_iterative_solver`. It is a `Function`, so it
+# fits every `linear_solver` slot, and its type tells the matrix-free drivers
+# that the solve is inexact: they then hand it a warm-started correction
+# system instead of `B * X` (see `_feast_warm_start_rhs!`).
+struct FeastIterativeSolver{F} <: Function
+    solve::F
+end
+(s::FeastIterativeSolver)(Y, z, X) = s.solve(Y, z, X)
+
 """
     create_iterative_solver(A_op, B_op, solver_type=:gmres; kwargs...)
 
@@ -81,23 +91,29 @@ function create_iterative_solver(A_op::MatrixFreeOperator{T},
         end, (N,N))
     end
 
+    # The closure below must not call CT or RT: a captured type is stored as a
+    # DataType, so each such call is a dynamic dispatch that boxes its result --
+    # once per RHS element in the conversion loop. Convert through the typed
+    # scratch and refs instead.
     function linear_solver(Y::AbstractMatrix, z::Number, X::AbstractMatrix)
         # FEAST contour shifts are complex; keep the Krylov operator and
         # conversion scratch alive across contour points.
-        current_shift[] = CT(z)
-        inner_tol = tolerance_ref === nothing ? rtol_value : RT(tolerance_ref[])
+        current_shift[] = z
+        inner_tol = tolerance_ref === nothing ? rtol_value :
+                    oftype(rtol_value, tolerance_ref[])
+        atol = zero(rtol_value)
         M0 = size(X, 2)
         for j in 1:M0
             # Convert RHS to complex since z is complex (Krylov needs matching types)
             @inbounds for i in 1:N
-                xj[i] = CT(X[i, j])
+                xj[i] = X[i, j]
             end
             # Besides relative stopping, Krylov has absolute breakdown tests.
             # Normalize both sides to avoid accepting/discarding tiny RHSs
             # solely because the entire pencil was rescaled.
             rhs_scale[] = norm(xj)
             if iszero(rhs_scale[])
-                fill!(view(Y, :, j), zero(CT))
+                fill!(view(Y, :, j), zero(eltype(xj)))
                 continue
             end
             xj ./= rhs_scale[]
@@ -105,13 +121,13 @@ function create_iterative_solver(A_op::MatrixFreeOperator{T},
                 converged = _feast_gmres!(gmres_workspace, shifted_op, xj;
                                           restart=true,
                                           rtol=inner_tol,
-                                          atol=zero(RT),
+                                          atol=atol,
                                           preconditioner=scaled_preconditioner,
                                           itmax=maxiter)
                 copyto!(view(Y, :, j), _feast_gmres_solution(gmres_workspace))
             elseif solver_type == :bicgstab
                 converged = _feast_bicgstab!(bicgstab_workspace, shifted_op, xj;
-                                                    rtol=inner_tol, atol=zero(RT),
+                                                    rtol=inner_tol, atol=atol,
                                                     preconditioner=scaled_preconditioner,
                                                     itmax=maxiter)
                 result = _feast_bicgstab_solution(bicgstab_workspace)
@@ -123,7 +139,7 @@ function create_iterative_solver(A_op::MatrixFreeOperator{T},
                     # forming 0/0 in its stabilization step. Retry that RHS
                     # with GMRES rather than feeding NaNs to the projector.
                     converged = _feast_gmres!(gmres_workspace, shifted_op, xj;
-                                              restart=true, rtol=inner_tol, atol=zero(RT),
+                                              restart=true, rtol=inner_tol, atol=atol,
                                               preconditioner=scaled_preconditioner,
                                               itmax=maxiter)
                     copyto!(view(Y, :, j), _feast_gmres_solution(gmres_workspace))
@@ -136,7 +152,7 @@ function create_iterative_solver(A_op::MatrixFreeOperator{T},
         end
     end
 
-    return linear_solver
+    return FeastIterativeSolver(linear_solver)
 end
 
 """

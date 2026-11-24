@@ -151,7 +151,6 @@ function _feast_backend_issue(backend, A, B; general::Bool=false, solver=:direct
     elseif backend in (:threads, :distributed)
         real || return "Threaded/distributed backends currently support real symmetric problems"
         dense || sparse || return "Threaded/distributed backend requires both matrices to use the same dense or sparse storage"
-        backend === :distributed && dense && return "Dense distributed backend is not implemented; contour points are distributed across workers only for sparse storage"
     end
     return nothing
 end

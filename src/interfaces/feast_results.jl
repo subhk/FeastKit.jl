@@ -88,7 +88,7 @@ inaccurate or spurious. It does not suppress exceptions raised by `feast`. Use
 `feast` directly to inspect convergence, residuals, and any partial results.
 Other keywords are forwarded to `feast`.
 """
-function eigvals_feast(A::AbstractMatrix, interval::Tuple; check::Bool=false, kwargs...)
+function eigvals_feast(A::AbstractMatrix, interval::Union{Tuple,FeastContour}; check::Bool=false, kwargs...)
     # Return only eigenvalues
     result = feast(A, interval; kwargs...)
     _feast_checked(result, check)
@@ -107,14 +107,14 @@ unsuccessful solve, but logs a warning with the status. It does not suppress
 exceptions raised by `feast`. Use `feast` directly to inspect convergence,
 residuals, and any partial results. Other keywords are forwarded to `feast`.
 """
-function eigen_feast(A::AbstractMatrix, interval::Tuple; check::Bool=false, kwargs...)
+function eigen_feast(A::AbstractMatrix, interval::Union{Tuple,FeastContour}; check::Bool=false, kwargs...)
     # Return eigenvalues and eigenvectors as Eigen object
     result = feast(A, interval; kwargs...)
     _feast_checked(result, check)
     return Eigen(result.lambda, result.q)
 end
 
-function eigvals_feast(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple;
+function eigvals_feast(A::AbstractMatrix, B::AbstractMatrix, interval::Union{Tuple,FeastContour};
                       check::Bool=false, kwargs...)
     # Return only eigenvalues for generalized problem
     result = feast(A, B, interval; kwargs...)
@@ -122,7 +122,7 @@ function eigvals_feast(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple;
     return result.lambda
 end
 
-function eigen_feast(A::AbstractMatrix, B::AbstractMatrix, interval::Tuple;
+function eigen_feast(A::AbstractMatrix, B::AbstractMatrix, interval::Union{Tuple,FeastContour};
                      check::Bool=false, kwargs...)
     # Return eigenvalues and eigenvectors for generalized problem
     result = feast(A, B, interval; kwargs...)

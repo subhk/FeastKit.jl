@@ -26,6 +26,17 @@ mutable struct ParallelFeastState{T<:Real}
     kernel::FeastSRCIState{T}
     kernel_job::Int
     contour_solutions::Vector{Matrix{Complex{T}}}
+    # Shifted factorizations for the contour points, made on the first sweep of
+    # a solve and kept until it is done: a vector of factors, or a
+    # `_PFeastDistributedFactors` whose factors live on the workers.
+    factors::Any
+    factor_key::Tuple{UInt,UInt}
+    # Whether `work` holds the caller's starting subspace on initialization
+    # (the default). The kernel checks such a subspace with independent probes
+    # before accepting it, as it does an `initial_subspace`; `feast_parallel`
+    # clears this and starts from the kernel's own subspace, which needs no
+    # check (it cost one or two extra refinement loops per solve).
+    user_subspace::Bool
 
     function ParallelFeastState{T}(ne::Int, M0::Int, use_parallel::Bool=true, use_threads::Bool=true) where T<:Real
         # These buffers are resized to the kernel's contour at initialization,
@@ -48,7 +59,10 @@ mutable struct ParallelFeastState{T<:Real}
             use_threads,                           # use_threads
             FeastSRCIState{T}(),
             -1,
-            Matrix{Complex{T}}[]
+            Matrix{Complex{T}}[],
+            nothing,
+            (UInt(0), UInt(0)),
+            true                                   # user_subspace
         )
     end
 end
@@ -77,7 +91,12 @@ end
     pfeast_srci!(state, N, work, workc, Aq, Sq, fpm, Emin, Emax, M0, lambda, q, res)
 
 Parallel adapter for the real symmetric RCI kernel. On initialization, `work`
-holds the caller's trial subspace. Handle `MULT_A` and `MULT_B` by writing
+holds the caller's trial subspace, which is checked with independent probes
+before it is accepted, as an `initial_subspace` is. Set
+`state.user_subspace = false` before the first call to start from the default
+subspace instead, as `feast_parallel` does.
+
+Handle `MULT_A` and `MULT_B` by writing
 `A*q[:,1:state.mode]` or `B*q[:,1:state.mode]` into `work`, respectively.
 For `PARALLEL_SOLVE`, call `pfeast_compute_all_contour_points!`; the adapter
 then feeds those solves to the shared rank-compression/Rayleigh–Ritz kernel.
@@ -91,12 +110,14 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
     if state.ijob == Int(Feast_RCI_DONE)
         return nothing
     elseif state.ijob == -1
+        _pfeast_release_factors!(state)
         state.kernel = FeastSRCIState{T}()
         state.kernel_job = -1
         # Parallel RCI has always accepted the seed in work. Tell the shared
-        # kernel to use it, without changing the caller's parameter setting.
+        # kernel whether to use it, without changing the caller's parameter
+        # setting; without a seed the kernel writes its default one to work.
         old_initial = fpm[5]
-        fpm[5] = 1
+        fpm[5] = state.user_subspace ? 1 : 0
         try
             _pfeast_kernel_step!(state,N,work,workc,Aq,Sq,fpm,Emin,Emax,M0,lambda,q,res)
         finally
@@ -128,6 +149,7 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
     end
 
     state.ijob = state.kernel_job
+    state.ijob == Int(Feast_RCI_DONE) && _pfeast_release_factors!(state)
     if state.use_parallel && state.kernel_job == Int(Feast_RCI_FACTORIZE)
         # Refinement changes Q0 inside the shared kernel. All workers must see
         # that new basis, not the previous residual matrix left in work.
@@ -140,45 +162,125 @@ function pfeast_srci!(state::ParallelFeastState{T}, N::Int,
     return nothing
 end
 
-function _pfeast_rci_point(A, B, work::Matrix{T}, z::Complex{T}, w::Complex{T}) where T
-    Y = Matrix{Complex{T}}((z*B - A) \ (B*work))
-    moment = transpose(work) * Y
-    return (2*w .* moment, 2*w*z .* moment, Y)
+# Factorize (z*B - A) for each node, optionally threaded over the nodes.
+function _pfeast_rci_factorize(A, B, nodes, threaded::Bool)
+    f1 = lu(nodes[1] * B - A)
+    factors = Vector{typeof(f1)}(undef, length(nodes))
+    factors[1] = f1
+    if threaded && Threads.nthreads() > 1 && length(nodes) > 1
+        _with_single_blas_thread() do
+            Threads.@threads for e in 2:length(nodes)
+                factors[e] = lu(nodes[e] * B - A)
+            end
+        end
+    else
+        for e in 2:length(nodes)
+            factors[e] = lu(nodes[e] * B - A)
+        end
+    end
+    return factors
+end
+
+# On a worker: solve with each of its stored factorizations.
+function _pfeast_rci_solve_chunk(factors::Future, rhs::AbstractMatrix)
+    owned = fetch(factors)
+    owned isa Exception && throw(owned)
+    return [Matrix{eltype(rhs)}(f \ rhs) for f in owned]
+end
+
+# The factorizations of one solve, made once on its first sweep. They depend on
+# A and B, so a state reused for another pencil (or a new solve, see
+# `pfeast_srci!`) factorizes again.
+function _pfeast_rci_factors!(state::ParallelFeastState, A, B)
+    key = (objectid(A), objectid(B))
+    state.factors !== nothing && state.factor_key == key && return state.factors
+    _pfeast_release_factors!(state)
+    nodes = state.contour_points
+    state.factors = if !(state.use_threads && Threads.nthreads() > 1) &&
+                       _distributed_backend_ready()
+        pids = workers()[1:min(length(workers()), length(nodes))]
+        Distributed.remotecall_eval(Main, pids, :(using FeastKit))
+        chunks = distribute_contour_points(length(nodes), length(pids))
+        futures = Future[]
+        try
+            for (pid, chunk) in zip(pids, chunks)
+                push!(futures, remotecall(_pfeast_rci_factorize, pid, A, B, nodes[chunk], false))
+            end
+            for (pid, future) in zip(pids, futures)
+                failure = remotecall_fetch(_pfeast_remote_failure, pid, future)
+                failure === nothing ||
+                    error("Shifted factorization failed on worker $pid: $failure")
+            end
+        catch
+            foreach(finalize, futures)
+            rethrow()
+        end
+        _PFeastDistributedFactors(pids, chunks, futures)
+    else
+        _pfeast_rci_factorize(A, B, nodes, state.use_threads)
+    end
+    state.factor_key = key
+    return state.factors
+end
+
+function _pfeast_release_factors!(state::ParallelFeastState)
+    state.factors isa _PFeastDistributedFactors && foreach(finalize, state.factors.futures)
+    state.factors = nothing
+    return state
 end
 
 # Store both legacy reduced moments and the full solved subspace. The latter
 # is essential: moments alone cannot reconstruct eigenvectors in the original
 # space when the initial trial basis is not already an invariant subspace.
+function _pfeast_store_point!(state::ParallelFeastState, e::Int, work, Y)
+    z = state.contour_points[e]
+    w = state.contour_weights[e]
+    moment = transpose(work) * Y
+    state.moment_contributions[e] = (2 * w .* moment, 2 * w * z .* moment)
+    copyto!(state.contour_solutions[e], Y)
+    return nothing
+end
+
+"""
+    pfeast_compute_all_contour_points!(state, A, B, work, M0)
+
+Solve `(z*B - A) Y = B*work` at every contour point of `state` and store the
+solutions for [`pfeast_srci!`](@ref). The shifted systems are factorized on the
+first call of a solve and reused for the rest of it, so `A` and `B` must not
+change in between. With `state.use_threads` the points are threaded; otherwise,
+when Distributed workers are available, each worker factorizes and keeps its
+share of the points, and a sweep sends it only `B*work`.
+"""
 function pfeast_compute_all_contour_points!(state::ParallelFeastState{T},
                                            A::AbstractMatrix{T}, B::AbstractMatrix{T},
                                            work::Matrix{T}, M0::Int) where T<:Real
     ne = state.total_points
-    if state.use_threads && Threads.nthreads() > 1
-        Threads.@threads for e in 1:ne
-            a, b, Y = _pfeast_rci_point(A,B,work,state.contour_points[e],state.contour_weights[e])
-            state.moment_contributions[e] = (a,b)
-            copyto!(state.contour_solutions[e],Y)
-        end
-    elseif _distributed_backend_ready()
-        chunks = distribute_contour_points(ne,nworkers())
-        futures = Vector{Future}(undef,length(chunks))
-        nodes, weights = state.contour_points, state.contour_weights
-        for (i, chunk) in enumerate(chunks)
-            futures[i] = @spawnat workers()[i] begin
-                [_pfeast_rci_point(A,B,work,nodes[e],weights[e]) for e in chunk]
+    factors = _pfeast_rci_factors!(state, A, B)
+    rhs = Matrix{Complex{T}}(B * work)
+    if factors isa _PFeastDistributedFactors
+        pending = Future[]
+        try
+            for i in eachindex(factors.pids)
+                push!(pending, remotecall(_pfeast_rci_solve_chunk, factors.pids[i],
+                                          factors.futures[i], rhs))
             end
+            for (chunk, future) in zip(factors.chunks, pending)
+                for (e, Y) in zip(chunk, fetch(future))
+                    _pfeast_store_point!(state, e, work, Y)
+                end
+            end
+        finally
+            foreach(finalize, pending)
         end
-        for (chunk, future) in zip(chunks,futures)
-            for (e, (a,b,Y)) in zip(chunk,fetch(future))
-                state.moment_contributions[e] = (a,b)
-                copyto!(state.contour_solutions[e],Y)
+    elseif state.use_threads && Threads.nthreads() > 1
+        _with_single_blas_thread() do
+            Threads.@threads for e in 1:ne
+                _pfeast_store_point!(state, e, work, Matrix{Complex{T}}(factors[e] \ rhs))
             end
         end
     else
         for e in 1:ne
-            a, b, Y = _pfeast_rci_point(A,B,work,state.contour_points[e],state.contour_weights[e])
-            state.moment_contributions[e] = (a,b)
-            copyto!(state.contour_solutions[e],Y)
+            _pfeast_store_point!(state, e, work, Matrix{Complex{T}}(factors[e] \ rhs))
         end
     end
     return nothing
@@ -213,9 +315,11 @@ function feast_parallel(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     feastdefault!(fpm)
     check_feast_srci_input(N, M0, Emin, Emax, fpm)
     
-    # Create parallel state
+    # Create parallel state. It starts from the kernel's default subspace, as
+    # the serial solvers do, which the kernel writes to work.
     state = ParallelFeastState{T}(fpm[2], M0, true, use_threads)
-    
+    state.user_subspace = false
+
     # Initialize workspace
     work = Matrix{T}(undef, N, M0)
     workc = Matrix{Complex{T}}(undef, N, M0)
@@ -224,10 +328,7 @@ function feast_parallel(A::AbstractMatrix{T}, B::AbstractMatrix{T},
     lambda = Vector{T}(undef, M0)
     q = Matrix{T}(undef, N, M0)
     res = Vector{T}(undef, M0)
-    
-    # Use the same deterministic initial subspace policy as the serial kernels.
-    _feast_seeded_subspace!(work)
-    
+
     while true
         # Call parallel RCI
         pfeast_srci!(state, N, work, workc, Aq, Sq, fpm, 

@@ -1,3 +1,7 @@
+# Vertices of the boundary polygon that decides membership for the built-in
+# circle and ellipse (see `feast_ellipse`).
+const _FEAST_SHAPE_BOUNDARY_POINTS = 4096
+
 """
     feast_circle(center, radius; n=64)
 
@@ -38,7 +42,17 @@ function feast_ellipse(center::Number, a::Real, b::Real;
         nodes[j] = c + rot * complex(aa * cos(θ), bb * sin(θ))
         weights[j] = rot * complex(bb * cos(θ), aa * sin(θ)) / n
     end
-    return FeastContour{T}(nodes, weights)
+    # Membership is decided by the ellipse, not by the polygon through the
+    # quadrature nodes: that polygon cuts off a sliver of relative width
+    # 1 - cos(π/n) which the filter still captures. A fine boundary polygon
+    # makes the difference negligible (3e-7 of the semiaxes).
+    m = max(n, _FEAST_SHAPE_BOUNDARY_POINTS)
+    boundary = Vector{Complex{T}}(undef, m)
+    for j in 1:m
+        θ = 2T(π) * (T(j) - T(0.5)) / m
+        boundary[j] = c + rot * complex(aa * cos(θ), bb * sin(θ))
+    end
+    return FeastContour{T}(nodes, weights, boundary)
 end
 
 """

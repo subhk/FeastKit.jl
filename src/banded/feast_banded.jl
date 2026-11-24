@@ -28,6 +28,7 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
     # Validate banded matrix dimensions
     size(A, 1) >= kla + 1 || throw(ArgumentError("A matrix storage insufficient for kla"))
     size(B, 1) >= klb + 1 || throw(ArgumentError("B matrix storage insufficient for klb"))
+    size(B, 2) == N || throw(ArgumentError("B must have same dimensions as A"))
 
     # Direct solves cache one factorization per contour point. Iterative solves
     # reuse the same shifted matvec closure and update only the current shift.
@@ -174,7 +175,8 @@ function feast_sbgv!(A::Matrix{T}, B::Matrix{T}, kla::Int, klb::Int,
                 success = _solve_banded_shifted!(view(workspace.workc, :, 1:M0), rhs_block,
                                                  shifted_mul!, solver_choice,
                                                  _feast_inner_tol(solver_tol == 0.0, tol_value, epsout[], loop[]), solver_maxiter,
-                                                 solver_restart; workspace=krylov_workspace)
+                                                 solver_restart; workspace=krylov_workspace,
+                                                 trial=view(workspace.work, :, 1:M0))
                 if !success
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     break
@@ -347,10 +349,12 @@ function _solve_banded_shifted!(dest::AbstractMatrix{Complex{T}},
                                 rhs::AbstractMatrix{Complex{T}},
                                 apply_shift!::F,
                                 solver::Symbol, tol::T,
-                                maxiter::Int, restart::Int; workspace=nothing) where {T<:Real,F}
+                                maxiter::Int, restart::Int; workspace=nothing,
+                                trial=nothing) where {T<:Real,F}
     # Share dense shifted-solve logic so direct/iterative stopping behavior stays
     # consistent between dense and banded FEAST paths.
-    return solve_dense_shifted!(dest, rhs, apply_shift!, solver, tol, maxiter, restart; workspace=workspace)
+    return solve_dense_shifted!(dest, rhs, apply_shift!, solver, tol, maxiter, restart;
+                                workspace=workspace, trial=trial)
 end
 
 function feast_hbev!(A::Matrix{Complex{T}}, ka::Int,
@@ -657,6 +661,7 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
     end
 
     contour = feast_get_custom_contour(T, fpm)
+    offset = _feast_filter_offset(T, fpm, contour !== nothing)
     contour === nothing && (contour = feast_contour(Emin, Emax, fpm))
     contour = _feast_complete_hermitian_contour(contour)
     Zne = contour.Zne
@@ -689,6 +694,7 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
     active_dim = M0
     Q_proj = zeros(Complex{T}, N, M0)
 
+    empty_dist = -one(T)
     @views for loop_idx in 0:maxloop
         loop_count = loop_idx
         fill!(zAq, zero(Complex{T}))
@@ -739,7 +745,8 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
                 success = _solve_banded_shifted!(solutions_block, rhs_block,
                                                  shifted_mul!, solver_choice,
                                                  _feast_inner_tol(solver_tol == 0.0, tol_value, epsout_val, loop_idx), solver_maxiter,
-                                                 solver_restart; workspace=krylov_workspace)
+                                                 solver_restart; workspace=krylov_workspace,
+                                                 trial=basis_block)
                 if !success
                     info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                     solve_failed = true
@@ -751,11 +758,14 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
         end
 
         solve_failed && break
+        offset == zero(T) ||
+            (view(Q_proj, :, 1:active_dim) .+= offset .* view(Q_basis, :, 1:active_dim))
 
         # Both contour halves are explicit, so Q_proj is the filtered image of
         # the previous loop's Ritz vectors (Q_basis).
         if loop_idx >= _FEAST_SPURIOUS_MIN_LOOPS
-            kept = _feast_screen_spurious!(keep, Q_proj, Q_basis, res_vec, M_found, eps_tol)
+            kept = _feast_screen_spurious!(keep, Q_proj, Q_basis, res_vec, M_found, eps_tol,
+                                           lambda_vec, Zne, Wne; offset=offset)
             if kept !== nothing
                 # The solves overwrote `solutions`; the pairs live in Q_basis.
                 copyto!(view(solutions, :, 1:M_found), view(Q_basis, :, 1:M_found))
@@ -830,12 +840,23 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
                                              lambda_tmp, solutions_tmp,
                                              Emin, Emax, rank)
             if M == 0
-                # No Ritz value in the interval: it holds no eigenvalues.
+                # No Ritz value in the interval. It is empty only once the
+                # subspace has settled outside it; until then, filter again
+                # (see _feast_region_looks_empty).
+                empty, empty_dist = _feast_region_looks_empty(
+                    view(lambda_vec, 1:rank), (Emin + Emax) / 2, (Emax - Emin) / 2,
+                    Zne, Wne, false, empty_dist; offset=offset)
                 M_found = 0
                 epsout_val = zero(T)
-                info_code = Int(Feast_SUCCESS)
-                break
+                if empty || loop_idx == maxloop
+                    info_code = empty ? Int(Feast_SUCCESS) : Int(Feast_ERROR_NO_CONVERGENCE)
+                    break
+                end
+                active_dim = rank
+                Q_basis[:, 1:active_dim] .= solutions[:, 1:active_dim]
+                continue
             end
+            empty_dist = -one(T)
 
             for j in 1:M
                 vec = view(solutions, :, j)
@@ -866,7 +887,7 @@ function _feast_banded_complex_hermitian(A::Matrix{Complex{T}},
             end
 
             if loop_idx == maxloop
-                info_code = Int(Feast_ERROR_NO_CONVERGENCE)
+                info_code = _feast_exit_info(false, M, M0, N)
                 break
             end
 
@@ -940,6 +961,11 @@ required for complex-symmetric pencils.
     lambda_tmp = similar(lambda_vec)
     perm = Vector{Int}(undef, M0)
     solutions_tmp = similar(shifted_solutions)
+    # A nearly dependent in-region block is swept through an orthonormal basis
+    # (see `_feast_orthonormal_ritz_block!`); these hold its Ritz vectors.
+    ritz_vectors = similar(Q_basis)
+    ritz_R = Matrix{Complex{T}}(undef, M0, M0)
+    orth_k = 0
     res_vec = zeros(T, M0)
     residual_vec = Vector{Complex{T}}(undef, N)
     Bq_vec = Vector{Complex{T}}(undef, N)
@@ -995,6 +1021,7 @@ required for complex-symmetric pencils.
     M_found = 0
     active_dim = M0
 
+    empty_dist = -one(T)
     for loop_idx in 0:maxloop
         loop_count = loop_idx
         fill!(Q_proj, zero(Complex{T}))
@@ -1043,7 +1070,8 @@ required for complex-symmetric pencils.
                 success = _solve_banded_shifted!(shifted_block, rhs_block,
                                                  shifted_mul!, solver_choice,
                                                  _feast_inner_tol(solver_tol == 0.0, tol_value, epsout_val, loop_idx), solver_maxiter,
-                                                 solver_restart; workspace=krylov_workspace)
+                                                 solver_restart; workspace=krylov_workspace,
+                                                 trial=basis_block)
                 if !success
                     info_code = Int(Feast_ERROR_NO_CONVERGENCE)
                     solve_failed = true
@@ -1055,17 +1083,23 @@ required for complex-symmetric pencils.
         end
         solve_failed && break
 
-        # The sweep has filtered the previous loop's Ritz vectors (Q_basis);
-        # their filter response separates genuine pairs from spurious ones.
+        # The sweep has filtered the previous loop's Ritz vectors (Xr; Q_basis
+        # unless a dependent block was orthonormalized); their filter response
+        # separates genuine pairs from spurious ones.
+        Yr, Xr = _feast_ritz_images(Q_proj, Q_basis, ritz_vectors, ritz_R, orth_k,
+                                    active_dim, solutions_tmp)
+        filtered_ratio = norm(Yr) / norm(Xr)
+        orth_k = 0
         if loop_idx >= _FEAST_SPURIOUS_MIN_LOOPS
             # Complex-symmetric Rayleigh-Ritz is oblique, so also count the
             # in-region directions of the whole subspace.
-            kept = _feast_screen_spurious!(keep, view(Q_proj, :, 1:active_dim),
-                                           view(Q_basis, :, 1:active_dim), res_vec,
-                                           M_found, eps_tol; filter_rank=true)
+            kept = _feast_screen_spurious!(keep, Yr, Xr, res_vec,
+                                           M_found, eps_tol, lambda_vec, Zne, Wne;
+                                           filter_rank=true, residual_scale=res_scale,
+                                           boundary=_feast_region_boundary(T, Emid, r, fpm))
             if kept !== nothing
-                # The solves overwrote shifted_solutions; the pairs live in Q_basis.
-                copyto!(view(shifted_solutions, :, 1:M_found), view(Q_basis, :, 1:M_found))
+                # The solves overwrote shifted_solutions; the pairs live in Xr.
+                copyto!(view(shifted_solutions, :, 1:M_found), view(Xr, :, 1:M_found))
                 M_found = _feast_compact_pairs!(lambda_vec, shifted_solutions, res_vec,
                                                 keep, M_found)
                 epsout_val = M_found > 0 ? maximum(view(res_vec, 1:M_found)) : zero(T)
@@ -1116,13 +1150,34 @@ required for complex-symmetric pencils.
                                             lambda_tmp, solutions_tmp,
                                             Emid, r, fpm, rank)
             if M == 0
-                # No Ritz value inside the contour: it encloses no eigenvalues.
+                # No Ritz value inside the contour. It encloses nothing only
+                # once the subspace has settled outside it; until then, filter
+                # again (see _feast_region_looks_empty).
+                center, radius = _feast_contour_extent(Zne)
+                nearest_residual(i) = _feast_pair_residual(
+                    (y, x) -> banded_complex_symmetric_matvec!(y, A, ka, x),
+                    (y, x) -> B_is_identity ? copyto!(y, x) :
+                              banded_complex_symmetric_matvec!(y, B, kb, x),
+                    view(shifted_solutions, :, i), lambda_vec[i], res_scale)
+                empty, empty_dist = _feast_region_looks_empty(
+                    view(lambda_vec, 1:rank), center, radius, Zne, Wne, false, empty_dist;
+                    real_spectrum=false, nearest_residual=nearest_residual,
+                    tol=feast_tolerance(fpm, T),
+                    boundary=_feast_region_boundary(T, Emid, r, fpm),
+                    filtered_ratio=loop_idx >= 1 ? filtered_ratio : nothing)
                 M_found = 0
                 epsout_val = zero(T)
-                info_code = Int(Feast_SUCCESS)
-                empty_region = true
-                break
+                if empty || loop_idx == maxloop
+                    info_code = Int(Feast_SUCCESS)
+                    empty_region = empty
+                    break
+                end
+                active_dim = rank
+                copyto!(view(Q_basis, :, 1:active_dim),
+                        view(shifted_solutions, :, 1:active_dim))
+                continue
             end
+            empty_dist = -one(T)
 
             for idx in 1:rank
                 vec = view(shifted_solutions, :, idx)
@@ -1152,14 +1207,18 @@ required for complex-symmetric pencils.
 
             epsout_val = max_res
             M_found = M
-            if epsout_val <= eps_tol || loop_idx == maxloop
-                info_code = _feast_exit_info(epsout_val <= eps_tol, M, M0, N)
+            convergence_tol, _ = _feast_contour_residual_limits(eps_tol, res_scale, Zne)
+            converged = epsout_val <= convergence_tol
+            if converged || loop_idx == maxloop
+                info_code = _feast_exit_info(converged, M, M0, N)
                 break
             end
 
             active_dim = rank
             copyto!(view(Q_basis, :, 1:active_dim),
                     view(shifted_solutions, :, 1:active_dim))
+            orth_k = _feast_orthonormal_ritz_block!(Q_basis, ritz_vectors, ritz_R, M,
+                                                    active_dim)
         catch err
             info_code = Int(Feast_ERROR_LAPACK)
             @warn "Reduced eigenvalue problem failed during banded complex-symmetric FEAST" exception=err
@@ -1198,10 +1257,14 @@ to the dense GMRES path used by the existing dense general solver.
                                       solver_maxiter::Int = 500,
                                       solver_restart::Int = 30) where T<:Real
     N = size(A, 2)
-    size(A, 1) >= ka + 1 || throw(ArgumentError("A matrix storage insufficient for ka"))
+    # General band storage holds kl = ka subdiagonals and ku = ka superdiagonals.
+    # Symmetric (upper-only, ka+1 rows) storage would silently drop the lower triangle.
+    size(A, 1) >= 2ka + 1 || throw(ArgumentError(
+        "General band storage needs 2ka+1 = $(2ka + 1) rows, got $(size(A, 1)); use full_to_general_banded"))
     if B !== nothing
         size(B, 2) == N || throw(ArgumentError("B must have same dimensions as A"))
-        size(B, 1) >= kb + 1 || throw(ArgumentError("B matrix storage insufficient for kb"))
+        size(B, 1) >= 2kb + 1 || throw(ArgumentError(
+            "General band storage needs 2kb+1 = $(2kb + 1) rows for B, got $(size(B, 1)); use full_to_general_banded"))
     end
 
     feastdefault!(fpm)
@@ -1352,7 +1415,8 @@ to the dense GMRES path used by the existing dense general solver.
                 success = _solve_banded_shifted!(workc_block, rhs_block,
                                                  shifted_mul!, solver_choice,
                                                  _feast_inner_tol(solver_tol == 0.0, tol_value, epsout[], loop[]), solver_maxiter,
-                                                 solver_restart; workspace=krylov_workspace)
+                                                 solver_restart; workspace=krylov_workspace,
+                                                 trial=workc_block)
                 if !success
                     info[] = Int(Feast_ERROR_NO_CONVERGENCE)
                     break

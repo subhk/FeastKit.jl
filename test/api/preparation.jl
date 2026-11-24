@@ -38,8 +38,13 @@ end
         options = (; subspace_size=3, tol=1e-10)
         # Both the high-level API and the exported routing helper enforce the
         # same restrictions; strict requests must never silently run serial.
+        @test_throws ArgumentError feast(H, complex.(B), (0.5, 2.5); options..., backend=:threads)
+        # The high-level API brings a mixed dense/sparse pencil to one storage
+        # family before choosing a backend; the routing helper takes it as is.
+        mixed = feast(A, sparse(B), (0.5, 2.5); options..., backend=:threads)
+        @test mixed.converged
+        @test sort(real.(mixed.values)) ≈ [1.0, 2.0] atol=1e-9
         for (a, b) in ((H, complex.(B)), (A, sparse(B)))
-            @test_throws ArgumentError feast(a, b, (0.5, 2.5); options..., backend=:threads)
             @test_throws ArgumentError feast_with_backend(a, b, (0.5, 2.5), :threads,
                                                           3, feastinit().fpm, nothing, true;
                                                           strict_backend=true)
@@ -51,6 +56,24 @@ end
             result = solve((; options..., backend=:auto))
             @test result.converged
             @test sort(real.(result.values)) ≈ [1.0, 2.0] atol=1e-9
+        end
+    end
+end
+
+@testset "Structured Float16 pencils" begin
+    interval = (Float16(1.5), Float16(2.5))
+    center, radius = ComplexF16(2), Float16(0.5)
+    for T in (Float16, ComplexF16)
+        A = Diagonal(T[1, 2, 3, 4])
+        B = Diagonal(fill(T(2), 4))
+        for result in (feast(A, interval; M0=3),
+                       feast(2A, B, interval; M0=3),
+                       feast_general(A, center, radius; M0=3),
+                       feast_general(2A, B, center, radius; M0=3))
+            @test result.converged
+            @test result.M == 1
+            @test only(result.values) ≈ 2 atol=2eps(Float16)
+            @test eltype(result.vectors) in (Float16, ComplexF16)
         end
     end
 end

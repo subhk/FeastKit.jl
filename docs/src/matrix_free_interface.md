@@ -138,9 +138,13 @@ multiplication callback; `Pl` is not a supported option. A preconditioner for
 Use `initial_subspace=previous.vectors` to seed a related solve, or
 `subspace_size=:auto, max_subspace_size=cap` for bounded growth from a small
 heuristic width. Matrix-free sizing does not run a direct count estimator.
-Built-in solvers adapt their default inner tolerance to the outer residual;
-set `solver_opts.rtol` to keep it fixed. Custom callbacks retain control over
-their own tolerances. Mixed precision requires assembled dense matrices.
+Built-in solvers warm-start every shifted solve from the best multiple of its
+trial vector, so they only solve for a correction whose size shrinks with the
+eigen-residual; their default relative tolerance is a fixed `1e-3`, which
+therefore does not limit the outer accuracy. Set `solver_opts.rtol` to change
+it. Custom callbacks retain control over their own tolerances and receive
+`B*Q` as before; pass `warm_start=true` to `feast_matfree_srci!` or
+`feast_matfree_grci!` to give them the correction systems instead. Mixed precision requires assembled dense matrices.
 `tol`, `maxiter`, and `quadrature_points` have the same meaning as in assembled
 solves. Conflicting named controls and explicitly set `fpm` entries raise an
 `ArgumentError`. Named overrides use a copy of the supplied parameter vector.
